@@ -140,6 +140,25 @@ def get_klines_df(symbol: str, interval: str, limit: int = 100) -> pd.DataFrame:
         logger.error(f"Error fetching klines for {symbol} {interval}: {e}")
         return pd.DataFrame()
 
+def get_klines_fapi(symbol: str, interval: str, limit: int = 1000) -> pd.DataFrame:
+    """Fetch from Binance Futures for indices like BTCDOMUSDT and DEFIUSDT."""
+    try:
+        url = "https://fapi.binance.com/fapi/v1/klines"
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
+        resp = http_requests.get(url, params=params, timeout=10, verify=False)
+        if resp.status_code == 200:
+            df = pd.DataFrame(resp.json(), columns=[
+                'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
+                'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
+            ])
+            df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
+            for col in ['Open', 'High', 'Low', 'Close', 'Total_Volume']:
+                df[col] = df[col].astype(float)
+            return df
+    except Exception as e:
+        logger.warning(f"Error fetching fapi klines for {symbol} {interval}: {e}")
+    return pd.DataFrame()
+
 
 def apply_full_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Apply EMA, RSI, and StochRSI indicators."""
@@ -479,7 +498,7 @@ def delete_trade_entry():
 
         entries = load_trade_entries()
         if symbol in entries:
-            del entries[symbol]
+            del entries[symbol]  # type: ignore[attr-defined]
             save_trade_entries(entries)
             logger.info(f"🗑️ Entry deleted: {symbol}")
 
@@ -491,7 +510,7 @@ def delete_trade_entry():
 # ==========================================
 # 📥 EXPORT HELPER
 # ==========================================
-def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "1h", limit: int = 250) -> pd.DataFrame:
+def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "4h", limit: int = 1000) -> pd.DataFrame:
     """
     Bangun DataFrame lengkap berisi semua kolom yang dibutuhkan untuk upload ke Gemini:
     Timestamp, OHLCV, Volume breakdown, EMA 7/21/50/200, RSI 6,
@@ -549,9 +568,11 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "1h", limit
     try:
         # Fetch data for enrichment - Use more H4 data for stable EMA 200
         h4_limit = max(limit, 300)
+        d1_limit = max(int(limit / 6), 50) # approximate D1 candles needed for the timeframe window
+        w1_limit = max(int(limit / 42), 10)
         df_h4 = get_klines_df(symbol, Client.KLINE_INTERVAL_4HOUR, limit=h4_limit)
-        df_d1 = get_klines_df(symbol, Client.KLINE_INTERVAL_1DAY, limit=10)
-        df_w1 = get_klines_df(symbol, Client.KLINE_INTERVAL_1WEEK, limit=10)
+        df_d1 = get_klines_df(symbol, Client.KLINE_INTERVAL_1DAY, limit=d1_limit)
+        df_w1 = get_klines_df(symbol, Client.KLINE_INTERVAL_1WEEK, limit=w1_limit)
         
         # Enrich dataset
         df = enrichment.enrich_dataset(df, df_h4, df_d1, df_w1)
@@ -630,6 +651,28 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "1h", limit
         df['Buy_Liq'] = 0.0
         df['Sell_Liq'] = 0.0
 
+    # ── [APEX] MODULE 4: MACRO ALTCOIN CONTEXT (BTC.D & TOTAL3/DEFI) ──
+    logger.info("  [Export] Fetching Crypto Macro Context (BTC.D & Altcoin Index)...")
+    try:
+        df_btcd = get_klines_fapi("BTCDOMUSDT", interval, limit=limit)
+        if not df_btcd.empty:
+            df_btcd_slim = df_btcd[['Open_Time', 'Close']].rename(columns={'Close': 'BTC_Dominance'})
+            df = pd.merge(df, df_btcd_slim, on='Open_Time', how='left')
+        else:
+            df['BTC_Dominance'] = None
+
+        df_defi = get_klines_fapi("1000DEFIUSDT", interval, limit=limit) # DEFI index mapping
+        if df_defi.empty: df_defi = get_klines_fapi("DEFIUSDT", interval, limit=limit)
+        if not df_defi.empty:
+            df_defi_slim = df_defi[['Open_Time', 'Close']].rename(columns={'Close': 'Altcoin_Index'})
+            df = pd.merge(df, df_defi_slim, on='Open_Time', how='left')
+        else:
+            df['Altcoin_Index'] = None
+    except Exception as e:
+        logger.warning(f"Macro context merge error: {e}")
+        df['BTC_Dominance'] = None
+        df['Altcoin_Index'] = None
+
     # ── Pilih dan urutkan kolom sesuai spesifikasi ──
     col_order = [
         'Timestamp',
@@ -648,10 +691,13 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "1h", limit
         'FVG_Up_Top', 'FVG_Up_Bottom', 'FVG_Down_Top', 'FVG_Down_Bottom',
         'OB_Price', 'SFP_Sweep',
         'Fib_0.618', 'Fib_0.786',
+        'MSB', 'BOS', 'CHoCH',
+        'POC', 'VAH', 'VAL',
         'Open_Interest',
         'Funding_Rate',
         'Buy_Liq', 'Sell_Liq',
         'BTC_Price',
+        'BTC_Dominance', 'Altcoin_Index'
     ]
 
     # Rename Close_Time → Timestamp (waktu close candle) jika belum ada (merging mungkin merubah nama)
@@ -687,9 +733,11 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "1h", limit
         'FVG_Up_Top', 'FVG_Up_Bottom', 'FVG_Down_Top', 'FVG_Down_Bottom',
         'OB_Price',
         'Fib_0.618', 'Fib_0.786',
+        'MSB', 'BOS', 'CHoCH',
+        'POC', 'VAH', 'VAL',
         'Open_Interest', 'Funding_Rate',
         'Buy_Liq', 'Sell_Liq',
-        'BTC_Price',
+        'BTC_Price', 'BTC_Dominance', 'Altcoin_Index'
     ]
     for col in float_cols:
         if col in df_export.columns:
@@ -703,14 +751,8 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "1h", limit
 # ==========================================
 @app.route("/api/export-csv")
 def export_csv():
-    """
-    Export data Protocol 9.6 ke format CSV.
-    Query params:
-      ?tf=1h    — timeframe (15m/1h/4h/1d/1w), default: 1h
-      ?limit=250 — jumlah candle, default: 250
-    """
-    timeframe = flask_request.args.get('tf', '1h')
-    limit     = int(flask_request.args.get('limit', 250))
+    timeframe = flask_request.args.get('tf', '4h')
+    limit     = int(flask_request.args.get('limit', 1000))
     coin_pair = flask_request.args.get('pair', AVAILABLE_PAIRS[0]).upper()
 
     try:
@@ -754,14 +796,8 @@ def export_csv():
 
 @app.route("/api/export-excel")
 def export_excel():
-    """
-    Export data Protocol 9.6 ke format Excel (.xlsx).
-    Query params:
-      ?tf=1h    — timeframe (15m/1h/4h/1d/1w), default: 1h
-      ?limit=250 — jumlah candle, default: 250
-    """
-    timeframe = flask_request.args.get('tf', '1h')
-    limit     = int(flask_request.args.get('limit', 250))
+    timeframe = flask_request.args.get('tf', '4h')
+    limit     = int(flask_request.args.get('limit', 1000))
     coin_pair = flask_request.args.get('pair', AVAILABLE_PAIRS[0]).upper()
 
     try:
@@ -807,4 +843,4 @@ def export_excel():
 # ==========================================
 if __name__ == "__main__":
     logger.info("🖥️  Protocol 9.6 Dashboard starting on http://127.0.0.1:5000")
-    app.run(debug=False, port=5000, threaded=True)
+    app.run(debug=True, port=5000, threaded=True)

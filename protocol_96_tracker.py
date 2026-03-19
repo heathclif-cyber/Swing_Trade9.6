@@ -15,8 +15,8 @@ ENTRY_PRICE = 1.055
 ALLOCATED_CAPITAL = 200
 
 # Pengaturan Telegram
-TELEGRAM_BOT_TOKEN = "your_bot_token"
-TELEGRAM_CHAT_ID = "your_chat_id"
+TELEGRAM_BOT_TOKEN = "8728046864:AAEaLD5c1yJRuTjoNKRLbyzkBII2AJKV9hE"
+TELEGRAM_CHAT_ID = "982913105"
 
 # Binance API Keys (Opsional untuk data market publik, wajib untuk fungsi private)
 BINANCE_API_KEY = ""
@@ -123,7 +123,7 @@ def apply_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 def check_intermarket_macro() -> dict:
     """Akses batas makro D1/W1, Open Interest (OI) Delta, dan SMT Divergence."""
-    res = {"PDH": 0.0, "PDL": 0.0, "PWH": 0.0, "Delta_OI": 0.0, "Bearish_SMT": False}
+    res = {"PDH": 0.0, "PDL": 0.0, "PWH": 0.0, "Delta_OI": 0.0, "Bearish_SMT": False, "BTC_Dom_Change": 0.0}
     
     try:
         # Macro Liquidity Borders (D1 / W1)
@@ -156,6 +156,12 @@ def check_intermarket_macro() -> dict:
                 tgt_is_lh = tgt_highs[2] < tgt_highs[1]
                 res["Bearish_SMT"] = bool(btc_is_hh and tgt_is_lh)
 
+        # BTC Dominance Siphon Check
+        fapi_url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        btcd_resp = requests.get(fapi_url, params={"symbol": "BTCDOMUSDT"}, timeout=5)
+        if btcd_resp.status_code == 200:
+            res["BTC_Dom_Change"] = float(btcd_resp.json().get('priceChangePercent', 0))
+
     except Exception as e:
         logger.warning(f"Error processing Intermarket Logic: {e}")
         
@@ -167,19 +173,19 @@ def check_intermarket_macro() -> dict:
 def evaluate_market_conditions():
     """Fungsi utama yang memanggil siklus evaluasi setiap candle target."""
     try:
-        # 1. Tarik Struktur Data Frame
-        df_15m = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_15MINUTE, limit=250)
+        # 1. Tarik Struktur Data Frame (Swing Macro Adjustments: H1, H4, D1)
         df_1h = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_1HOUR, limit=250)
-        df_4h = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_4HOUR, limit=250)
+        df_4h = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_4HOUR, limit=500)
+        df_1d = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_1DAY, limit=100)
         
-        if df_15m.empty or df_1h.empty or df_4h.empty:
+        if df_1h.empty or df_4h.empty or df_1d.empty:
             return
 
         # 2. Kalkulasi Indikator
         df_1h = apply_indicators(df_1h)
         df_4h = apply_indicators(df_4h)
         
-        current_price = df_15m.iloc[-1]['Close']
+        current_price = df_1h.iloc[-1]['Close']
         current_ema21_4h = df_4h.iloc[-1]['EMA_21']
         
         # 3. Inisialisasi Bootstrapping Protocol
@@ -271,13 +277,12 @@ def evaluate_market_conditions():
         last_closed_h4 = df_4h.iloc[-2]
         ema_kill_switch = last_closed_h4['Close'] < last_closed_h4['EMA_21']
         
-        # Kondisi B: BTC Siphon
-        ticker_btc = client.get_ticker(symbol="BTCUSDT")
+        # Kondisi B: BTC Dominance Siphon (Altcoin Filter Siphon)
         ticker_tgt = client.get_ticker(symbol=COIN_PAIR)
-        
-        btc_change_24h = float(ticker_btc['priceChangePercent'])
         tgt_change_24h = float(ticker_tgt['priceChangePercent'])
-        btc_siphon = (btc_change_24h >= 2.0) and (tgt_change_24h <= -1.0)
+        
+        # Siphon terjadi jika BTC Dominance naik tinggi tapi Altcoin hancur (Liquidity dialirkan ke BTC doang)
+        btc_siphon = (macro_state.get("BTC_Dom_Change", 0.0) >= 1.5) and (tgt_change_24h <= -1.0)
         
         if (ema_kill_switch or btc_siphon) and not BotState.ALERTS_SENT["KILL_SWITCH"]:
             msg = f"💀 *KILL SWITCH ACTIVATED:* {COIN_PAIR}\n"
@@ -285,7 +290,7 @@ def evaluate_market_conditions():
             if ema_kill_switch:
                 msg += f"Structural Breakdown! H4 Close di bawah EMA 21 (${last_closed_h4['EMA_21']:.4f}).\n"
             else:
-                msg += f"Korelasi Berbahaya (BTC Siphon terdeteksi).\n"
+                msg += f"Korelasi Berbahaya (BTC.D Siphon terdeteksi. BTC.DOM naik {macro_state.get('BTC_Dom_Change', 0):.2f}%).\n"
                 
             msg += f"❌ *Instruksi:* BUANG SEMUA POSISI. Tren Bullish resmi batal."
             

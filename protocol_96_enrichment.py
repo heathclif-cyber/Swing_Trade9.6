@@ -127,38 +127,184 @@ def calculate_fib_ote(df: pd.DataFrame, lookback: int = 40) -> pd.DataFrame:
         
     return df
 
-def enrich_dataset(df_m15: pd.DataFrame, df_h4: pd.DataFrame, df_d1: pd.DataFrame, df_w1: pd.DataFrame) -> pd.DataFrame:
+def calculate_market_structure(df_macro: pd.DataFrame, df_base: pd.DataFrame) -> pd.DataFrame:
     """
-    Main enrichment function.
+    Kalkulasi Market Structure (MSB, BOS, CHoCH) pada timeframe Makro (D1/W1) 
+    dan proyeksikan ke base timeframe (H4/1D).
     """
-    # 1. H4 EMAs Mapping
-    df_h4 = df_h4.copy()
+    df = df_base.copy()
+    
+    # Simple pivot isolation for macro structure
+    df_macro = df_macro.copy()
+    window = 3
+    df_macro['Pivot_High'] = df_macro['High'] == df_macro['High'].rolling(window=window*2+1, center=True).max()
+    df_macro['Pivot_Low'] = df_macro['Low'] == df_macro['Low'].rolling(window=window*2+1, center=True).min()
+    
+    last_ph = np.nan
+    last_pl = np.nan
+    trend = 0 # 1 untuk uptrend, -1 untuk downtrend
+    
+    df_macro['MSB'] = 0
+    df_macro['BOS'] = 0
+    df_macro['CHoCH'] = 0
+    
+    for i in range(len(df_macro)):
+        current_close = df_macro['Close'].iloc[i]
+        
+        if df_macro['Pivot_High'].iloc[i]:
+            last_ph = df_macro['High'].iloc[i]
+        if df_macro['Pivot_Low'].iloc[i]:
+            last_pl = df_macro['Low'].iloc[i]
+            
+        # Break of Resistance
+        if pd.notna(last_ph) and current_close > last_ph:
+            if trend == -1:
+                df_macro.at[df_macro.index[i], 'CHoCH'] = 1
+                trend = 1
+            elif trend == 1:
+                df_macro.at[df_macro.index[i], 'BOS'] = 1
+            else:
+                df_macro.at[df_macro.index[i], 'MSB'] = 1
+                trend = 1
+            last_ph = np.nan
+            
+        # Break of Support
+        elif pd.notna(last_pl) and current_close < last_pl:
+            if trend == 1:
+                df_macro.at[df_macro.index[i], 'CHoCH'] = -1
+                trend = -1
+            elif trend == -1:
+                df_macro.at[df_macro.index[i], 'BOS'] = -1
+            else:
+                df_macro.at[df_macro.index[i], 'MSB'] = -1
+                trend = -1
+            last_pl = np.nan
+
+    # Merge project macro markers ke base timeframe via forward fill
+    macro_slim = df_macro[['Open_Time', 'MSB', 'BOS', 'CHoCH']].copy()
+    df = pd.merge_asof(
+        df.sort_values('Open_Time'),
+        macro_slim.sort_values('Open_Time'),
+        on='Open_Time',
+        direction='backward'
+    )
+    
+    # Fill NaN and rolling them
+    df['MSB'] = df['MSB'].fillna(0)
+    df['BOS'] = df['BOS'].fillna(0)
+    df['CHoCH'] = df['CHoCH'].fillna(0)
+    return df
+
+def calculate_volume_profile(df: pd.DataFrame, bins: int = 24) -> pd.DataFrame:
+    """
+    Hitung Historical Volume Profile (POC, VAH, VAL) pada Rolling Window.
+    Digunakan untuk melihat institusional value area dalam 30 hari terakhir.
+    """
+    df = df.copy()
+    df['POC'] = np.nan
+    df['VAH'] = np.nan
+    df['VAL'] = np.nan
+    
+    # Kita butuh minimal 30 candle H4 (sekitar 5 hari) atau D1 (1 bln) untuk window
+    lookback = min(len(df), 30)
+    if lookback < 5:
+        return df
+        
+    for i in range(lookback, len(df)):
+        window = df.iloc[i-lookback:i]
+        min_price = window['Low'].min()
+        max_price = window['High'].max()
+        
+        if max_price == min_price:
+            continue
+            
+        vol_profile = np.zeros(bins)
+        price_step = (max_price - min_price) / bins
+        
+        # Distribusikan volume ke bins harga
+        for _, row in window.iterrows():
+            low = row['Low']
+            high = row['High']
+            vol = row['Total_Volume']
+            
+            # Simple average distribution
+            bin_idx = int((((high + low) / 2) - min_price) / price_step)
+            bin_idx = min(bin_idx, bins - 1)
+            vol_profile[bin_idx] += vol
+            
+        # Tentukan POC
+        poc_idx = np.argmax(vol_profile)
+        poc_price = min_price + (poc_idx * price_step)
+        
+        # Kalkulasi Value Area (VA) - 70% dari volume
+        total_vol = np.sum(vol_profile)
+        va_vol_target = total_vol * 0.7
+        va_vol_current = vol_profile[poc_idx]
+        
+        upper_idx = poc_idx
+        lower_idx = poc_idx
+        
+        while va_vol_current < va_vol_target and (upper_idx < bins - 1 or lower_idx > 0):
+            vol_up = vol_profile[upper_idx + 1] if upper_idx < bins - 1 else 0
+            vol_down = vol_profile[lower_idx - 1] if lower_idx > 0 else 0
+            
+            if vol_up == 0 and vol_down == 0:
+                if upper_idx < bins - 1:
+                    upper_idx += 1
+                elif lower_idx > 0:
+                    lower_idx -= 1
+                else: break
+            elif vol_up > vol_down:
+                upper_idx += 1
+                va_vol_current += vol_up
+            else:
+                lower_idx -= 1
+                va_vol_current += vol_down
+                
+        vah_price = min_price + (upper_idx * price_step)
+        val_price = min_price + (lower_idx * price_step)
+        
+        df.at[df.index[i], 'POC'] = poc_price
+        df.at[df.index[i], 'VAH'] = vah_price
+        df.at[df.index[i], 'VAL'] = val_price
+
+    return df
+
+def enrich_dataset(df_base: pd.DataFrame, df_macro_h4: pd.DataFrame, df_macro_d1: pd.DataFrame, df_macro_w1: pd.DataFrame) -> pd.DataFrame:
+    """
+    Main enrichment function, disesuaikan untuk Swing Trading (Base H4 / D1).
+    Parameter df_base merupakan timeframe operasional kita (bisa H4).
+    """
+    df = df_base.copy()
+    
+    # 1. Base Indicators & SMC Components
+    df['ATR_14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+    df = calculate_liquidity_levels(df, df_macro_d1, df_macro_w1)
+    df = calculate_smc_markers(df, df_macro_h4)
+    df = calculate_fib_ote(df, lookback=30)
+    
+    # 2. H4/Macro EMAs Mapping
+    df_h4 = df_macro_h4.copy()
     df_h4['EMA_7_H4'] = ta.ema(df_h4['Close'], length=7)
     df_h4['EMA_21_H4'] = ta.ema(df_h4['Close'], length=21)
     df_h4['EMA_50_H4'] = ta.ema(df_h4['Close'], length=50)
     df_h4['EMA_200_H4'] = ta.ema(df_h4['Close'], length=200)
     df_h4['ATR_14_H4'] = ta.atr(df_h4['High'], df_h4['Low'], df_h4['Close'], length=14)
     
-    # 2. M15 Enrichment
-    df = df_m15.copy()
-    df['ATR_14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-    
-    # 3. Merge H4 to M15
-    # Ensure both have 'Open_Time'
     h4_slim = df_h4[['Open_Time', 'EMA_7_H4', 'EMA_21_H4', 'EMA_50_H4', 'EMA_200_H4', 'ATR_14_H4']]
-    df = pd.merge_asof(
-        df.sort_values('Open_Time'),
-        h4_slim.sort_values('Open_Time'),
-        on='Open_Time',
-        direction='backward'
-    )
+    if 'Open_Time' in df.columns:
+        df = pd.merge_asof(
+            df.sort_values('Open_Time'),
+            h4_slim.sort_values('Open_Time'),
+            on='Open_Time',
+            direction='backward'
+        )
     
-    # 4. Liquidity & SMC
-    df = calculate_liquidity_levels(df, df_d1, df_w1)
-    df = calculate_smc_markers(df, df_h4)
-    df = calculate_fib_ote(df)
+    # 3. Swing Trading Enhancements (Market Structure & Volume Profile)
+    df = calculate_market_structure(df_macro_d1, df)
+    df = calculate_volume_profile(df, bins=30)
     
-    # 5. Temporal Alignment (UTC+8 & Sessions)
+    # 4. Temporal Alignment (UTC+8 & Sessions)
     df = apply_temporal_alignment(df, offset_hours=8)
     
     # Handle NaNs
