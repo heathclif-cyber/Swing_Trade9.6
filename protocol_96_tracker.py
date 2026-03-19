@@ -1,11 +1,11 @@
 import time
 import logging
-import requests
-import schedule
-import pandas as pd
-import pandas_ta as ta
-from binance.client import Client
-from binance.exceptions import BinanceAPIException, BinanceRequestException
+import requests  # type: ignore
+import schedule  # type: ignore
+import pandas as pd  # type: ignore
+import pandas_ta as ta  # type: ignore
+from binance.client import Client  # type: ignore
+from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
 
 # ==========================================
 # ⚙️ USER CONFIGURATION (State Variables)

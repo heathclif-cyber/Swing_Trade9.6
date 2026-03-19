@@ -611,6 +611,23 @@
             background: linear-gradient(135deg, rgba(16,185,129,0.9), rgba(34,211,238,0.9));
             color: #0a0e17;
         }
+
+        .select-pair {
+            background: var(--bg-card);
+            color: var(--accent-cyan);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 8px 16px;
+            font-family: var(--font-sans);
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            outline: none;
+            text-transform: uppercase;
+        }
+        .select-pair:hover {
+            border-color: var(--border-active);
+        }
     </style>
 </head>
 <body>
@@ -634,6 +651,9 @@
                 </div>
             </div>
             <div class="header-right">
+                <select id="pairSelect" class="select-pair" onchange="changePair()">
+                    <option value="">LOADING...</option>
+                </select>
                 <div class="header-timestamp">
                     <span class="live-dot"></span>
                     <span id="headerTimestamp">Loading...</span>
@@ -871,6 +891,7 @@
         let activePair = 'coin';
         let activeTimeframe = '15m';
         let activeIndicator = '1h';
+        let currentBackendPair = '';
 
         // ==========================================
         // 📡 DATA FETCHING
@@ -881,7 +902,8 @@
             btn.textContent = '⏳ Loading...';
 
             try {
-                const response = await fetch('/api/data');
+                const url = currentBackendPair ? `/api/data?pair=${currentBackendPair}` : '/api/data';
+                const response = await fetch(url);
                 const json = await response.json();
 
                 if (!json.success) {
@@ -890,6 +912,27 @@
                 }
 
                 APP_DATA = json;
+                
+                if (json.state && json.state.user_input) {
+                    const available = json.state.user_input.available_pairs || [];
+                    const cp = json.state.user_input.coin_pair;
+                    currentBackendPair = cp;
+                    
+                    const select = document.getElementById('pairSelect');
+                    if (select.options.length <= 1 || select.options[0].value === "") { 
+                        select.innerHTML = '';
+                        available.forEach(p => {
+                            const opt = document.createElement('option');
+                            opt.value = p;
+                            opt.textContent = p;
+                            if (p === cp) opt.selected = true;
+                            select.appendChild(opt);
+                        });
+                    } else {
+                        select.value = cp;
+                    }
+                }
+
                 renderAll();
                 document.getElementById('loadingOverlay').classList.add('hidden');
             } catch (err) {
@@ -898,6 +941,13 @@
                 btn.classList.remove('btn-loading');
                 btn.textContent = '🔄 Refresh';
             }
+        }
+
+        // ==========================================
+        function changePair() {
+            currentBackendPair = document.getElementById('pairSelect').value;
+            document.getElementById('loadingOverlay').classList.remove('hidden');
+            fetchData();
         }
 
         // ==========================================
@@ -1196,7 +1246,7 @@
             const limit = 500; // Ambil data history lebih panjang untuk CSV lengkap
 
             // Redirect ke endpoint export
-            const url = `/api/export-csv?tf=${timeframe}&limit=${limit}`;
+            const url = `/api/export-csv?tf=${timeframe}&limit=${limit}&pair=${currentBackendPair}`;
             
             // Menggunakan window.location untuk trigger download browser
             window.location.href = url;
