@@ -4,6 +4,8 @@ Flask backend serving all raw, computed, and state data for the web dashboard.
 """
 import time
 import logging
+import json
+import os
 import requests as http_requests  # type: ignore
 import pandas as pd  # type: ignore
 import pandas_ta as ta  # type: ignore
@@ -21,8 +23,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ==========================================
 AVAILABLE_PAIRS = ["SUIUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "PENDLEUSDT", "DOGEUSDT", "LINKUSDT", "WLFIUSDT", "ETHUSDT"]
 COIN_PAIR = AVAILABLE_PAIRS[0]
-ENTRY_PRICE = 1.055
 ALLOCATED_CAPITAL = 200
+
+# File path untuk menyimpan entry price per koin
+TRADE_ENTRIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
 
 BINANCE_API_KEY = ""
 BINANCE_API_SECRET = ""
@@ -41,6 +45,44 @@ try:
 except Exception as e:
     logger.error(f"Failed to initialize Binance client: {e}")
     binance_client = None
+
+
+# ==========================================
+# 💾 TRADE ENTRIES (Persistent JSON Storage)
+# ==========================================
+def load_trade_entries() -> dict:  # type: ignore
+    """Load entry prices & capital per coin dari file JSON."""
+    if os.path.exists(TRADE_ENTRIES_FILE):
+        try:
+            with open(TRADE_ENTRIES_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load trade entries: {e}")
+    return {}
+
+
+def save_trade_entries(entries: dict) -> None:  # type: ignore
+    """Simpan entry prices & capital per coin ke file JSON."""
+    try:
+        with open(TRADE_ENTRIES_FILE, 'w') as f:
+            json.dump(entries, f, indent=2)
+        logger.info(f"💾 Trade entries saved to {TRADE_ENTRIES_FILE}")
+    except Exception as e:
+        logger.error(f"Failed to save trade entries: {e}")
+
+
+def get_entry_price(symbol: str) -> float:  # type: ignore
+    """Dapatkan entry price untuk koin tertentu. Return 0.0 jika belum di-set."""
+    entries = load_trade_entries()
+    coin_data = entries.get(symbol, {})
+    return float(coin_data.get('entry_price', 0.0))
+
+
+def get_allocated_capital(symbol: str) -> float:  # type: ignore
+    """Dapatkan allocated capital untuk koin tertentu."""
+    entries = load_trade_entries()
+    coin_data = entries.get(symbol, {})
+    return float(coin_data.get('allocated_capital', ALLOCATED_CAPITAL))
 
 # ==========================================
 # Bot State (in-memory)
@@ -324,9 +366,13 @@ def api_data():
             BotState.INITIAL_SL = BotState.ACTIVE_SL
             BotState.INITIALIZED = True
 
+        # ── Lookup dynamic entry price for this coin ──
+        entry_price = get_entry_price(coin_pair)
+        allocated_capital = get_allocated_capital(coin_pair)
+
         pnl_pct = 0.0
-        if ENTRY_PRICE > 0:
-            pnl_pct = round(((current_price - ENTRY_PRICE) / ENTRY_PRICE) * 100, 4)  # type: ignore[call-overload]
+        if entry_price > 0:
+            pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 4)  # type: ignore[call-overload]
 
         # Check for kill switch trigger
         if not df_4h.empty and len(df_4h) >= 2:
@@ -339,8 +385,8 @@ def api_data():
             "user_input": {
                 "coin_pair": coin_pair,
                 "available_pairs": AVAILABLE_PAIRS,
-                "entry_price": ENTRY_PRICE,
-                "allocated_capital": ALLOCATED_CAPITAL,
+                "entry_price": entry_price,
+                "allocated_capital": allocated_capital,
                 "status": BotState.STATUS,
             },
             "active_tracker": {
@@ -369,6 +415,76 @@ def api_data():
         logger.error(f"Dashboard data error: {e}")
         import traceback
         traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==========================================
+# 💰 TRADE ENTRY MANAGEMENT ENDPOINTS
+# ==========================================
+@app.route("/api/trade-entries", methods=["GET"])
+def get_trade_entries():
+    """Ambil semua entry price & capital per koin."""
+    try:
+        entries = load_trade_entries()
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/trade-entries", methods=["POST"])
+def set_trade_entry():
+    """
+    Simpan/update entry price & capital untuk satu koin.
+    Body JSON: { "symbol": "SUIUSDT", "entry_price": 1.055, "allocated_capital": 200 }
+    """
+    try:
+        data = flask_request.get_json()  # type: ignore
+        if not data:
+            return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+        symbol = data.get("symbol", "").upper()
+        if not symbol or symbol not in AVAILABLE_PAIRS:
+            return jsonify({"success": False, "error": f"Invalid symbol: {symbol}"}), 400
+
+        entry_price = float(data.get("entry_price", 0))
+        allocated_capital = float(data.get("allocated_capital", ALLOCATED_CAPITAL))
+
+        entries = load_trade_entries()
+        entries[symbol] = {
+            "entry_price": entry_price,
+            "allocated_capital": allocated_capital,
+            "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        save_trade_entries(entries)
+
+        logger.info(f"💰 Entry updated: {symbol} @ ${entry_price}, Capital: ${allocated_capital}")
+        return jsonify({
+            "success": True,
+            "message": f"{symbol} entry saved",
+            "entry": entries[symbol],
+        })
+    except Exception as e:
+        logger.error(f"Save entry error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/trade-entries/delete", methods=["POST"])
+def delete_trade_entry():
+    """Hapus entry price untuk satu koin (reset ke 0)."""
+    try:
+        data = flask_request.get_json()  # type: ignore
+        symbol = data.get("symbol", "").upper() if data else ""
+        if not symbol:
+            return jsonify({"success": False, "error": "No symbol provided"}), 400
+
+        entries = load_trade_entries()
+        if symbol in entries:
+            del entries[symbol]
+            save_trade_entries(entries)
+            logger.info(f"🗑️ Entry deleted: {symbol}")
+
+        return jsonify({"success": True, "message": f"{symbol} entry deleted"})
+    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
