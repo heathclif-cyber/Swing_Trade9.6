@@ -48,14 +48,30 @@ except Exception as e:
 
 
 # ==========================================
-# 💾 TRADE ENTRIES (Persistent JSON Storage)
+# 💾 TRADE ENTRIES (Persistent JSON Storage — Multi-Entry DCA)
 # ==========================================
+# Format baru: { "SUIUSDT": { "entries": [{"price": 1.05, "qty": 100, "date": "..."}, ...], "allocated_capital": 200 } }
+
 def load_trade_entries() -> dict:  # type: ignore
     """Load entry prices & capital per coin dari file JSON."""
     if os.path.exists(TRADE_ENTRIES_FILE):
         try:
             with open(TRADE_ENTRIES_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            # ── Migrate old format (single entry_price) to new multi-entry format ──
+            for sym, val in data.items():
+                if isinstance(val, dict) and 'entry_price' in val and 'entries' not in val:
+                    old_price = float(val.get('entry_price', 0))
+                    old_cap = float(val.get('allocated_capital', ALLOCATED_CAPITAL))
+                    old_date = val.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                    if old_price > 0:
+                        data[sym] = {
+                            'entries': [{'price': old_price, 'qty': old_cap / old_price if old_price else 0, 'date': old_date}],
+                            'allocated_capital': old_cap,
+                        }
+                    else:
+                        data[sym] = {'entries': [], 'allocated_capital': old_cap}
+            return data
         except Exception as e:
             logger.warning(f"Failed to load trade entries: {e}")
     return {}
@@ -71,11 +87,32 @@ def save_trade_entries(entries: dict) -> None:  # type: ignore
         logger.error(f"Failed to save trade entries: {e}")
 
 
-def get_entry_price(symbol: str) -> float:  # type: ignore
-    """Dapatkan entry price untuk koin tertentu. Return 0.0 jika belum di-set."""
+def get_entry_summary(symbol: str) -> dict:  # type: ignore
+    """Return entry summary: list of entries, average price, total qty, total cost."""
     entries = load_trade_entries()
     coin_data = entries.get(symbol, {})
-    return float(coin_data.get('entry_price', 0.0))
+    entry_list = coin_data.get('entries', [])
+
+    if not entry_list:
+        return {'entries': [], 'avg_price': 0.0, 'total_qty': 0.0, 'total_cost': 0.0, 'num_entries': 0}
+
+    total_cost = sum(e['price'] * e['qty'] for e in entry_list)
+    total_qty = sum(e['qty'] for e in entry_list)
+    avg_price = total_cost / total_qty if total_qty > 0 else 0.0
+
+    return {
+        'entries': entry_list,
+        'avg_price': round(avg_price, 8),
+        'total_qty': round(total_qty, 6),
+        'total_cost': round(total_cost, 4),
+        'num_entries': len(entry_list),
+    }
+
+
+def get_entry_price(symbol: str) -> float:  # type: ignore
+    """Dapatkan RATA-RATA entry price untuk koin tertentu. Return 0.0 jika belum di-set."""
+    summary = get_entry_summary(symbol)
+    return summary['avg_price']
 
 
 def get_allocated_capital(symbol: str) -> float:  # type: ignore
@@ -88,16 +125,24 @@ def get_allocated_capital(symbol: str) -> float:  # type: ignore
 # Bot State (in-memory)
 # ==========================================
 class BotState:
-    INITIALIZED = False
-    ACTIVE_SL = 0.0
-    INITIAL_SL = 0.0
-    STATUS = "ACTIVE"
-    ALERTS_SENT = {
-        "TP_1": False,
-        "SL_BE": False,
-        "VOL_FAKEOUT": False,
-        "KILL_SWITCH": False
-    }
+    # Per-coin state stored as dict {coin_pair: {...}}
+    _states: dict = {}
+    
+    @classmethod
+    def get(cls, coin_pair: str) -> dict:
+        if coin_pair not in cls._states:
+            cls._states[coin_pair] = {
+                "active_sl": 0.0,
+                "initial_sl": 0.0,
+                "status": "ACTIVE",
+                "alerts_sent": {
+                    "TP_1": False,
+                    "SL_BE": False,
+                    "VOL_FAKEOUT": False,
+                    "KILL_SWITCH": False,
+                },
+            }
+        return cls._states[coin_pair]
 
 # ==========================================
 # Interval Map
@@ -161,16 +206,19 @@ def get_klines_fapi(symbol: str, interval: str, limit: int = 1000) -> pd.DataFra
 
 
 def apply_full_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply EMA, RSI, and StochRSI indicators."""
+    """Apply EMA, RSI, StochRSI, and ATR indicators."""
     if df.empty:
         return df
 
-    df['EMA_7'] = ta.ema(df['Close'], length=7)
-    df['EMA_21'] = ta.ema(df['Close'], length=21)
-    df['EMA_50'] = ta.ema(df['Close'], length=50)
+    df['EMA_7']   = ta.ema(df['Close'], length=7)
+    df['EMA_21']  = ta.ema(df['Close'], length=21)
+    df['EMA_50']  = ta.ema(df['Close'], length=50)
     df['EMA_200'] = ta.ema(df['Close'], length=200)
+    df['RSI_6']   = ta.rsi(df['Close'], length=6)
 
-    df['RSI_6'] = ta.rsi(df['Close'], length=6)
+    # ATR-14 for structural SL calculation
+    atr_result = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+    df['ATR_14'] = atr_result if atr_result is not None else None
 
     try:
         stoch_rsi = ta.stochrsi(df['Close'], length=14, rsi_length=14, k=3, d=3)
@@ -263,9 +311,9 @@ def format_ohlcv_for_json(df: pd.DataFrame, last_n: int = 10) -> list:
             "vol_delta": round(float(row['Volume_Delta']), 2),  # type: ignore[call-overload]
         }
         # Add indicators if present
-        for col in ['EMA_7', 'EMA_21', 'EMA_50', 'EMA_200', 'RSI_6', 'StochRSI_K', 'StochRSI_D']:
+        for col in ['EMA_7', 'EMA_21', 'EMA_50', 'EMA_200', 'RSI_6', 'StochRSI_K', 'StochRSI_D', 'ATR_14']:
             if col in row.index and pd.notna(row[col]):
-                entry[col.lower()] = round(float(row[col]), 4)  # type: ignore[call-overload]
+                entry[col.lower()] = round(float(row[col]), 6)  # type: ignore[call-overload]
         result.append(entry)
     return result
 
@@ -372,18 +420,97 @@ def api_data():
                 oi_delta_pct = round(((new_oi - old_oi) / old_oi) * 100, 4)  # type: ignore[call-overload]
         computed["oi_delta_pct"] = oi_delta_pct  # type: ignore[assignment]
 
+        # ── Protocol 9.6 Battle Plan Computation (Wick Hunter Edition) ──
+        # Uses ATR-based Structural SL and Liquidity-based TPs
+        battle_plan: dict = {}
+        if not df_4h.empty and len(df_4h) >= 20:
+            last4h  = df_4h.iloc[-1]
+            atr_val = last4h.get('ATR_14')
+            atr_h4  = float(atr_val) if pd.notna(atr_val) else 0.0
+
+            # Swing Low macro: lowest Low in last 20 H4 bars (≈ 80 hours)
+            swing_low_h4 = float(df_4h['Low'].iloc[-20:].min())
+            swing_high_h4 = float(df_4h['High'].iloc[-20:].max())
+
+            # Structural SL = Swing Low - (2.0 × ATR_H4) — stop-hunt proof
+            structural_sl = swing_low_h4 - (2.0 * atr_h4) if atr_h4 > 0 else swing_low_h4 * 0.985
+
+            # EMA walls above current price (for TP1 in Markdown phase)
+            ema_levels = []
+            for col in ['EMA_7', 'EMA_21', 'EMA_50', 'EMA_200']:
+                v = last4h.get(col)
+                if pd.notna(v):
+                    ema_levels.append((col, float(v)))
+
+            # Determine market phase: Markup if price > EMA_21 H4, else Markdown
+            price_h4 = float(last4h['Close'])
+            ema21_h4 = float(last4h.get('EMA_21', price_h4))
+            market_phase = "MARKUP" if price_h4 > ema21_h4 else "MARKDOWN"
+
+            # TP1: nearest EMA wall strictly above current price (first structural resistance)
+            emas_above = [(name, val) for name, val in ema_levels if val > price_h4]
+            if emas_above:
+                tp1_name, tp1_val = min(emas_above, key=lambda x: x[1])
+            else:
+                tp1_name, tp1_val = ('PDH', liquidity.get('PDH', price_h4 * 1.06))
+
+            # TP2 = PDH (Previous Day High) — institutional daily run
+            tp2_val = liquidity.get('PDH', 0.0)
+
+            # TP3 = PWH (Previous Week High) — apex moonbag
+            tp3_val = liquidity.get('PWH', 0.0)
+
+            # Fibonacci safety net layers (Markdown phase entry zones)
+            # Fib retracement from swing_high to swing_low
+            fib_range = swing_high_h4 - swing_low_h4
+            fib_786  = swing_high_h4 - (fib_range * 0.786)  # Layer 1 – 20%
+            pdl_val  = liquidity.get('PDL', swing_low_h4)   # Layer 2 – 30%
+            pwl_val  = liquidity.get('PWL', swing_low_h4 * 0.97)  # Layer 3 – 50%
+
+            battle_plan = {
+                "market_phase": market_phase,      # MARKUP | MARKDOWN
+                "atr_h4": round(atr_h4, 8),
+                "swing_low": round(swing_low_h4, 8),
+                "swing_high": round(swing_high_h4, 8),
+                "structural_sl": round(structural_sl, 8),  # SL = Swing Low - 2×ATR
+                "tp1_val": round(tp1_val, 8),              # Nearest EMA above / PDH
+                "tp1_label": tp1_name,
+                "tp2_val": round(tp2_val, 8),              # PDH
+                "tp3_val": round(tp3_val, 8),              # PWH
+                "layer1_val": round(fib_786, 8),           # 20% – Fib 0.786
+                "layer2_val": round(pdl_val, 8),           # 30% – PDL
+                "layer3_val": round(pwl_val, 8),           # 50% – PWL
+            }
+
+        computed["battle_plan"] = battle_plan  # type: ignore[assignment]
+
         # ── Section 3: User & System State ──
         current_price = 0.0
         if not df_1h.empty:
             current_price = float(df_1h.iloc[-1]['Close'])
 
-        # Initialize bot state
-        if not BotState.INITIALIZED and not df_4h.empty:
-            ema21_val = df_4h.iloc[-1].get('EMA_21')
-            ema21_4h = float(ema21_val) if pd.notna(ema21_val) else current_price
-            BotState.ACTIVE_SL = round(ema21_4h * 0.99, 6)  # type: ignore[call-overload]
-            BotState.INITIAL_SL = BotState.ACTIVE_SL
-            BotState.INITIALIZED = True
+        # --- Dynamic Structural SL: Swing Low - 2×ATR_H4 ---
+        coin_state = BotState.get(coin_pair)
+        bp = computed.get("battle_plan", {})
+        if bp and bp.get("structural_sl", 0) > 0:
+            new_sl = bp["structural_sl"]
+            # Trailing: SL only moves UP (locks in profit)
+            if new_sl > coin_state["active_sl"] or coin_state["active_sl"] == 0:
+                coin_state["active_sl"] = new_sl
+            if coin_state["initial_sl"] == 0:
+                coin_state["initial_sl"] = coin_state["active_sl"]
+
+        # Check for kill switch trigger
+        if not df_4h.empty and len(df_4h) >= 2:
+            ema21_check = df_4h.iloc[-2].get('EMA_21')
+            if pd.notna(ema21_check):
+                if float(df_4h.iloc[-2]['Close']) < float(ema21_check):
+                    coin_state["status"] = "KILL_SWITCH"
+                    coin_state["alerts_sent"]["KILL_SWITCH"] = True
+                else:
+                    # Reset kill switch if recovered above EMA21
+                    if coin_state["status"] == "KILL_SWITCH":
+                        coin_state["status"] = "ACTIVE"
 
         # ── Lookup dynamic entry price for this coin ──
         entry_price = get_entry_price(coin_pair)
@@ -393,28 +520,21 @@ def api_data():
         if entry_price > 0:
             pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 4)  # type: ignore[call-overload]
 
-        # Check for kill switch trigger
-        if not df_4h.empty and len(df_4h) >= 2:
-            ema21_check = df_4h.iloc[-2].get('EMA_21')
-            if pd.notna(ema21_check):
-                if float(df_4h.iloc[-2]['Close']) < float(ema21_check):
-                    BotState.STATUS = "KILL_SWITCH"
-
         state = {
             "user_input": {
                 "coin_pair": coin_pair,
                 "available_pairs": AVAILABLE_PAIRS,
                 "entry_price": entry_price,
                 "allocated_capital": allocated_capital,
-                "status": BotState.STATUS,
+                "status": coin_state["status"],
             },
             "active_tracker": {
-                "current_price": round(current_price, 6),  # type: ignore[call-overload]
-                "initial_sl": round(BotState.INITIAL_SL, 6),  # type: ignore[call-overload]
-                "active_sl": round(BotState.ACTIVE_SL, 6),  # type: ignore[call-overload]
+                "current_price": round(current_price, 8),
+                "initial_sl": round(coin_state["initial_sl"], 8),
+                "active_sl": round(coin_state["active_sl"], 8),
                 "current_pnl_pct": pnl_pct,
             },
-            "alerts_sent": BotState.ALERTS_SENT,
+            "alerts_sent": coin_state["alerts_sent"],
         }
 
         logger.info("✅ Dashboard data ready!")
@@ -441,11 +561,16 @@ def api_data():
 # 💰 TRADE ENTRY MANAGEMENT ENDPOINTS
 # ==========================================
 @app.route("/api/trade-entries", methods=["GET"])
-def get_trade_entries():
-    """Ambil semua entry price & capital per koin."""
+def api_get_trade_entries():
+    """Ambil semua entry prices & capital per koin (multi-entry format)."""
     try:
         entries = load_trade_entries()
-        return jsonify({"success": True, "entries": entries})
+        # Build summaries for each coin
+        summaries = {}
+        for sym in entries:
+            summaries[sym] = get_entry_summary(sym)
+            summaries[sym]['allocated_capital'] = entries[sym].get('allocated_capital', ALLOCATED_CAPITAL)
+        return jsonify({"success": True, "entries": entries, "summaries": summaries})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -453,8 +578,9 @@ def get_trade_entries():
 @app.route("/api/trade-entries", methods=["POST"])
 def set_trade_entry():
     """
-    Simpan/update entry price & capital untuk satu koin.
-    Body JSON: { "symbol": "SUIUSDT", "entry_price": 1.055, "allocated_capital": 200 }
+    TAMBAH satu entry baru untuk koin (DCA / Scaling-In).
+    Body JSON: { "symbol": "SUIUSDT", "entry_price": 1.055, "qty": 190.47, "allocated_capital": 200 }
+    Jika qty tidak disediakan, dihitung otomatis dari allocated_capital / entry_price.
     """
     try:
         data = flask_request.get_json()  # type: ignore
@@ -466,21 +592,34 @@ def set_trade_entry():
             return jsonify({"success": False, "error": f"Invalid symbol: {symbol}"}), 400
 
         entry_price = float(data.get("entry_price", 0))
+        if entry_price <= 0:
+            return jsonify({"success": False, "error": "Entry price must be > 0"}), 400
+
         allocated_capital = float(data.get("allocated_capital", ALLOCATED_CAPITAL))
+        qty = float(data.get("qty", 0))
+        if qty <= 0:
+            qty = allocated_capital / entry_price  # auto-calc qty
 
         entries = load_trade_entries()
-        entries[symbol] = {
-            "entry_price": entry_price,
-            "allocated_capital": allocated_capital,
-            "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        if symbol not in entries:
+            entries[symbol] = {'entries': [], 'allocated_capital': allocated_capital}
+
+        # Tambah entry baru ke list
+        new_entry = {
+            'price': entry_price,
+            'qty': round(qty, 6),
+            'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
+        entries[symbol]['entries'].append(new_entry)
+        entries[symbol]['allocated_capital'] = allocated_capital
         save_trade_entries(entries)
 
-        logger.info(f"💰 Entry updated: {symbol} @ ${entry_price}, Capital: ${allocated_capital}")
+        summary = get_entry_summary(symbol)
+        logger.info(f"💰 Entry added: {symbol} @ ${entry_price} x {qty:.4f} (Avg: ${summary['avg_price']})")
         return jsonify({
             "success": True,
-            "message": f"{symbol} entry saved",
-            "entry": entries[symbol],
+            "message": f"{symbol} entry #{summary['num_entries']} added",
+            "summary": summary,
         })
     except Exception as e:
         logger.error(f"Save entry error: {e}")
@@ -489,22 +628,41 @@ def set_trade_entry():
 
 @app.route("/api/trade-entries/delete", methods=["POST"])
 def delete_trade_entry():
-    """Hapus entry price untuk satu koin (reset ke 0)."""
+    """Hapus SEMUA entry untuk satu koin, atau hapus entry spesifik by index."""
     try:
         data = flask_request.get_json()  # type: ignore
         symbol = data.get("symbol", "").upper() if data else ""
         if not symbol:
             return jsonify({"success": False, "error": "No symbol provided"}), 400
 
+        index = data.get("index", None)  # Optional: hapus entry spesifik
+
         entries = load_trade_entries()
         if symbol in entries:
-            del entries[symbol]  # type: ignore[attr-defined]
+            if index is not None and isinstance(entries[symbol].get('entries'), list):
+                idx = int(index)
+                if 0 <= idx < len(entries[symbol]['entries']):
+                    removed = entries[symbol]['entries'].pop(idx)
+                    logger.info(f"🗑️ Entry #{idx} deleted for {symbol}: ${removed['price']}")
+                else:
+                    return jsonify({"success": False, "error": f"Index {idx} out of range"}), 400
+            else:
+                del entries[symbol]  # type: ignore[attr-defined]
+                logger.info(f"🗑️ All entries deleted: {symbol}")
             save_trade_entries(entries)
-            logger.info(f"🗑️ Entry deleted: {symbol}")
 
         return jsonify({"success": True, "message": f"{symbol} entry deleted"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/entry-summary")
+def api_entry_summary():
+    """Get entry summary for a specific coin."""
+    symbol = flask_request.args.get('symbol', AVAILABLE_PAIRS[0]).upper()
+    summary = get_entry_summary(symbol)
+    summary['allocated_capital'] = get_allocated_capital(symbol)
+    return jsonify({"success": True, "symbol": symbol, "summary": summary})
 
 
 # ==========================================
@@ -763,25 +921,49 @@ def export_csv():
             return jsonify({"success": False, "error": "No data available"}), 500
 
         # ── Build dynamic filename ──
-        # Format: Data_Track_9.6_{COIN_PAIR}_{YYYYMMDD_HHmm}.csv
         now = datetime.now()
         ts_str = now.strftime('%Y%m%d_%H%M')
         filename = f"Data_Track_9.6_{coin_pair}_{timeframe.upper()}_{ts_str}.csv"
 
-        # ── Tulis ke in-memory buffer (tanpa index baris) ──
+        # ── Build entry price header block ──
+        entry_summary = get_entry_summary(coin_pair)
+        header_lines = []
+        header_lines.append(f"# ═══════════════════════════════════════════════════")
+        header_lines.append(f"# PROTOCOL 9.6 — TRADE ENTRY SUMMARY")
+        header_lines.append(f"# Symbol: {coin_pair}")
+        header_lines.append(f"# Export Time: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC+8")
+        header_lines.append(f"# Timeframe: {timeframe.upper()} | Candles: {len(df_export)}")
+        header_lines.append(f"# ───────────────────────────────────────────────────")
+
+        if entry_summary['num_entries'] > 0:
+            header_lines.append(f"# ENTRIES ({entry_summary['num_entries']} positions):")
+            for i, e in enumerate(entry_summary['entries'], 1):
+                header_lines.append(f"#   Entry #{i}: Price=${e['price']}  Qty={e['qty']}  Date={e['date']}")
+            header_lines.append(f"# ───────────────────────────────────────────────────")
+            header_lines.append(f"# AVG ENTRY PRICE: ${entry_summary['avg_price']}")
+            header_lines.append(f"# TOTAL QTY: {entry_summary['total_qty']}")
+            header_lines.append(f"# TOTAL COST: ${entry_summary['total_cost']}")
+            header_lines.append(f"# ALLOCATED CAPITAL: ${get_allocated_capital(coin_pair)}")
+        else:
+            header_lines.append(f"# NO ENTRY PRICES SET — Use dashboard to add entries")
+
+        header_lines.append(f"# ═══════════════════════════════════════════════════")
+        header_lines.append("")  # blank line before CSV data
+
+        # ── Tulis ke in-memory buffer ──
         buf = io.StringIO()
+        # Write header block
+        buf.write("\n".join(header_lines) + "\n")
+        # Write CSV data
         df_export.to_csv(buf, index=False, encoding='utf-8')
         buf.seek(0)
 
-        logger.info(f"✅ CSV ready: {filename} ({len(df_export)} rows)")
+        logger.info(f"✅ CSV ready: {filename} ({len(df_export)} rows, {entry_summary['num_entries']} entries)")
 
-        # ── Kirim ke browser dengan header yang benar ──
         return Response(
             buf.getvalue(),
             mimetype='text/csv',
             headers={
-                # Content-Disposition: attachment memaksa browser download (bukan buka inline)
-                # filename= memastikan nama yang informatif, bukan UUID
                 'Content-Disposition': f'attachment; filename="{filename}"',
                 'Content-Type': 'text/csv; charset=utf-8',
             }
