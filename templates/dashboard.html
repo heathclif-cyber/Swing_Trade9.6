@@ -187,11 +187,85 @@
             box-shadow: 0 1px 3px 1px rgba(60,64,67,0.15), 0 1px 2px 0 rgba(60,64,67,0.3);
         }
 
-        .btn-pdf { color: var(--google-gray-800); }
+        .btn-pdf { color: var(--text-secondary); }
         .btn-pdf:hover { background: var(--google-gray-100); }
 
-        .btn-csv { color: var(--google-green); }
-        .btn-csv:hover { background: var(--google-green-light); }
+        .btn-csv { 
+            background: var(--google-green); 
+            color: #ffffff; 
+            border: none;
+            font-size: 15px;
+            font-weight: 700;
+            padding: 12px 30px;
+            box-shadow: 0 4px 6px rgba(52, 168, 83, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .btn-csv:hover { 
+            background: #2d9447; 
+            color: #ffffff;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(52, 168, 83, 0.4);
+        }
+
+        /* 🌓 DARK MODE OVERRIDES */
+        [data-theme="dark"] {
+            --bg-primary: #121212;
+            --bg-secondary: #1e1e1e;
+            --bg-card: #242526;
+            --bg-card-hover: #3a3b3c;
+            --border: #3a3b3c;
+            
+            --text-primary: #e4e6eb;
+            --text-secondary: #b0b3b8;
+            --text-muted: #8c8c8c;
+            
+            --google-blue-light: rgba(26, 115, 232, 0.15);
+            --google-green-light: rgba(52, 168, 83, 0.15);
+            --google-red-light: rgba(234, 67, 53, 0.15);
+            --google-gray-50: #18191a;
+            --google-gray-100: #242526;
+            --google-gray-200: #3a3b3c;
+            --google-gray-800: #b0b3b8;
+            --google-gray-900: #e4e6eb;
+
+            --shadow-card: 0 1px 2px 0 rgba(0,0,0,0.5);
+            --shadow-hover: 0 4px 8px 3px rgba(0,0,0,0.4);
+        }
+        [data-theme="dark"] .status-card,
+        [data-theme="dark"] .panel, 
+        [data-theme="dark"] .data-card,
+        [data-theme="dark"] .header,
+        [data-theme="dark"] .modal {
+            border: 1px solid var(--border) !important;
+            box-shadow: var(--shadow-card);
+        }
+        [data-theme="dark"] th {
+            background: #18191a !important;
+        }
+        [data-theme="dark"] td {
+            border-bottom: 1px solid var(--border) !important;
+        }
+        [data-theme="dark"] .btn-pdf, [data-theme="dark"] .btn-entry, [data-theme="dark"] .tab-btn {
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .btn-pdf:hover, [data-theme="dark"] .btn-entry:hover {
+            background: var(--google-gray-100);
+        }
+
+        /* 📊 THEME ADAPTIVE COLORS FOR COMPASS */
+        .row-bearish { background-color: var(--google-red-light); color: var(--google-red); }
+        .row-bullish { background-color: var(--google-green-light); color: var(--google-green); }
+        .row-neutral { background-color: #fff3cd; color: #856404; }
+
+        [data-theme="dark"] .row-bearish { background-color: rgba(234, 67, 53, 0.2) !important; color: #ffb4a9 !important; }
+        [data-theme="dark"] .row-bullish { background-color: rgba(52, 168, 83, 0.2) !important; color: #b4ffc4 !important; }
+        [data-theme="dark"] .row-neutral { background-color: rgba(251, 188, 4, 0.15) !important; color: #ffe082 !important; }
+        
+        [data-theme="dark"] .val-highlight { color: #ffffff !important; }
+        [data-theme="dark"] .badge-red { background: #b71c1c; color: #ffffff; }
+        [data-theme="dark"] .badge-green { background: #1b5e20; color: #ffffff; }
+
 
         .btn-loading {
             pointer-events: none;
@@ -727,10 +801,20 @@
                     <span class="live-dot"></span>
                     <span id="headerTimestamp">Loading...</span>
                 </div>
+                <button class="btn btn-pdf" id="btnTheme" onclick="toggleTheme()" title="Toggle Dark Mode" style="font-size:20px;padding:8px 12px;border:none;">🌓</button>
                 <button class="btn btn-entry" id="btnEntry" onclick="openEntryModal()">💰 Entry Price</button>
                 <button class="btn btn-primary" id="btnRefresh" onclick="fetchData()">🔄 Refresh</button>
-                <button class="btn btn-csv" id="btnCsv" onclick="downloadCSV()">📥 Download CSV</button>
                 <button class="btn btn-pdf" id="btnPdf" onclick="downloadPDF()">📄 Download PDF</button>
+                <div style="display:flex; align-items:center; border:2px solid var(--google-green); border-radius:24px; overflow:hidden;">
+                    <select id="csvYears" style="border:none; outline:none; padding:10px 16px; background:var(--bg-card); color:var(--text-primary); font-family:var(--font-sans); font-size:14px; font-weight:600; cursor:pointer;">
+                        <option value="0.5">📊 6 Bulan (~1000 limit)</option>
+                        <option value="1">📊 1 Tahun (~2190 limit)</option>
+                        <option value="2">📊 2 Tahun (~4380 limit)</option>
+                        <option value="3">📊 3 Tahun (~6570 limit)</option>
+                        <option value="4">📊 4 Tahun (~8760 limit)</option>
+                    </select>
+                    <button id="btnCsv" onclick="downloadCSV()" style="background:var(--google-green); color:#fff; border:none; padding:10px 24px; font-weight:700; font-size:14px; cursor:pointer; text-transform:uppercase; letter-spacing:0.5px;">📥 HARVEST CSV</button>
+                </div>
             </div>
         </header>
 
@@ -759,6 +843,10 @@
             <div class="status-card purple">
                 <div class="status-label">Capital Allocated</div>
                 <div class="status-value" id="statCapital">—</div>
+            </div>
+            <div class="status-card" id="pnlRealizedCard">
+                <div class="status-label">Floating P&L ($)</div>
+                <div class="status-value" id="statRealizedPnL">—</div>
             </div>
             <div class="status-card" id="statusCardState">
                 <div class="status-label">Trade Status</div>
@@ -891,11 +979,12 @@
                     <table id="tacticalCompassTable">
                         <thead>
                             <tr>
-                                <th style="text-align:left;width:16%">Parameter</th>
-                                <th style="text-align:center;width:14%">Live Value</th>
-                                <th style="text-align:center;background:#fce8e6;color:var(--google-red);width:28%">🔴 MARKDOWN (Bearish)</th>
-                                <th style="text-align:center;background:#e6f4ea;color:var(--google-green);width:28%">🟢 MARKUP (Bullish)</th>
-                                <th style="text-align:center;width:14%">Verdict</th>
+                                <th style="text-align:left;width:15%">Parameter</th>
+                                <th style="text-align:center;width:12%">Live Value</th>
+                                <th style="text-align:center;background:#fce8e6;color:var(--google-red);width:23%">🔴 MARKDOWN (Bearish)</th>
+                                <th style="text-align:center;background:#e6f4ea;color:var(--google-green);width:23%">🟢 MARKUP (Bullish)</th>
+                                <th style="text-align:center;width:12%">Verdict</th>
+                                <th style="text-align:left;width:15%;font-size:11px;color:var(--text-secondary)">Keterangan</th>
                             </tr>
                         </thead>
                         <tbody id="tacticalCompassBody">
@@ -932,6 +1021,8 @@
                 </div>
             </div>
 
+
+
             <!-- ═══════════ KILL SWITCH CHECKLIST (Aviation SOP) ═══════════ -->
             <div class="data-card" style="margin-bottom:24px;overflow:hidden;border:2px solid var(--google-red)">
                 <div style="padding:16px 20px;background:var(--google-red-light);border-bottom:2px solid var(--google-red);display:flex;align-items:center;gap:10px">
@@ -965,56 +1056,7 @@
                 </div>
             </div>
 
-            <!-- ═══════════ BATTLE PLAN EXECUTION TABLE ═══════════ -->
-            <div class="data-card" style="margin-bottom:24px;overflow:hidden;border:2px solid var(--google-blue)">
-                <div style="padding:16px 20px;background:var(--google-blue-light);border-bottom:2px solid var(--google-blue);display:flex;align-items:center;gap:10px">
-                    <span style="font-size:20px">📋</span>
-                    <span style="font-size:16px;font-weight:700;color:var(--google-blue);letter-spacing:0.5px">BATTLE PLAN — EXECUTION PARAMETERS</span>
-                </div>
-                <div class="table-scroll">
-                    <table id="battlePlanTable">
-                        <thead>
-                            <tr>
-                                <th style="text-align:left;width:30%">Parameter</th>
-                                <th style="text-align:center;width:35%">Value</th>
-                                <th style="text-align:center;width:35%">Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody id="battlePlanBody">
-                            <tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:30px">Awaiting data...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- ═══════════ ALERT SYSTEM STATUS ═══════════ -->
-            <div class="panel-grid">
-                <div class="panel" style="grid-column: 1 / -1">
-                    <div class="panel-title">🔔 Alert & Trigger Status</div>
-                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
-                        <div id="alertCardTP" style="padding:16px;border:1px solid var(--border);border-radius:12px;transition:all 0.2s">
-                            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;font-weight:600">🎯 Take Profit 1 (+6%)</div>
-                            <div id="alertTP" style="font-size:14px;font-weight:600;margin-bottom:6px">—</div>
-                            <div id="alertTPDesc" style="font-size:11px;color:var(--text-muted);line-height:1.4">—</div>
-                        </div>
-                        <div id="alertCardSLBE" style="padding:16px;border:1px solid var(--border);border-radius:12px;transition:all 0.2s">
-                            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;font-weight:600">🛡️ Stop Loss / Break-Even</div>
-                            <div id="alertSLBE" style="font-size:14px;font-weight:600;margin-bottom:6px">—</div>
-                            <div id="alertSLBEDesc" style="font-size:11px;color:var(--text-muted);line-height:1.4">—</div>
-                        </div>
-                        <div id="alertCardVol" style="padding:16px;border:1px solid var(--border);border-radius:12px;transition:all 0.2s">
-                            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;font-weight:600">📉 Volume Fakeout</div>
-                            <div id="alertVol" style="font-size:14px;font-weight:600;margin-bottom:6px">—</div>
-                            <div id="alertVolDesc" style="font-size:11px;color:var(--text-muted);line-height:1.4">—</div>
-                        </div>
-                        <div id="alertCardKill" style="padding:16px;border:1px solid var(--border);border-radius:12px;transition:all 0.2s">
-                            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px;font-weight:600">🚫 Kill Switch</div>
-                            <div id="alertKill" style="font-size:14px;font-weight:600;margin-bottom:6px">—</div>
-                            <div id="alertKillDesc" style="font-size:11px;color:var(--text-muted);line-height:1.4">—</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- Removed Battle Plan and Alert Status per user request (Data Harvester Only) -->
         </div>
     </div>
 
@@ -1026,14 +1068,17 @@
                 <button class="modal-close" onclick="closeEntryModal()">✕</button>
             </div>
 
-            <div class="modal-form">
+            <div class="tabs" style="margin-top:16px;">
+                <button class="tab-btn active" id="tabEntry" onclick="switchModalTab('entry')">📥 Buy/Entry</button>
+                <button class="tab-btn" id="tabSell" onclick="switchModalTab('sell')">📤 Sell/Profit</button>
+                <button class="tab-btn" id="tabHistory" onclick="switchModalTab('history')">📜 History</button>
+            </div>
+
+            <div id="modalEntryForm" class="modal-form" style="margin-top:20px">
                 <div class="form-group">
                     <label class="form-label">Select Coin</label>
-                    <select id="entrySymbol" class="form-select">
-                        <!-- Populated dynamically -->
-                    </select>
+                    <select id="entrySymbol" class="form-select"></select>
                 </div>
-
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Entry Price ($)</label>
@@ -1044,14 +1089,33 @@
                         <input type="number" step="any" id="entryCapital" class="form-input" placeholder="200" value="200">
                     </div>
                 </div>
-
-                <button class="btn-save" onclick="saveEntry()">💾 Save Entry</button>
+                <button class="btn-save" onclick="saveEntry()">💾 Record Entry</button>
             </div>
 
-            <div class="entry-list">
-                <div class="entry-list-title">📋 Saved Entries</div>
-                <div id="entryListBody">
-                    <div class="entry-empty">No entries saved yet</div>
+            <div id="modalSellForm" class="modal-form" style="margin-top:20px; display:none">
+                <div class="form-group">
+                    <label class="form-label">Select Coin</label>
+                    <select id="sellSymbol" class="form-select"></select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Sell Price ($)</label>
+                        <input type="number" step="any" id="sellPriceInput" class="form-input" placeholder="0.000">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Quantity to Sell</label>
+                        <input type="number" step="any" id="sellQtyInput" class="form-input" placeholder="0.00">
+                    </div>
+                </div>
+                <button class="btn-save" style="background:var(--google-red)" onclick="saveSell()">💰 Record Sale</button>
+            </div>
+
+            <div id="modalHistory" style="margin-top:20px; display:none">
+                <div class="entry-list">
+                    <div class="entry-list-title">📋 Trade Ledger</div>
+                    <div id="entryListBody">
+                        <div class="entry-empty">No trades in ledger</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1067,6 +1131,20 @@
         let activeIndicator = '1h';
         let currentBackendPair = '';
         let tradeEntries = {};
+
+        // ── Notifications ──
+        function showAlert(type, message) {
+            const banner = document.getElementById('alertBanner');
+            if (!banner) return;
+            banner.textContent = message;
+            banner.className = 'alert-banner show ' + type;
+            setTimeout(hideAlert, 6000);
+        }
+
+        function hideAlert() {
+            const banner = document.getElementById('alertBanner');
+            if (banner) banner.classList.remove('show');
+        }
 
         // ==========================================
         // 📡 DATA FETCHING
@@ -1179,7 +1257,7 @@
 
             // Check kill switch
             if (state.alerts_sent.KILL_SWITCH) {
-                showAlert('danger', '💀 KILL SWITCH ACTIVATED — Structural breakdown detected!');
+                showAlert('danger', 'KILL SWITCH ACTIVATED — Structural breakdown detected!');
             } else if (state.alerts_sent.VOL_FAKEOUT) {
                 showAlert('danger', '⚠️ VOLUME FAKEOUT — Heavy distribution detected!');
             }
@@ -1199,7 +1277,7 @@
             }
 
             tbody.innerHTML = data.map(row => {
-                const deltaClass = row.vol_delta >= 0 ? 'val-pos' : 'val-neg';
+                const deltaStyle = getVolDeltaStyle(row.vol_delta, row.buy_vol, row.sell_vol);
                 return `<tr>
                     <td>${row.time}</td>
                     <td>${row.open.toFixed(4)}</td>
@@ -1209,7 +1287,7 @@
                     <td>${fmtVol(row.total_vol)}</td>
                     <td class="val-pos">${fmtVol(row.buy_vol)}</td>
                     <td class="val-neg">${fmtVol(row.sell_vol)}</td>
-                    <td class="${deltaClass}">${row.vol_delta >= 0 ? '+' : ''}${fmtVol(row.vol_delta)}</td>
+                    <td ${deltaStyle}>${row.vol_delta >= 0 ? '+' : ''}${fmtVol(row.vol_delta)}</td>
                 </tr>`;
             }).join('');
         }
@@ -1244,7 +1322,7 @@
 
             tbody.innerHTML = data.map(row => {
                 const rsiClass = (row.rsi_6 || 0) > 70 ? 'val-neg' : (row.rsi_6 || 0) < 30 ? 'val-pos' : '';
-                const deltaClass = (row.vol_delta || 0) >= 0 ? 'val-pos' : 'val-neg';
+                const deltaStyle = getVolDeltaStyle(row.vol_delta || 0, row.buy_vol || 0, row.sell_vol || 0);
                 return `<tr>
                     <td>${row.time}</td>
                     <td class="val-highlight">${row.close.toFixed(4)}</td>
@@ -1255,9 +1333,9 @@
                     <td class="${rsiClass}">${(row.rsi_6 || 0).toFixed(2)}</td>
                     <td>${(row.stochrsi_k || 0).toFixed(2)}</td>
                     <td>${(row.stochrsi_d || 0).toFixed(2)}</td>
-                    <td class="val-pos">${fmtVol(row.buy_vol)}</td>
-                    <td class="val-neg">${fmtVol(row.sell_vol)}</td>
-                    <td class="${deltaClass}">${(row.vol_delta || 0) >= 0 ? '+' : ''}${fmtVol(row.vol_delta || 0)}</td>
+                    <td class="val-pos">${fmtVol(row.buy_vol || 0)}</td>
+                    <td class="val-neg">${fmtVol(row.sell_vol || 0)}</td>
+                    <td ${deltaStyle}>${(row.vol_delta || 0) >= 0 ? '+' : ''}${fmtVol(row.vol_delta || 0)}</td>
                 </tr>`;
             }).join('');
         }
@@ -1269,6 +1347,8 @@
             const tracker = state.active_tracker;
             const userInput = state.user_input;
             const alerts = state.alerts_sent;
+            const bp = c.battle_plan || {};
+            const tp1Label = bp.tp1_label || 'Target 6%';
 
             // Liquidity Borders
             document.getElementById('valPDH').textContent = `$${c.liquidity_borders.PDH.toFixed(4)}`;
@@ -1284,6 +1364,18 @@
             smtEl.innerHTML = isBearishSmt
                 ? '<span class="badge badge-red">⚠️ YES — BEARISH</span>'
                 : '<span class="badge badge-green">✅ NO</span>';
+
+
+
+            // Floating P&L ($)
+            const realizedEl = document.getElementById('statRealizedPnL');
+            if (realizedEl) {
+                const cap = parseFloat(userInput.allocated_capital) || 0;
+                const floatingPnL = (tracker.current_pnl_pct / 100) * cap;
+                realizedEl.textContent = `${floatingPnL >= 0 ? '+$' : '-$'}${Math.abs(floatingPnL).toFixed(2)}`;
+                realizedEl.className = 'status-value ' + (floatingPnL >= 0 ? 'tag-positive' : 'tag-negative');
+                document.getElementById('pnlRealizedCard').className = 'status-card ' + (floatingPnL >= 0 ? 'green' : 'red');
+            }
 
             // OI Delta
             const oiDelta = c.oi_delta_pct;
@@ -1345,86 +1437,51 @@
             const smtBull = !isBearishSmt;
             compassScore += smtBear ? -1 : (smtBull ? 1 : 0);
 
-            function compassRow(label, liveVal, bearText, bullText, isBear, isBull) {
-                const bg = isBear ? '#fce8e6' : (isBull ? '#e6f4ea' : '');
+            function compassRow(label, liveVal, bearText, bullText, isBear, isBull, description) {
+                const rowClass = isBear ? 'row-bearish' : (isBull ? 'row-bullish' : 'row-neutral');
                 const verdictHtml = isBear
                     ? '<span class="badge badge-red" style="font-size:12px">🔴 BEARISH</span>'
                     : (isBull ? '<span class="badge badge-green" style="font-size:12px">🟢 BULLISH</span>'
                     : '<span class="badge" style="background:#fff3cd;color:#856404;font-size:12px">⚪ NEUTRAL</span>');
-                return `<tr style="background:${bg}">
+                return `<tr class="${rowClass}">
                     <td style="text-align:left;font-weight:600">${label}</td>
-                    <td style="text-align:center;font-family:var(--font-mono);font-size:12px">${liveVal}</td>
-                    <td style="text-align:center;${isBear ? 'font-weight:700;color:var(--google-red)' : ''}">${bearText}</td>
-                    <td style="text-align:center;${isBull ? 'font-weight:700;color:var(--google-green)' : ''}">${bullText}</td>
+                    <td style="text-align:center;font-family:var(--font-mono);font-size:12px" class="val-highlight">${liveVal}</td>
+                    <td style="text-align:center;${isBear ? 'font-weight:700' : ''}">${bearText}</td>
+                    <td style="text-align:center;${isBull ? 'font-weight:700' : ''}">${bullText}</td>
                     <td style="text-align:center">${verdictHtml}</td>
+                    <td style="text-align:left;font-size:11px;color:var(--text-secondary);white-space:normal">${description}</td>
                 </tr>`;
             }
 
             document.getElementById('tacticalCompassBody').innerHTML =
-                compassRow('EMA Stack', emaVal, 'Price < EMA 21 < EMA 50', 'Price > EMA 7 > EMA 21', emaBear, emaBull) +
-                compassRow('RSI 6', rsiVal, '> 70 (Overbought)', '< 30 (Oversold)', rsiBear, rsiBull) +
-                compassRow('Volume Delta', volVal, 'Sell Vol > Buy Vol', 'Buy Vol > Sell Vol', volBear, volBull) +
-                compassRow('OI + Price', oiPriceVal, 'OI ↑ + Price ↓ = Trap', 'OI ↑ + Price ↑ = Conviction', oiBear, oiBull) +
-                compassRow('SMT Divergence', smtVal, 'BTC HH + Coin LH = SELL', 'No Divergence = SAFE', smtBear, smtBull) +
-                `<tr style="background:${compassScore < 0 ? '#fce8e6' : (compassScore > 0 ? '#e6f4ea' : '#fff3cd')};font-weight:700">
+                compassRow('EMA Stack', emaVal, 'Price < EMA 21 < EMA 50', 'Price > EMA 7 > EMA 21', emaBear, emaBull, 'Tren utama H4. Markdown jika di bawah EMA 21.') +
+                compassRow('RSI 6', rsiVal, '> 70 (Overbought)', '< 30 (Oversold)', rsiBear, rsiBull, 'Momentum H4. Di atas 70 jenuh beli, di bawah 30 jenuh jual.') +
+                compassRow('Volume Delta', volVal, 'Sell Vol > Buy Vol', 'Buy Vol > Sell Vol', volBear, volBull, 'Tekanan jual/beli H4. Sell > Buy = distribusi institusi.') +
+                compassRow('OI + Price', oiPriceVal, 'OI ↑ + Price ↓ = Trap', 'OI ↑ + Price ↑ = Conviction', oiBear, oiBull, 'Aliran uang. OI naik + Harga turun = Jebakan (Trap).') +
+                compassRow('SMT Divergence', smtVal, 'BTC HH + Coin LH = SELL', 'No Divergence = SAFE', smtBear, smtBull, 'Korelasi BTC H4. BTC HH + Koin LH = Bearish Divergensi.') +
+                `<tr class="${compassScore < 0 ? 'row-bearish' : (compassScore > 0 ? 'row-bullish' : 'row-neutral')}" style="font-weight:700">
                     <td style="text-align:left">TOTAL SCORE</td>
-                    <td style="text-align:center;font-size:16px">${compassScore > 0 ? '+' : ''}${compassScore}/5</td>
-                    <td style="text-align:center;font-weight:700;color:var(--google-red)">⛔ Safety Net / Exit</td>
-                    <td style="text-align:center;font-weight:700;color:var(--google-green)">🎯 Main Strike / Add</td>
+                    <td style="text-align:center;font-size:16px" class="val-highlight">${compassScore > 0 ? '+' : ''}${compassScore}/5</td>
+                    <td style="text-align:center;font-weight:700">⛔ Safety Net / Exit</td>
+                    <td style="text-align:center;font-weight:700">🎯 Main Strike / Add</td>
                     <td style="text-align:center">${compassScore < 0 ? '<span class="badge badge-red">BEARISH</span>' :
                         (compassScore > 0 ? '<span class="badge badge-green">BULLISH</span>' :
                         '<span class="badge" style="background:#fff3cd;color:#856404">MIXED</span>')}</td>
+                    <td style="text-align:left;font-size:11px">Kesimpulan skor dari 5 parameter taktis utama.</td>
                 </tr>`;
 
             // Compass verdict badge in header
             const cv = document.getElementById('compassVerdict');
-            if (compassScore <= -2) { cv.textContent = '📉 MARKDOWN'; cv.style.background = '#fce8e6'; cv.style.color = 'var(--google-red)'; }
-            else if (compassScore >= 2) { cv.textContent = '📈 MARKUP'; cv.style.background = '#e6f4ea'; cv.style.color = 'var(--google-green)'; }
-            else { cv.textContent = '⚖️ MIXED'; cv.style.background = '#fff3cd'; cv.style.color = '#856404'; }
+            cv.className = 'status-tag ' + (compassScore < 0 ? 'row-bearish' : (compassScore > 0 ? 'row-bullish' : 'row-neutral'));
+            if (compassScore <= -2) { cv.textContent = '📉 MARKDOWN'; }
+            else if (compassScore >= 2) { cv.textContent = '📈 MARKUP'; }
+            else { cv.textContent = '⚖️ MIXED'; }
 
-            // ── INFORMATIVE ALERT STATUS ──
-            const entryPrice = userInput.entry_price;
-            const sl = tracker.active_sl;
-            const tp1Price = entryPrice > 0 ? entryPrice * 1.06 : 0;
-            const pnl = tracker.current_pnl_pct;
-
-            // TP 1
-            renderAlertCard('alertCardTP', 'alertTP', 'alertTPDesc', alerts.TP_1,
-                `🔔 REACHED — Price hit $${tp1Price.toFixed(4)}. Execute partial exit (30%).`,
-                entryPrice > 0
-                    ? `Belum tercapai. Target: $${tp1Price.toFixed(4)} (+6%). Saat ini P&L: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%. Jarak: ${((tp1Price - curPrice) / curPrice * 100).toFixed(2)}% lagi.`
-                    : `Entry price belum diset. Klik "Entry Price" untuk setting target.`
-            );
-
-            // SL / BE
-            renderAlertCard('alertCardSLBE', 'alertSLBE', 'alertSLBEDesc', alerts.SL_BE,
-                `🔴 TRIGGERED — Price menyentuh SL $${sl.toFixed(4)}. Posisi harus di-close.`,
-                sl > 0
-                    ? `Aman. SL aktif di $${sl.toFixed(4)} (EMA21 H4 × 0.99). Jarak dari harga: ${((curPrice - sl) / curPrice * 100).toFixed(2)}% buffer.`
-                    : `Stop Loss belum dihitung. Data H4 EMA belum tersedia.`
-            );
-
-            // Vol Fakeout
-            let sellPct = 0;
-            if (lastH4 && lastH4.sell_vol && lastH4.buy_vol) {
-                sellPct = (lastH4.sell_vol / (lastH4.buy_vol + lastH4.sell_vol) * 100);
-            }
-            renderAlertCard('alertCardVol', 'alertVol', 'alertVolDesc', alerts.VOL_FAKEOUT,
-                `⚠️ FAKEOUT — Sell Volume dominan (${sellPct.toFixed(1)}% dari total). Pump palsu terdeteksi.`,
-                `Komposisi saat ini: Sell ${sellPct.toFixed(1)}% vs Buy ${(100-sellPct).toFixed(1)}%. Threshold trigger: Sell > 60%. ${sellPct > 50 ? 'Hati-hati, mendekati batas.' : 'Ratio sehat.'}`
-            );
-
-            // Kill Switch
             const isKillEma = alerts.KILL_SWITCH || userInput.status === 'KILL_SWITCH';
             const isKillSmt = isBearishSmt;
             const isKillVol = alerts.VOL_FAKEOUT;
             const isKillOi = oiDelta < -2;
             const killCount = [isKillEma, isKillSmt, isKillVol, isKillOi].filter(Boolean).length;
-
-            renderAlertCard('alertCardKill', 'alertKill', 'alertKillDesc', killCount > 0,
-                `🚫 ${killCount}/4 kondisi aktif! ${isKillEma ? 'H4<EMA21 ' : ''}${isKillSmt ? 'SMT ' : ''}${isKillVol ? 'VolFakeout ' : ''}${isKillOi ? 'OI-Trap ' : ''}— STOP semua entry baru.`,
-                `Semua 4 kondisi Kill Switch clear. EMA struktur intact, SMT tidak diverge, Volume ratio sehat, OI momentum normal. Aman untuk lanjutkan Battle Plan.`
-            );
 
             // ── Kill Switch Checklist ──
             const checkboxes = document.querySelectorAll('#killSwitchChecklist input[type="checkbox"]');
@@ -1453,90 +1510,9 @@
             verdict.style.color = 'white';
             verdict.textContent = anyKill
                 ? `⚠️ ABORT — ${killCount}/4 CONDITIONS TRIGGERED`
-                : '✅ ALL CLEAR — PROCEED WITH BATTLE PLAN';
-
-            // ── Battle Plan Table (Protocol 9.6 Wick Hunter Edition) ──
-            const capital = userInput.allocated_capital;
-            const bp = c.battle_plan || {};
-
-            // Structural SL from backend (Swing Low - 2×ATR_H4)
-            const structuralSl = bp.structural_sl || sl;
-            const atrH4 = bp.atr_h4 || 0;
-            const swingLow = bp.swing_low || 0;
-            const marketPhase = bp.market_phase || '—';
-
-            // TPs from liquidity borders (Protocol 9.6)
-            const tp1Val   = bp.tp1_val || 0;
-            const tp1Label = bp.tp1_label || 'EMA';
-            const tp2Val   = bp.tp2_val || c.liquidity_borders.PDH || 0;
-            const tp3Val   = bp.tp3_val || c.liquidity_borders.PWH || 0;
-
-            // Layered Safety Net (Fib + PDL + PWL)
-            const layer1 = bp.layer1_val || 0;
-            const layer2 = bp.layer2_val || c.liquidity_borders.PDL || 0;
-            const layer3 = bp.layer3_val || c.liquidity_borders.PWL || 0;
-
-            // TP1 as % from entry
-            const tp1Pct = entryPrice > 0 && tp1Val > 0 ? ((tp1Val - entryPrice) / entryPrice * 100).toFixed(1) : '?';
-            const tp2Pct = entryPrice > 0 && tp2Val > 0 ? ((tp2Val - entryPrice) / entryPrice * 100).toFixed(1) : '?';
-            const tp3Pct = entryPrice > 0 && tp3Val > 0 ? ((tp3Val - entryPrice) / entryPrice * 100).toFixed(1) : '?';
-
-            // R:R based on Structural SL
-            const risk = entryPrice > 0 && structuralSl > 0 ? (entryPrice - structuralSl) : 0;
-            const reward1 = entryPrice > 0 && tp1Val > 0 ? (tp1Val - entryPrice) : 0;
-            const rr = risk > 0 && reward1 > 0 ? (reward1 / risk).toFixed(2) : '—';
-            const rrColor = parseFloat(rr) >= 2 ? 'var(--google-green)' : (parseFloat(rr) >= 1 ? '#f9a825' : 'var(--google-red)');
-
-            // Phase badge
-            const phaseBg    = marketPhase === 'MARKUP' ? '#e6f4ea' : '#fce8e6';
-            const phaseColor  = marketPhase === 'MARKUP' ? 'var(--google-green)' : 'var(--google-red)';
-            const phaseIcon   = marketPhase === 'MARKUP' ? '📈 MARKUP — Trend Riding' : '📉 MARKDOWN — Wick Hunting';
-
-            const fv6 = (v) => v > 0 ? `$${v.toFixed(6)}` : '—';
-
-            const summary = tradeSummaries[currentBackendPair] || {};
-            let entryRows = '';
-            if (summary.entries && summary.entries.length > 0) {
-                summary.entries.forEach((e, i) => {
-                    entryRows += `<tr><td style="text-align:left;padding-left:32px;color:var(--text-secondary)">↳ Entry #${i+1}</td><td style="text-align:center" class="val-highlight">$${e.price}</td><td style="text-align:center">Qty: ${e.qty} | ${e.date||''}</td></tr>`;
-                });
-            }
-
-            document.getElementById('battlePlanBody').innerHTML = `
-                <tr style="background:${phaseBg}"><td colspan="3" style="text-align:center;font-weight:700;font-size:14px;color:${phaseColor};padding:10px">${phaseIcon}</td></tr>
-                <tr style="background:var(--google-blue-light)"><td style="text-align:left;font-weight:700">📍 Avg Entry Price</td><td style="text-align:center;font-weight:700;font-size:16px" class="val-highlight">${entryPrice > 0 ? `$${entryPrice.toFixed(6)}` : 'NOT SET'}</td><td style="text-align:center">${summary.num_entries||0} entry positions</td></tr>
-                ${entryRows}
-                <tr><td style="text-align:left;font-weight:600">💲 Current Price</td><td style="text-align:center" class="val-highlight">$${curPrice.toFixed(6)}</td><td style="text-align:center">${pnl >= 0 ? '🟢' : '🔴'} P&L: ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%</td></tr>
-                <tr style="background:#fce8e6"><td style="text-align:left;font-weight:600;color:var(--google-red)">🛑 Structural SL</td><td style="text-align:center;font-weight:700;color:var(--google-red)">${fv6(structuralSl)}</td><td style="text-align:center;font-size:12px">Swing Low ${fv6(swingLow)} − 2×ATR (${atrH4.toFixed(4)})</td></tr>
-                <tr style="background:#e6f4ea"><td style="text-align:left;font-weight:600;color:var(--google-green)">🎯 TP 1 — ${tp1Label} Wall</td><td style="text-align:center;font-weight:700;color:var(--google-green)">${fv6(tp1Val)}</td><td style="text-align:center">Nearest EMA above price (+${tp1Pct}%) | 30% exit → Move SL to BE</td></tr>
-                <tr style="background:#e6f4ea"><td style="text-align:left;font-weight:600;color:var(--google-green)">🎯 TP 2 — PDH Run</td><td style="text-align:center;font-weight:700;color:var(--google-green)">${fv6(tp2Val)}</td><td style="text-align:center">Previous Day High (+${tp2Pct}%) | 40% exit</td></tr>
-                <tr style="background:#e6f4ea"><td style="text-align:left;font-weight:600;color:var(--google-green)">🎯 TP 3 — PWH Moonbag</td><td style="text-align:center;font-weight:700;color:var(--google-green)">${fv6(tp3Val)}</td><td style="text-align:center">Previous Week High (+${tp3Pct}%) | 30% exit</td></tr>
-                <tr><td style="text-align:left;font-weight:600">📐 Risk:Reward</td><td style="text-align:center;font-weight:700;color:${rrColor}" class="val-highlight">1 : ${rr}</td><td style="text-align:center">Min protocol: 1:2 ${parseFloat(rr) >= 2 ? '✅' : '⚠️'}</td></tr>
-                <tr><td style="text-align:left;font-weight:600">💰 Capital</td><td style="text-align:center" class="val-highlight">$${capital}</td><td style="text-align:center">${entryPrice > 0 ? (capital / entryPrice).toFixed(4) + ' units' : '—'}</td></tr>
-                <tr style="background:#fff3cd"><td style="text-align:left;font-weight:700;color:#856404" colspan="3">🪤 Layered Safety Net (Markdown Phase Only)</td></tr>
-                <tr><td style="text-align:left;padding-left:24px;color:var(--text-secondary)">Layer 1 — Fib 0.786 (20% / $${(capital*0.2).toFixed(0)})</td><td style="text-align:center;font-family:var(--font-mono)">${fv6(layer1)}</td><td style="text-align:center;font-size:12px">Discount OTE Zone</td></tr>
-                <tr><td style="text-align:left;padding-left:24px;color:var(--text-secondary)">Layer 2 — PDL (30% / $${(capital*0.3).toFixed(0)})</td><td style="text-align:center;font-family:var(--font-mono)">${fv6(layer2)}</td><td style="text-align:center;font-size:12px">Macro Support</td></tr>
-                <tr><td style="text-align:left;padding-left:24px;color:var(--text-secondary)">Layer 3 — PWL Wick (50% / $${(capital*0.5).toFixed(0)})</td><td style="text-align:center;font-family:var(--font-mono)">${fv6(layer3)}</td><td style="text-align:center;font-size:12px">Extreme Wick Zone</td></tr>
-            `;
+                : '✅ ALL CLEAR — NO DANGER DETECTED';
         }
 
-        function renderAlertCard(cardId, badgeId, descId, isTriggered, triggeredDesc, safeDesc) {
-            const card = document.getElementById(cardId);
-            const badge = document.getElementById(badgeId);
-            const desc = document.getElementById(descId);
-            if (!card || !badge || !desc) return;
-            if (isTriggered) {
-                badge.innerHTML = '<span class="badge badge-red">🔴 TRIGGERED</span>';
-                desc.textContent = triggeredDesc;
-                card.style.background = '#fce8e6';
-                card.style.borderColor = 'var(--google-red)';
-            } else {
-                badge.innerHTML = '<span class="badge badge-green">🟢 NOT TRIGGERED</span>';
-                desc.textContent = safeDesc;
-                card.style.background = '#e8f5e9';
-                card.style.borderColor = 'var(--google-green)';
-            }
-        }
 
         // ==========================================
         // 🔄 TAB SWITCHING
@@ -1652,10 +1628,16 @@
 
             const btn = document.getElementById('btnCsv');
             btn.classList.add('btn-loading');
-            btn.textContent = '⏳ Exporting CSV...';
+            btn.textContent = '⏳ Exporting...';
 
             const timeframe = '4h'; // Disesuaikan untuk data Swing (4 Jam)
-            const limit = 1000; // Ambil data history swing 5+ bulan untuk CSV lengkap
+            let limit = 1000;
+            const yearsSelect = document.getElementById('csvYears');
+            if (yearsSelect) {
+                const years = parseFloat(yearsSelect.value);
+                if (years === 0.5) limit = 1000;
+                else limit = Math.floor(years * 2190);
+            }
 
             // Redirect ke endpoint export
             const url = `/api/export-csv?tf=${timeframe}&limit=${limit}&pair=${currentBackendPair}`;
@@ -1665,8 +1647,8 @@
 
             setTimeout(() => {
                 btn.classList.remove('btn-loading');
-                btn.textContent = '📥 Download CSV';
-                showAlert('success', '✅ Request export CSV berhasil dikirim!');
+                btn.textContent = '📥 HARVEST CSV';
+                showAlert('success', `✅ Request export CSV (${limit} bars) berhasil dikirim!`);
             }, 2000);
         }
 
@@ -1690,6 +1672,22 @@
             if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(2) + 'M';
             if (Math.abs(v) >= 1000) return (v / 1000).toFixed(2) + 'K';
             return v.toFixed(2);
+        }
+
+        function getVolDeltaStyle(delta, buy, sell) {
+            const total = buy + sell;
+            if (!total || isNaN(delta)) return '';
+            const ratio = delta / total;
+            const absRatio = Math.min(Math.abs(ratio), 1.0);
+            if (delta >= 0) {
+                const s = 40 + (absRatio * 60);
+                const l = 50 - (absRatio * 20);
+                return `style="color: hsl(142, ${s}%, ${l}%); font-weight: ${absRatio > 0.4 ? '700' : '500'}"`;
+            } else {
+                const s = 50 + (absRatio * 50);
+                const l = 60 - (absRatio * 25);
+                return `style="color: hsl(4, ${s}%, ${l}%); font-weight: ${absRatio > 0.4 ? '700' : '500'}"`;
+            }
         }
 
         // ==========================================
@@ -1760,6 +1758,71 @@
             } catch (err) { showAlert('danger', `❌ ${err.message}`); }
         }
 
+        async function saveSell() {
+            const symbol = document.getElementById('sellSymbol').value;
+            const sellPrice = parseFloat(document.getElementById('sellPriceInput').value);
+            const qty = parseFloat(document.getElementById('sellQtyInput').value);
+            if (!symbol) { showAlert('danger', '⚠️ Pilih coin dulu'); return; }
+            if (isNaN(sellPrice) || sellPrice <= 0) { showAlert('danger', '⚠️ Sell price harus > 0'); return; }
+            if (isNaN(qty) || qty <= 0) { showAlert('danger', '⚠️ Quantity harus > 0'); return; }
+            try {
+                const resp = await fetch('/api/trade-sales', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, sell_price: sellPrice, qty: qty }),
+                });
+                const json = await resp.json();
+                if (json.success) {
+                    showAlert('success', `💰 Sale recorded: ${symbol} @ $${sellPrice} x ${qty}`);
+                    setTimeout(() => hideAlert(), 4000);
+                    await loadTradeEntries();
+                    renderEntryList();
+                    document.getElementById('sellPriceInput').value = '';
+                    document.getElementById('sellQtyInput').value = '';
+                    fetchData();
+                } else { showAlert('danger', `❌ ${json.error}`); }
+            } catch (err) { showAlert('danger', `❌ ${err.message}`); }
+        }
+
+        async function deleteSaleEntry(symbol, index) {
+            if (!confirm(`Hapus catatan jual #${index + 1} untuk ${symbol}?`)) return;
+            try {
+                const resp = await fetch('/api/trade-sales/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol, index }),
+                });
+                const json = await resp.json();
+                if (json.success) {
+                    showAlert('success', `🗑️ Sale entry deleted`);
+                    await loadTradeEntries(); renderEntryList();
+                    if (symbol === currentBackendPair) fetchData();
+                }
+            } catch (err) { showAlert('danger', `❌ ${err.message}`); }
+        }
+
+        function switchModalTab(tab) {
+            document.querySelectorAll('.modal .tab-btn').forEach(b => b.classList.remove('active'));
+            const tabBtn = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+            if (tabBtn) tabBtn.classList.add('active');
+            
+            document.getElementById('modalEntryForm').style.display = (tab === 'entry' ? 'grid' : 'none');
+            document.getElementById('modalSellForm').style.display = (tab === 'sell' ? 'grid' : 'none');
+            document.getElementById('modalHistory').style.display = (tab === 'history' ? 'block' : 'none');
+
+            if (tab === 'sell' && APP_DATA) {
+                const select = document.getElementById('sellSymbol');
+                const pairs = APP_DATA.state.user_input.available_pairs || [];
+                select.innerHTML = pairs.map(p =>
+                    `<option value="${p}" ${p === currentBackendPair ? 'selected' : ''}>${p}</option>`
+                ).join('');
+                
+                // Prefill remaining qty
+                const summary = tradeSummaries[currentBackendPair] || {};
+                document.getElementById('sellQtyInput').value = summary.remaining_qty || 0;
+            }
+        }
+
         async function deleteSingleEntry(symbol, index) {
             if (!confirm(`Hapus entry #${index + 1} untuk ${symbol}?`)) return;
             try {
@@ -1807,22 +1870,42 @@
             symbols.forEach(sym => {
                 const coinData = tradeEntries[sym];
                 const entries = coinData.entries || [];
+                const sales = coinData.sales || [];
                 const summary = tradeSummaries[sym] || {};
-                if (entries.length === 0) return;
+                if (entries.length === 0 && sales.length === 0) return;
+                
                 // Summary header
-                html += `<div style="background:var(--google-blue-light);padding:12px 16px;border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
-                    <div><strong>${sym}</strong> — ${entries.length} entries | Avg: <span style="color:var(--google-blue);font-weight:700;font-family:var(--font-mono)">$${(summary.avg_price||0).toFixed(6)}</span> | Qty: ${(summary.total_qty||0).toFixed(4)} | Cost: $${(summary.total_cost||0).toFixed(2)}</div>
-                    <button class="btn-delete-entry" onclick="deleteAllEntries('${sym}')" style="background:var(--google-red-light);color:var(--google-red)">✕ Delete All</button>
+                html += `<div style="background:var(--google-blue-light);padding:12px 16px;border-radius:8px;margin-bottom:4px">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div><strong>${sym}</strong> — Rem: <span style="font-weight:700">${(summary.remaining_qty||0).toFixed(4)}</span> | PnL: <span style="color:${(summary.realized_pnl||0)>=0?'var(--google-green)':'var(--google-red)'};font-weight:700">$${(summary.realized_pnl||0).toFixed(2)}</span></div>
+                        <button class="btn-delete-entry" onclick="deleteAllEntries('${sym}')" style="background:var(--google-red-light);color:var(--google-red)">✕ Clear Data</button>
+                    </div>
                 </div>`;
+                
+                // Show Buy Entries
                 entries.forEach((e, i) => {
-                    html += `<div class="entry-item" style="margin-left:16px">
+                    html += `<div class="entry-item" style="margin-left:16px; border-left:4px solid var(--google-green)">
                         <div class="entry-item-info">
-                            <div class="entry-item-symbol" style="font-size:13px">Entry #${i+1}</div>
+                            <div class="entry-item-symbol" style="font-size:12px; color:var(--google-green)">BUY #${i+1}</div>
                             <div class="entry-item-details">Qty: ${e.qty} • ${e.date || ''}</div>
                         </div>
                         <div style="display:flex;align-items:center;gap:12px">
                             <div class="entry-item-price">$${e.price}</div>
                             <button class="btn-delete-entry" onclick="deleteSingleEntry('${sym}',${i})">✕</button>
+                        </div>
+                    </div>`;
+                });
+
+                // Show Sales
+                sales.forEach((s, i) => {
+                    html += `<div class="entry-item" style="margin-left:16px; border-left:4px solid var(--google-red)">
+                        <div class="entry-item-info">
+                            <div class="entry-item-symbol" style="font-size:12px; color:var(--google-red)">SELL #${i+1}</div>
+                            <div class="entry-item-details">Qty: ${s.qty} • ${s.date || ''}</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <div class="entry-item-price" style="color:var(--google-red)">$${s.price}</div>
+                            <button class="btn-delete-entry" onclick="deleteSaleEntry('${sym}',${i})">✕</button>
                         </div>
                     </div>`;
                 });
@@ -1841,10 +1924,29 @@
         });
 
         // ==========================================
+        // 🌓 DARK MODE SUPPORT
+        // ==========================================
+        function toggleTheme() {
+            const html = document.documentElement;
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.removeAttribute('data-theme');
+                localStorage.setItem('theme', 'light');
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // ==========================================
         // 🚀 INIT
         // ==========================================
         document.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
             fetchData();
+            // setInterval(fetchData, 60000); // Auto-refresh dimatikan sesuai permintaan
         });
     </script>
 </body>

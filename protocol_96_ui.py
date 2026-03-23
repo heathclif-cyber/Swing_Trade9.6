@@ -60,17 +60,21 @@ def load_trade_entries() -> dict:  # type: ignore
                 data = json.load(f)
             # ── Migrate old format (single entry_price) to new multi-entry format ──
             for sym, val in data.items():
-                if isinstance(val, dict) and 'entry_price' in val and 'entries' not in val:
-                    old_price = float(val.get('entry_price', 0))
-                    old_cap = float(val.get('allocated_capital', ALLOCATED_CAPITAL))
-                    old_date = val.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                    if old_price > 0:
-                        data[sym] = {
-                            'entries': [{'price': old_price, 'qty': old_cap / old_price if old_price else 0, 'date': old_date}],
-                            'allocated_capital': old_cap,
-                        }
-                    else:
-                        data[sym] = {'entries': [], 'allocated_capital': old_cap}
+                if isinstance(val, dict):
+                    # Ensure sales list exists
+                    if 'sales' not in val:
+                        val['sales'] = []
+                    # Migrate old format
+                    if 'entry_price' in val and 'entries' not in val:
+                        old_price = float(val.get('entry_price', 0))
+                        old_cap = float(val.get('allocated_capital', ALLOCATED_CAPITAL))
+                        old_date = val.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                        if old_price > 0:
+                            val['entries'] = [{'price': old_price, 'qty': old_cap / old_price if old_price else 0, 'date': old_date}]
+                            val['allocated_capital'] = old_cap
+                        else:
+                            val['entries'] = []
+                            val['allocated_capital'] = old_cap
             return data
         except Exception as e:
             logger.warning(f"Failed to load trade entries: {e}")
@@ -88,24 +92,57 @@ def save_trade_entries(entries: dict) -> None:  # type: ignore
 
 
 def get_entry_summary(symbol: str) -> dict:  # type: ignore
-    """Return entry summary: list of entries, average price, total qty, total cost."""
-    entries = load_trade_entries()
-    coin_data = entries.get(symbol, {})
+    """Return entry & sales summary: lists, avg entry, total remaining qty, cost, and realized pnl."""
+    data = load_trade_entries()
+    coin_data = data.get(symbol, {})
     entry_list = coin_data.get('entries', [])
+    sales_list = coin_data.get('sales', [])
 
-    if not entry_list:
-        return {'entries': [], 'avg_price': 0.0, 'total_qty': 0.0, 'total_cost': 0.0, 'num_entries': 0}
+    total_entry_cost = sum(e['price'] * e['qty'] for e in entry_list)
+    total_entry_qty = sum(e['qty'] for e in entry_list)
+    avg_entry_price = total_entry_cost / total_entry_qty if total_entry_qty > 0 else 0.0
 
-    total_cost = sum(e['price'] * e['qty'] for e in entry_list)
-    total_qty = sum(e['qty'] for e in entry_list)
-    avg_price = total_cost / total_qty if total_qty > 0 else 0.0
+    total_sold_qty = sum(s['qty'] for s in sales_list)
+    total_sold_revenue = sum(s['price'] * s['qty'] for s in sales_list)
+    
+    # Realized PnL based on chronological rolling average cost
+    events = []
+    for e in entry_list:
+        events.append(('buy', e.get('date', ''), e.get('price', 0), e.get('qty', 0)))
+    for s in sales_list:
+        events.append(('sell', s.get('date', ''), s.get('price', 0), s.get('qty', 0)))
+    events.sort(key=lambda x: x[1])
+
+    current_qty = 0.0
+    current_cost = 0.0
+    realized_pnl = 0.0
+    for type_, date_, price, qty in events:
+        if type_ == 'buy':
+            current_cost += price * qty
+            current_qty += qty
+        elif type_ == 'sell':
+            rolling_avg = current_cost / current_qty if current_qty > 0 else 0.0
+            realized_pnl += (price - rolling_avg) * qty
+            current_cost -= rolling_avg * qty
+            current_qty -= qty
+            current_qty = max(0.0, current_qty)
+            current_cost = max(0.0, current_cost)
+
+    remaining_qty = max(0.0, total_entry_qty - total_sold_qty)
+    # If sold everything, mark as closed? For now just show qty 0.
 
     return {
         'entries': entry_list,
-        'avg_price': round(avg_price, 8),
-        'total_qty': round(total_qty, 6),
-        'total_cost': round(total_cost, 4),
+        'sales': sales_list,
+        'avg_price': round(avg_entry_price, 8),
+        'total_qty': round(total_entry_qty, 6),
+        'remaining_qty': round(remaining_qty, 6),
+        'total_cost': round(total_entry_cost, 4),
         'num_entries': len(entry_list),
+        'num_sales': len(sales_list),
+        'total_sold_qty': round(total_sold_qty, 6),
+        'total_sold_revenue': round(total_sold_revenue, 4),
+        'realized_pnl': round(realized_pnl, 4)
     }
 
 
@@ -165,8 +202,22 @@ def get_klines_df(symbol: str, interval: str, limit: int = 100) -> pd.DataFrame:
         logger.error("Binance client not initialized. Cannot fetch data.")
         return pd.DataFrame()
     try:
-        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
-        df = pd.DataFrame(klines, columns=[
+        total_klines = []
+        end_time = None
+        while len(total_klines) < limit:
+            req_limit = min(1000, limit - len(total_klines))
+            params = {'symbol': symbol, 'interval': interval, 'limit': req_limit}
+            if end_time:
+                params['endTime'] = end_time
+            chunk = binance_client.get_klines(**params)
+            if not chunk:
+                break
+            total_klines = chunk + total_klines
+            if len(chunk) < req_limit:
+                break
+            end_time = chunk[0][0] - 1
+        
+        df = pd.DataFrame(total_klines, columns=[
             'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
             'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
         ])
@@ -189,10 +240,24 @@ def get_klines_fapi(symbol: str, interval: str, limit: int = 1000) -> pd.DataFra
     """Fetch from Binance Futures for indices like BTCDOMUSDT and DEFIUSDT."""
     try:
         url = "https://fapi.binance.com/fapi/v1/klines"
-        params = {"symbol": symbol, "interval": interval, "limit": limit}
-        resp = http_requests.get(url, params=params, timeout=10, verify=False)
-        if resp.status_code == 200:
-            df = pd.DataFrame(resp.json(), columns=[
+        total_klines = []
+        end_time = None
+        while len(total_klines) < limit:
+            req_limit = min(1500, limit - len(total_klines))
+            params = {"symbol": symbol, "interval": interval, "limit": req_limit}
+            if end_time:
+                params['endTime'] = end_time
+            resp = http_requests.get(url, params=params, timeout=10, verify=False)
+            if resp.status_code == 200:
+                chunk = resp.json()
+                if not chunk: break
+                total_klines = chunk + total_klines
+                if len(chunk) < req_limit: break
+                end_time = chunk[0][0] - 1
+            else:
+                break
+        if total_klines:
+            df = pd.DataFrame(total_klines, columns=[
                 'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
                 'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
             ])
@@ -239,10 +304,23 @@ def fetch_oi_data(symbol: str = COIN_PAIR, limit: int = 4) -> list:
     """Fetch Open Interest history from Binance Futures."""
     try:
         url = "https://fapi.binance.com/futures/data/openInterestHist"
-        params = {"symbol": symbol, "period": "15m", "limit": limit}
-        resp = http_requests.get(url, params=params, timeout=10, verify=False)
-        if resp.status_code == 200:
-            return resp.json()
+        total_data = []
+        end_time = None
+        while len(total_data) < limit:
+            req_limit = min(500, limit - len(total_data))
+            params = {"symbol": symbol, "period": "15m", "limit": req_limit}
+            if end_time:
+                params['endTime'] = end_time
+            resp = http_requests.get(url, params=params, timeout=10, verify=False)
+            if resp.status_code == 200:
+                chunk = resp.json()
+                if not chunk: break
+                total_data = chunk + total_data
+                if len(chunk) < req_limit: break
+                end_time = chunk[0]['timestamp'] - 1
+            else:
+                break
+        return total_data
     except Exception as e:
         logger.warning(f"OI fetch error: {e}")
     return []
@@ -252,10 +330,23 @@ def fetch_funding_rate(symbol: str = COIN_PAIR, limit: int = 100) -> list:
     """Fetch Funding Rate history from Binance Futures USDⓈ-M."""
     try:
         url = "https://fapi.binance.com/fapi/v1/fundingRate"
-        params = {"symbol": symbol, "limit": limit}
-        resp = http_requests.get(url, params=params, timeout=10, verify=False)
-        if resp.status_code == 200:
-            return resp.json()
+        total_data = []
+        end_time = None
+        while len(total_data) < limit:
+            req_limit = min(1000, limit - len(total_data))
+            params = {"symbol": symbol, "limit": req_limit}
+            if end_time:
+                params['endTime'] = end_time
+            resp = http_requests.get(url, params=params, timeout=10, verify=False)
+            if resp.status_code == 200:
+                chunk = resp.json()
+                if not chunk: break
+                total_data = chunk + total_data
+                if len(chunk) < req_limit: break
+                end_time = chunk[0]['fundingTime'] - 1
+            else:
+                break
+        return total_data
     except Exception as e:
         logger.warning(f"Funding Rate fetch error: {e}")
     return []
@@ -265,10 +356,23 @@ def fetch_liquidation_data(symbol: str = COIN_PAIR, limit: int = 100) -> list:
     """Fetch recent Force Order (Liquidation) events from Binance Futures."""
     try:
         url = "https://fapi.binance.com/fapi/v1/allForceOrders"
-        params = {"symbol": symbol, "limit": limit}
-        resp = http_requests.get(url, params=params, timeout=10, verify=False)
-        if resp.status_code == 200:
-            return resp.json()
+        total_data = []
+        end_time = None
+        while len(total_data) < limit:
+            req_limit = min(100, limit - len(total_data))
+            params = {"symbol": symbol, "limit": req_limit}
+            if end_time:
+                params['endTime'] = end_time
+            resp = http_requests.get(url, params=params, timeout=10, verify=False)
+            if resp.status_code == 200:
+                chunk = resp.json()
+                if not chunk: break
+                total_data = chunk + total_data
+                if len(chunk) < req_limit: break
+                end_time = chunk[0]['time'] - 1
+            else:
+                break
+        return total_data
     except Exception as e:
         logger.warning(f"Liquidation data fetch error: {e}")
     return []
@@ -447,39 +551,126 @@ def api_data():
             ema21_h4 = float(last4h.get('EMA_21', price_h4))
             market_phase = "MARKUP" if price_h4 > ema21_h4 else "MARKDOWN"
 
-            # TP1: nearest EMA wall strictly above current price (first structural resistance)
-            emas_above = [(name, val) for name, val in ema_levels if val > price_h4]
-            if emas_above:
-                tp1_name, tp1_val = min(emas_above, key=lambda x: x[1])
+            # ── TP Candidate Pool: all meaningful levels ABOVE current price ──
+            tp_candidates: list[tuple[str, float]] = []
+            for name, val in ema_levels:
+                if val > price_h4:
+                    tp_candidates.append((name, val))
+            pdh = liquidity.get('PDH', 0.0)
+            pwh = liquidity.get('PWH', 0.0)
+            if pdh > price_h4:
+                tp_candidates.append(('PDH', pdh))
+            if pwh > price_h4:
+                tp_candidates.append(('PWH', pwh))
+            # Sort ascending, deduplicate by label
+            tp_candidates.sort(key=lambda x: x[1])
+            seen_lbls: dict[str, float] = {}
+            deduped_candidates: list[tuple[str, float]] = []
+            for lbl, v in tp_candidates:
+                if lbl not in seen_lbls:
+                    seen_lbls[lbl] = v
+                    deduped_candidates.append((lbl, v))
+            tp_candidates = deduped_candidates
+
+            # ── FIX 1: TP Validation Against Entry Price ──
+            # We need the avg_entry_price here. Fetch it early from trade_entries.
+            avg_entry_for_tp = get_entry_price(coin_pair)  # 0.0 if not set
+
+            # Re-classify candidates: only count as "TP" if they are ABOVE avg_entry_price
+            # If below entry → classify as "Relief Exit / Cut Minor"
+            classified_tps = []
+            relief_exits = []
+            for lbl, v in tp_candidates:
+                if avg_entry_for_tp > 0 and v <= avg_entry_for_tp:
+                    relief_exits.append((lbl, v, "RELIEF_EXIT"))
+                else:
+                    classified_tps.append((lbl, v, "TP"))
+
+            # Assign TP1/2/3 only from validated TP levels (above entry)
+            # If insufficient valid TPs, fallback to escalated projections
+            def _tp_fallback(n: int, base: float) -> tuple[str, float]:
+                multiples = [1.06, 1.10, 1.15]
+                return (f'Proj+{int(multiples[n]*100-100)}%', base * multiples[n])
+
+            if len(classified_tps) >= 1:
+                tp1_name, tp1_val, _ = classified_tps[0]
             else:
-                tp1_name, tp1_val = ('PDH', liquidity.get('PDH', price_h4 * 1.06))
+                tp1_name, tp1_val = _tp_fallback(0, max(avg_entry_for_tp, price_h4))
+            if len(classified_tps) >= 2:
+                tp2_name, tp2_val, _ = classified_tps[1]
+            else:
+                tp2_name, tp2_val = _tp_fallback(1, max(avg_entry_for_tp, price_h4))
+            if len(classified_tps) >= 3:
+                tp3_name, tp3_val, _ = classified_tps[2]
+            else:
+                tp3_name, tp3_val = _tp_fallback(2, max(avg_entry_for_tp, price_h4))
 
-            # TP2 = PDH (Previous Day High) — institutional daily run
-            tp2_val = liquidity.get('PDH', 0.0)
-
-            # TP3 = PWH (Previous Week High) — apex moonbag
-            tp3_val = liquidity.get('PWH', 0.0)
-
-            # Fibonacci safety net layers (Markdown phase entry zones)
-            # Fib retracement from swing_high to swing_low
+            # ── FIX 2: Safety Net Layer Validation (must be BELOW current price) ──
+            # A buy-limit order above current price executes as market immediately → INVALID
+            current_price_for_layers = float(df_1h.iloc[-1]['Close']) if not df_1h.empty else price_h4
             fib_range = swing_high_h4 - swing_low_h4
-            fib_786  = swing_high_h4 - (fib_range * 0.786)  # Layer 1 – 20%
-            pdl_val  = liquidity.get('PDL', swing_low_h4)   # Layer 2 – 30%
-            pwl_val  = liquidity.get('PWL', swing_low_h4 * 0.97)  # Layer 3 – 50%
+            fib_786  = swing_high_h4 - (fib_range * 0.786)
+            pdl_val  = liquidity.get('PDL', swing_low_h4)
+            pwl_val  = liquidity.get('PWL', swing_low_h4 * 0.97)
+
+            def _validate_layer(val: float, current: float) -> tuple[float, bool]:
+                """Returns (val, is_valid). Invalid if >= current price."""
+                return (val, val < current)
+
+            layer1_val, layer1_valid = _validate_layer(fib_786, current_price_for_layers)
+            layer2_val, layer2_valid = _validate_layer(pdl_val, current_price_for_layers)
+            layer3_val, layer3_valid = _validate_layer(pwl_val, current_price_for_layers)
+
+            # ── FIX 3: Kill Switch Emergency Override Flag ──
+            # Detect kill switch condition here so battle_plan can react
+            kill_switch_now = False
+            abort_note = ""
+            relief_label = ""
+            if not df_4h.empty and len(df_4h) >= 2:
+                last_closed_h4 = df_4h.iloc[-2]
+                ema21_ks = last_closed_h4.get('EMA_21')
+                if pd.notna(ema21_ks) and float(last_closed_h4['Close']) < float(ema21_ks):
+                    kill_switch_now = True
+                    # Find nearest EMA above price for abort target
+                    relief_candidates = [(n, v) for n, v in ema_levels if v > current_price_for_layers]
+                    relief_candidates.sort(key=lambda x: x[1])
+                    if relief_candidates:
+                        relief_name, relief_price = relief_candidates[0]
+                        relief_label = f"{relief_name} (${relief_price:.4f})"
+                    abort_note = (
+                        f"🚨 ABORT PROCEDURE AKTIF. Posisi dalam Death Spiral. "
+                        f"JANGAN menunggu TP. Eksekusi Surgical Cut saat relief bounce pertama "
+                        f"ke {relief_label or 'resistance terdekat'}. "
+                        f"Proteksi modal adalah prioritas utama."
+                    )
+
+            # Relief exits info for frontend labeling
+            relief_exit_levels = [{"label": f"{lbl} (Relief)", "val": round(v, 8)} for lbl, v, _ in relief_exits]
 
             battle_plan = {
-                "market_phase": market_phase,      # MARKUP | MARKDOWN
+                "market_phase": market_phase,
                 "atr_h4": round(atr_h4, 8),
                 "swing_low": round(swing_low_h4, 8),
                 "swing_high": round(swing_high_h4, 8),
-                "structural_sl": round(structural_sl, 8),  # SL = Swing Low - 2×ATR
-                "tp1_val": round(tp1_val, 8),              # Nearest EMA above / PDH
+                "structural_sl": round(structural_sl, 8),
+                # TP (validated above entry)
+                "tp1_val": round(tp1_val, 8),
                 "tp1_label": tp1_name,
-                "tp2_val": round(tp2_val, 8),              # PDH
-                "tp3_val": round(tp3_val, 8),              # PWH
-                "layer1_val": round(fib_786, 8),           # 20% – Fib 0.786
-                "layer2_val": round(pdl_val, 8),           # 30% – PDL
-                "layer3_val": round(pwl_val, 8),           # 50% – PWL
+                "tp2_val": round(tp2_val, 8),
+                "tp2_label": tp2_name,
+                "tp3_val": round(tp3_val, 8),
+                "tp3_label": tp3_name,
+                "relief_exits": relief_exit_levels,   # EMAs below entry (Cut Loss targets)
+                # Layers (validated below current price)
+                "layer1_val": round(layer1_val, 8),
+                "layer1_valid": layer1_valid,
+                "layer2_val": round(layer2_val, 8),
+                "layer2_valid": layer2_valid,
+                "layer3_val": round(layer3_val, 8),
+                "layer3_valid": layer3_valid,
+                # Kill Switch Emergency Override
+                "kill_switch_active": kill_switch_now,
+                "abort_note": abort_note,
             }
 
         computed["battle_plan"] = battle_plan  # type: ignore[assignment]
@@ -628,30 +819,83 @@ def set_trade_entry():
 
 @app.route("/api/trade-entries/delete", methods=["POST"])
 def delete_trade_entry():
-    """Hapus SEMUA entry untuk satu koin, atau hapus entry spesifik by index."""
+    """Hapus entry spesifik by index atau hapus koin."""
     try:
         data = flask_request.get_json()  # type: ignore
         symbol = data.get("symbol", "").upper() if data else ""
         if not symbol:
             return jsonify({"success": False, "error": "No symbol provided"}), 400
 
-        index = data.get("index", None)  # Optional: hapus entry spesifik
-
+        index = data.get("index", None)
         entries = load_trade_entries()
         if symbol in entries:
-            if index is not None and isinstance(entries[symbol].get('entries'), list):
+            if index is not None:
                 idx = int(index)
                 if 0 <= idx < len(entries[symbol]['entries']):
-                    removed = entries[symbol]['entries'].pop(idx)
-                    logger.info(f"🗑️ Entry #{idx} deleted for {symbol}: ${removed['price']}")
+                    entries[symbol]['entries'].pop(idx)
+                    save_trade_entries(entries)
                 else:
-                    return jsonify({"success": False, "error": f"Index {idx} out of range"}), 400
+                    return jsonify({"success": False, "error": "Index out of range"}), 400
             else:
-                del entries[symbol]  # type: ignore[attr-defined]
-                logger.info(f"🗑️ All entries deleted: {symbol}")
-            save_trade_entries(entries)
+                del entries[symbol]
+                save_trade_entries(entries)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
-        return jsonify({"success": True, "message": f"{symbol} entry deleted"})
+
+@app.route("/api/trade-sales", methods=["POST"])
+def set_trade_sale():
+    """Catat penjualan aset."""
+    try:
+        data = flask_request.get_json()  # type: ignore
+        symbol = data.get("symbol", "").upper()
+        if not symbol or symbol not in AVAILABLE_PAIRS:
+            return jsonify({"success": False, "error": "Invalid symbol"}), 400
+
+        sell_price = float(data.get("sell_price", 0))
+        qty = float(data.get("qty", 0))
+        if sell_price <= 0 or qty <= 0:
+            return jsonify({"success": False, "error": "Price and Qty must be > 0"}), 400
+
+        entries = load_trade_entries()
+        if symbol not in entries:
+            entries[symbol] = {'entries': [], 'sales': [], 'allocated_capital': ALLOCATED_CAPITAL}
+        if 'sales' not in entries[symbol]:
+            entries[symbol]['sales'] = []
+
+        new_sale = {
+            'price': sell_price,
+            'qty': round(qty, 6),
+            'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        entries[symbol]['sales'].append(new_sale)
+        save_trade_entries(entries)
+
+        summary = get_entry_summary(symbol)
+        return jsonify({"success": True, "summary": summary})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/trade-sales/delete", methods=["POST"])
+def delete_trade_sale():
+    """Hapus catatan penjualan spesifik."""
+    try:
+        data = flask_request.get_json()  # type: ignore
+        symbol = data.get("symbol", "").upper()
+        index = data.get("index")
+        if not symbol or index is None:
+            return jsonify({"success": False, "error": "Missing params"}), 400
+
+        entries = load_trade_entries()
+        if symbol in entries and 'sales' in entries[symbol]:
+            idx = int(index)
+            if 0 <= idx < len(entries[symbol]['sales']):
+                entries[symbol]['sales'].pop(idx)
+                save_trade_entries(entries)
+                return jsonify({"success": True})
+        return jsonify({"success": False, "error": "Not found"}), 404
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -815,7 +1059,12 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "4h", limit
         df_btcd = get_klines_fapi("BTCDOMUSDT", interval, limit=limit)
         if not df_btcd.empty:
             df_btcd_slim = df_btcd[['Open_Time', 'Close']].rename(columns={'Close': 'BTC_Dominance'})
-            df = pd.merge(df, df_btcd_slim, on='Open_Time', how='left')
+            df = pd.merge_asof(
+                df.sort_values('Open_Time'),
+                df_btcd_slim.sort_values('Open_Time'),
+                on='Open_Time',
+                direction='backward'
+            )
         else:
             df['BTC_Dominance'] = None
 
@@ -823,9 +1072,61 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "4h", limit
         if df_defi.empty: df_defi = get_klines_fapi("DEFIUSDT", interval, limit=limit)
         if not df_defi.empty:
             df_defi_slim = df_defi[['Open_Time', 'Close']].rename(columns={'Close': 'Altcoin_Index'})
-            df = pd.merge(df, df_defi_slim, on='Open_Time', how='left')
+            df = pd.merge_asof(
+                df.sort_values('Open_Time'),
+                df_defi_slim.sort_values('Open_Time'),
+                on='Open_Time',
+                direction='backward'
+            )
         else:
             df['Altcoin_Index'] = None
+            
+        # ── [APEX] LATEST MACRO FIX WITH CMC API ──
+        # Binance FAPI indices drop the latest candles due to computation lag. We fill these gaps using precise live CMC API.
+        try:
+            CMC_API_KEY = "aa8eb4dd82974c308c5428e7c1be0121"
+            cmc_url = "https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest"
+            cmc_headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY, "Accept": "application/json"}
+            r = http_requests.get(cmc_url, headers=cmc_headers, timeout=10)
+            if r.status_code == 200:
+                d = r.json()["data"]
+                btc_dom_raw = round(d["btc_dominance"] * 100, 1)
+                total_mcap = d["quote"]["USD"]["total_market_cap"]
+                btc_dom_frac = d["btc_dominance"] / 100
+                altcoin_index = round(total_mcap * (1 - btc_dom_frac) / 1_000_000_000, 1)
+                
+                mask_btc = df['BTC_Dominance'].isna() | (df['BTC_Dominance'] == 0)
+                mask_alt = df['Altcoin_Index'].isna() | (df['Altcoin_Index'] == 0)
+                df.loc[mask_btc, 'BTC_Dominance'] = btc_dom_raw
+                df.loc[mask_alt, 'Altcoin_Index'] = altcoin_index
+                logger.info(f"  [Export] Filled missing macro with CMC: BTC_Dom={btc_dom_raw}, AltIndex={altcoin_index}")
+        except Exception as e:
+            logger.warning(f"CMC API fetch error in export: {e}")
+            
+        # ── [APEX] LIVE LIQUIDITY WALL FIX (Orderbook) ──
+        # Fetch current Bid/Ask walls from Binance Futures to fill missing Buy_Liq and Sell_Liq
+        try:
+            liq_url = "https://fapi.binance.com/fapi/v1/depth"
+            liq_params = {"symbol": symbol.upper(), "limit": 500}
+            r_liq = http_requests.get(liq_url, params=liq_params, timeout=10)
+            if r_liq.status_code == 200:
+                book = r_liq.json()
+                close_last = float(df['Close'].iloc[-1])
+                bids = [(float(p), float(q)) for p, q in book.get("bids", []) if float(p) < close_last]
+                asks = [(float(p), float(q)) for p, q in book.get("asks", []) if float(p) > close_last]
+                if bids and asks:
+                    buy_wall = max(bids, key=lambda x: x[1])[0]
+                    sell_wall = max(asks, key=lambda x: x[1])[0]
+                    
+                    mask_buy = df['Buy_Liq'].isna() | (df['Buy_Liq'] == 0)
+                    mask_sell = df['Sell_Liq'].isna() | (df['Sell_Liq'] == 0)
+                    
+                    df.loc[mask_buy, 'Buy_Liq'] = round(buy_wall, 6)
+                    df.loc[mask_sell, 'Sell_Liq'] = round(sell_wall, 6)
+                    logger.info(f"  [Export] Filled missing Liquidity with Orderbook: Buy_Wall={buy_wall}, Sell_Wall={sell_wall}")
+        except Exception as e:
+            logger.warning(f"Orderbook API fetch error in export: {e}")
+            
     except Exception as e:
         logger.warning(f"Macro context merge error: {e}")
         df['BTC_Dominance'] = None
@@ -876,6 +1177,11 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "4h", limit
     for col in apex_cols:
         if col in df.columns:
             df[col] = df[col].ffill().fillna(0.0)
+            
+    # Fallback ffill untuk BTC_Dominance dan Altcoin_Index barangkali request CMC gagal
+    for col in ['BTC_Dominance', 'Altcoin_Index']:
+        if col in df.columns:
+            df[col] = df[col].ffill()
 
     df_export = df[col_order].copy()
 

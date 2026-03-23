@@ -2,23 +2,24 @@ import time
 import logging
 import requests  # type: ignore
 import schedule  # type: ignore
+import json
+import os
 import pandas as pd  # type: ignore
 import pandas_ta as ta  # type: ignore
+from datetime import datetime
 from binance.client import Client  # type: ignore
 from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
 
-# ==========================================
-# ⚙️ USER CONFIGURATION (State Variables)
-# ==========================================
-COIN_PAIR = "SUIUSDT"
-ENTRY_PRICE = 1.055
-ALLOCATED_CAPITAL = 200
+# Pengaturan Sesi & Lokasi Data
+TRADE_ENTRIES_FILE = "trade_entries.json"
+# Default pair if JSON is empty (for bootstrapping)
+DEFAULT_PAIR = "SUIUSDT"
 
 # Pengaturan Telegram
 TELEGRAM_BOT_TOKEN = "8728046864:AAEaLD5c1yJRuTjoNKRLbyzkBII2AJKV9hE"
 TELEGRAM_CHAT_ID = "982913105"
 
-# Binance API Keys (Opsional untuk data market publik, wajib untuk fungsi private)
+# Binance API Keys
 BINANCE_API_KEY = ""
 BINANCE_API_SECRET = ""
 
@@ -26,14 +27,32 @@ BINANCE_API_SECRET = ""
 # 📊 BOT INTERNAL STATE
 # ==========================================
 class BotState:
-    INITIALIZED = False
-    ACTIVE_SL = 0.0
-    ALERTS_SENT = {
-        "TP_1": False,
-        "SL_BE": False,
-        "VOL_FAKEOUT": False,
-        "KILL_SWITCH": False
-    }
+    INITIALIZED = {}  # {symbol: bool}
+    ACTIVE_SL = {}   # {symbol: float}
+    ALERTS_SENT = {} # {symbol: {alert_name: bool}}
+    BATTLE_PLAN = {} # {symbol: {...}}
+    
+    @classmethod
+    def get_state(cls, symbol):
+        if symbol not in cls.INITIALIZED:
+            cls.INITIALIZED[symbol] = False
+            cls.ACTIVE_SL[symbol] = 0.0
+            cls.ALERTS_SENT[symbol] = {
+                "TP_1": False, "TP_2": False, "TP_3": False,
+                "PROXIMITY_TP1": False, "PROXIMITY_TP2": False, "PROXIMITY_TP3": False,
+                "LAYER_1": False, "LAYER_2": False, "LAYER_3": False,
+                "PROXIMITY_LAYER1": False, "PROXIMITY_LAYER2": False, "PROXIMITY_LAYER3": False,
+                "PROXIMITY_SL": False,
+                "SL_BE": False,
+                "VOL_FAKEOUT": False,
+                "KILL_SWITCH": False
+            }
+            cls.BATTLE_PLAN[symbol] = {}
+        return {
+            "init": cls.INITIALIZED[symbol],
+            "sl": cls.ACTIVE_SL[symbol],
+            "alerts": cls.ALERTS_SENT[symbol]
+        }
 
 # Setup Logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -41,6 +60,38 @@ logger = logging.getLogger("Protocol_9.6")
 
 # Inisialisasi Binance Client
 client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
+
+# ==========================================
+# 📂 DATA PERSISTENCE HELPERS
+# ==========================================
+def load_trade_entries() -> dict:
+    if os.path.exists(TRADE_ENTRIES_FILE):
+        try:
+            with open(TRADE_ENTRIES_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load trade entries: {e}")
+    return {}
+
+def get_entry_summary(symbol: str) -> dict:
+    entries = load_trade_entries()
+    coin_data = entries.get(symbol, {})
+    entry_list = coin_data.get('entries', [])
+    if not entry_list:
+        # Support legacy single entry format
+        legacy_price = coin_data.get('entry_price', 0.0)
+        return {
+            'avg_price': legacy_price, 
+            'num_entries': 1 if legacy_price > 0 else 0,
+            'allocated_capital': coin_data.get('allocated_capital', 200)
+        }
+    total_cost = sum(e['price'] * e['qty'] for e in entry_list)
+    total_qty = sum(e['qty'] for e in entry_list)
+    return {
+        'avg_price': total_cost / total_qty if total_qty > 0 else 0.0,
+        'num_entries': len(entry_list),
+        'allocated_capital': coin_data.get('allocated_capital', 200)
+    }
 
 # ==========================================
 # 🛠️ HELPER FUNCTIONS
@@ -56,7 +107,7 @@ def send_telegram_alert(message: str):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
-        "parse_mode": "Markdown"
+        "parse_mode": "HTML"
     }
     
     try:
@@ -108,34 +159,38 @@ def get_klines_df(symbol: str, interval: str, limit: int = 250) -> pd.DataFrame:
         return pd.DataFrame()
 
 def apply_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Menambahkan indikator EMA dan RSI menggunakan pandas_ta."""
+    """Menambahkan indikator EMA, RSI, dan ATR menggunakan pandas_ta."""
     if df.empty: return df
     
-    # Exponential Moving Averages
+    # Structural Indicators
     df['EMA_7'] = ta.ema(df['Close'], length=7)
     df['EMA_21'] = ta.ema(df['Close'], length=21)
     df['EMA_50'] = ta.ema(df['Close'], length=50)
     df['EMA_200'] = ta.ema(df['Close'], length=200)
-    
-    # Momentum RSI
     df['RSI_6'] = ta.rsi(df['Close'], length=6)
+    
+    # ATR for Structural SL
+    df['ATR_14'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+    
     return df
 
-def check_intermarket_macro() -> dict:
+def check_intermarket_macro(symbol: str) -> dict:
     """Akses batas makro D1/W1, Open Interest (OI) Delta, dan SMT Divergence."""
-    res = {"PDH": 0.0, "PDL": 0.0, "PWH": 0.0, "Delta_OI": 0.0, "Bearish_SMT": False, "BTC_Dom_Change": 0.0}
+    res = {"PDH": 0.0, "PDL": 0.0, "PWH": 0.0, "PWL": 0.0, "Delta_OI": 0.0, "Bearish_SMT": False, "BTC_Dom_Change": 0.0}
     
     try:
         # Macro Liquidity Borders (D1 / W1)
-        df_1d = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_1DAY, limit=2)
-        df_1w = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_1WEEK, limit=2)
+        df_1d = get_klines_df(symbol, Client.KLINE_INTERVAL_1DAY, limit=2)
+        df_1w = get_klines_df(symbol, Client.KLINE_INTERVAL_1WEEK, limit=2)
         
-        if len(df_1d) >= 2: res["PDH"], res["PDL"] = df_1d.iloc[-2]['High'], df_1d.iloc[-2]['Low']
-        if len(df_1w) >= 2: res["PWH"] = df_1w.iloc[-2]['High']
+        if len(df_1d) >= 2: 
+            res["PDH"], res["PDL"] = df_1d.iloc[-2]['High'], df_1d.iloc[-2]['Low']
+        if len(df_1w) >= 2: 
+            res["PWH"], res["PWL"] = df_1w.iloc[-2]['High'], df_1w.iloc[-2]['Low']
             
         # Delta Open Interest (M15 Futures API) - 4 last candles
         url = "https://fapi.binance.com/futures/data/openInterestHist"
-        params = {"symbol": COIN_PAIR, "period": "15m", "limit": 4}
+        params = {"symbol": symbol, "period": "15m", "limit": 4}
         oi_resp = requests.get(url, params=params, timeout=10)
         if oi_resp.status_code == 200:
             data = oi_resp.json()
@@ -146,7 +201,7 @@ def check_intermarket_macro() -> dict:
 
         # SMT Divergence (Korelasi BTC) H4
         df_btc = get_klines_df("BTCUSDT", Client.KLINE_INTERVAL_4HOUR, limit=4)
-        df_tgt = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_4HOUR, limit=4)
+        df_tgt = get_klines_df(symbol, Client.KLINE_INTERVAL_4HOUR, limit=4)
         
         if not df_btc.empty and not df_tgt.empty:
             btc_highs = df_btc['High'].iloc[-4:-1].values
@@ -170,13 +225,13 @@ def check_intermarket_macro() -> dict:
 # ==========================================
 # 🧠 CORE EVALUATION LOGIC
 # ==========================================
-def evaluate_market_conditions():
+def evaluate_market_conditions(symbol: str):
     """Fungsi utama yang memanggil siklus evaluasi setiap candle target."""
     try:
         # 1. Tarik Struktur Data Frame (Swing Macro Adjustments: H1, H4, D1)
-        df_1h = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_1HOUR, limit=250)
-        df_4h = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_4HOUR, limit=500)
-        df_1d = get_klines_df(COIN_PAIR, Client.KLINE_INTERVAL_1DAY, limit=100)
+        df_1h = get_klines_df(symbol, Client.KLINE_INTERVAL_1HOUR, limit=250)
+        df_4h = get_klines_df(symbol, Client.KLINE_INTERVAL_4HOUR, limit=500)
+        df_1d = get_klines_df(symbol, Client.KLINE_INTERVAL_1DAY, limit=100)
         
         if df_1h.empty or df_4h.empty or df_1d.empty:
             return
@@ -188,20 +243,107 @@ def evaluate_market_conditions():
         current_price = df_1h.iloc[-1]['Close']
         current_ema21_4h = df_4h.iloc[-1]['EMA_21']
         
+        summary = get_entry_summary(symbol)
+        avg_entry = summary['avg_price']
+        
+        # Get/Init persistence for this symbol
+        BotState.get_state(symbol) 
+        
         # 3. Inisialisasi Bootstrapping Protocol
-        if not BotState.INITIALIZED:
-            BotState.ACTIVE_SL = current_ema21_4h * 0.99
-            BotState.INITIALIZED = True
+        if not BotState.INITIALIZED[symbol]:
+            BotState.ACTIVE_SL[symbol] = current_ema21_4h * 0.99
+            BotState.INITIALIZED[symbol] = True
             
-            logger.info("=== 🏗️ PROTOCOL 9.6: STRUCTURAL GUARDIAN INITIALIZED ===")
-            logger.info(f"Target Coin: {COIN_PAIR} | Entry Price: ${ENTRY_PRICE}")
-            logger.info(f"Initial Active SL: ${BotState.ACTIVE_SL:.4f} (EMA 21 H4 - 1%)")
+            logger.info(f"=== 🏗️ PROTOCOL 9.6: [{symbol}] GUARDIAN INITIALIZED ===")
+            logger.info(f"Entry Price: ${avg_entry}")
+            logger.info(f"Initial Active SL: ${BotState.ACTIVE_SL[symbol]:.4f} (EMA 21 H4 - 1%)")
             logger.info(f"Current EMA 21 (H4): ${current_ema21_4h:.4f}")
             logger.info(f"Current EMA 200 (H4): ${df_4h.iloc[-1]['EMA_200']:.4f}")
             logger.info("=========================================================")
 
         # 4. Ambil Intermarket Macro State
-        macro_state = check_intermarket_macro()
+        macro_state = check_intermarket_macro(symbol)
+        
+        # ── Build Tactical Battle Plan (Protocol 9.6) ──
+        last_h4 = df_4h.iloc[-1]
+        atr_h4 = float(last_h4['ATR_14']) if pd.notna(last_h4['ATR_14']) else 0.0
+        swing_low_h4 = float(df_4h['Low'].iloc[-20:].min())
+        swing_high_h4 = float(df_4h['High'].iloc[-20:].max())
+        
+        # SL = Swing Low - 2xATR
+        structural_sl = swing_low_h4 - (2.0 * atr_h4) if atr_h4 > 0 else swing_low_h4 * 0.985
+        
+        # TPs: collect ALL levels above current price, sort ascending, assign TP1/2/3 in order
+        tp_candidates = []
+        for col in ['EMA_7', 'EMA_21', 'EMA_50', 'EMA_200']:
+            if pd.notna(last_h4.get(col)):
+                val = float(last_h4[col])
+                if val > price_h4:
+                    tp_candidates.append((col, val))
+        pdh = macro_state.get('PDH', 0.0)
+        pwh = macro_state.get('PWH', 0.0)
+        if pdh and pdh > price_h4:
+            tp_candidates.append(('PDH', pdh))
+        if pwh and pwh > price_h4:
+            tp_candidates.append(('PWH', pwh))
+        
+        # Sort ascending and deduplicate by label
+        tp_candidates.sort(key=lambda x: x[1])
+        seen: dict = {}
+        deduped = []
+        for lbl, v in tp_candidates:
+            if lbl not in seen:
+                seen[lbl] = v
+                deduped.append((lbl, v))
+        tp_candidates = deduped
+        
+        tp1_val = tp_candidates[0][1] if len(tp_candidates) >= 1 else price_h4 * 1.06
+        tp2_val = tp_candidates[1][1] if len(tp_candidates) >= 2 else tp1_val * 1.04
+        tp3_val = tp_candidates[2][1] if len(tp_candidates) >= 3 else tp2_val * 1.08
+        
+        # Layers (Safety Net)
+        fib_range = swing_high_h4 - swing_low_h4
+        layer1_val = swing_high_h4 - (fib_range * 0.786)
+        layer2_val = macro_state.get('PDL', swing_low_h4)
+        layer3_val = macro_state.get('PWL', swing_low_h4 * 0.97)
+        
+        BotState.BATTLE_PLAN[symbol] = {
+            "TP1": tp1_val, "TP2": tp2_val, "TP3": tp3_val,
+            "L1": layer1_val, "L2": layer2_val, "L3": layer3_val,
+            "SL": structural_sl
+        }
+
+        # =========================================================
+        # 🚨 PROXIMITY ALERTS (Toleransi 1%)
+        # =========================================================
+        TOLERANCE = 0.01  # 1%
+        targets = [
+            ("TP1", tp1_val, "PROXIMITY_TP1", "🎯 Mendekati TP 1"),
+            ("TP2", tp2_val, "PROXIMITY_TP2", "🎯 Mendekati TP 2"),
+            ("TP3", tp3_val, "PROXIMITY_TP3", "🎯 Mendekati TP 3"),
+            ("L1", layer1_val, "PROXIMITY_LAYER1", "🪤 Mendekati Layer 1 (Safety Net)"),
+            ("L2", layer2_val, "PROXIMITY_LAYER2", "🪤 Mendekati Layer 2 (Macro Support)"),
+            ("L3", layer3_val, "PROXIMITY_LAYER3", "🪤 Mendekati Layer 3 (Extreme Wick)"),
+            ("SL", structural_sl, "PROXIMITY_SL", "🛑 Mendekati Structural SL"),
+        ]
+        
+        for name, val, flag, msg_prefix in targets:
+            if not val or val == 0: continue
+            dist = abs(current_price - val) / val
+            if dist <= TOLERANCE:
+                if not BotState.ALERTS_SENT[symbol][flag]:
+                    msg = (
+                        f"🔔 <b>PROXIMITY ALERT:</b> {symbol}\n"
+                        f"{msg_prefix} — Jarak: {dist*100:.2f}%\n"
+                        f"Current: ${current_price:.6f} | Target: ${val:.6f}\n"
+                        f"💡 <b>Saran:</b> Monitor order book / siapkan eksekusi."
+                    )
+                    send_telegram_alert(msg)
+                    BotState.ALERTS_SENT[symbol][flag] = True
+            else:
+                # Reset proximity flag if price moves away (> 2%) to re-alert later if it re-enters
+                if dist > 0.02:
+                    BotState.ALERTS_SENT[symbol][flag] = False
 
         # =========================================================
         # 🚨 TRIGGER 1: THE PROFIT GUARDIAN (Take Profit Parsial)
@@ -213,37 +355,39 @@ def evaluate_market_conditions():
         is_touching_macro = (current_price >= macro_state["PDH"] and macro_state["PDH"] > 0) or \
                             (current_price >= macro_state["PWH"] and macro_state["PWH"] > 0)
         
-        if (is_momentum_overheated or is_touching_macro) and not BotState.ALERTS_SENT["TP_1"]:
+        if (is_momentum_overheated or is_touching_macro) and not BotState.ALERTS_SENT[symbol]["TP_1"]:
             rsi_val = rsi_1h if rsi_1h > 85 else rsi_4h
             msg = (
-                f"🟢 *TACTICAL TP ALERT:* {COIN_PAIR}\n"
+                f"🟢 <b>TACTICAL TP ALERT:</b> {symbol}\n"
                 f"Momentum Overheated! RSI H1/H4: {rsi_val:.2f}. Harga: ${current_price:.4f}.\n"
-                f"🎯 *Instruksi:* Jual 30% posisi sekarang. Profit diamankan!"
+                f"🎯 <b>Instruksi:</b> Jual 30% posisi sekarang. Profit diamankan!"
             )
             send_telegram_alert(msg)
-            BotState.ALERTS_SENT["TP_1"] = True
+            BotState.ALERTS_SENT[symbol]["TP_1"] = True
 
         # =========================================================
         # 🚨 TRIGGER 2: STRUCTURAL SL & BREAK-EVEN PROTECTOR
         # =========================================================
         sl_msg = ""
-        # Break-even Trigger
-        if current_price > (ENTRY_PRICE * 1.03) and BotState.ACTIVE_SL < ENTRY_PRICE:
-            BotState.ACTIVE_SL = ENTRY_PRICE * 1.005 # Breakeven +0.5% buffer
-            sl_msg = f"Posisi profit +3%. Break-Even Terkunci."
-            
-        # Trailing SL Trigger
-        if current_ema21_4h * 0.99 > BotState.ACTIVE_SL:
-            BotState.ACTIVE_SL = current_ema21_4h * 0.99
-            sl_msg = f"Tren naik mendominasi. EMA Support dinaikkan."
+        # Break-even logic (if avg_entry exists)
+        if avg_entry > 0:
+            if current_price > (avg_entry * 1.03) and BotState.ACTIVE_SL[symbol] < avg_entry:
+                BotState.ACTIVE_SL[symbol] = avg_entry * 1.005 # Breakeven +0.5% buffer
+                sl_msg = f"Posisi profit +3%. Break-Even Terkunci."
+        
+        # Update using Structural SL
+        if structural_sl > BotState.ACTIVE_SL[symbol]:
+            BotState.ACTIVE_SL[symbol] = structural_sl
+            if BotState.INITIALIZED[symbol]: # Only ping SL update if not the first init
+                sl_msg = f"Structural SL diperbarui (Swing Low - 2xATR)."
 
-        if sl_msg and not BotState.ALERTS_SENT["SL_BE"]:
+        if sl_msg and not BotState.ALERTS_SENT[symbol]["SL_BE"]:
             msg = (
-                f"🛡️ *SL UPDATED:* {COIN_PAIR}\n"
-                f"{sl_msg} Stop Loss dinaikkan ke ${BotState.ACTIVE_SL:.4f}. Modal 100% aman!"
+                f"🛡️ <b>SL UPDATED:</b> {symbol}\n"
+                f"{sl_msg} Stop Loss dinaikkan ke ${BotState.ACTIVE_SL[symbol]:.4f}. Modal 100% aman!"
             )
             send_telegram_alert(msg)
-            BotState.ALERTS_SENT["SL_BE"] = True # Reset logic needed if we want multiple trail pings
+            BotState.ALERTS_SENT[symbol]["SL_BE"] = True 
 
         # =========================================================
         # 🚨 TRIGGER 3: VOLUME FAKEOUT / DISTRIBUSI
@@ -257,18 +401,18 @@ def evaluate_market_conditions():
         highest_price_3_candles_ago = df_1h.iloc[-4]['High']
         no_higher_high = current_price < highest_price_3_candles_ago
         
-        if (vol_3h_sell > vol_3h_buy) and no_higher_high and not BotState.ALERTS_SENT["VOL_FAKEOUT"]:
+        if (vol_3h_sell > vol_3h_buy) and no_higher_high and not BotState.ALERTS_SENT[symbol]["VOL_FAKEOUT"]:
             msg = (
-                f"⚠️ *VOLUME DANGER:* {COIN_PAIR}\n"
+                f"⚠️ <b>VOLUME DANGER:</b> {symbol}\n"
                 f"Heavy Distribution terdeteksi. 3 Candle terakhir didominasi Sell Volume institusi (Fakeout).\n"
-                f"🔪 *Instruksi:* Exit Immediate / Perketat SL sekarang!"
+                f"🔪 <b>Instruksi:</b> Exit Immediate / Perketat SL sekarang!"
             )
             send_telegram_alert(msg)
-            BotState.ALERTS_SENT["VOL_FAKEOUT"] = True
+            BotState.ALERTS_SENT[symbol]["VOL_FAKEOUT"] = True
             
         # Reset Volume Fakeout logic if buying resumes
         if vol_3h_buy > vol_3h_sell:
-            BotState.ALERTS_SENT["VOL_FAKEOUT"] = False
+            BotState.ALERTS_SENT[symbol]["VOL_FAKEOUT"] = False
 
         # =========================================================
         # 🚨 TRIGGER 4: THE KILL SWITCH (Darurat)
@@ -278,39 +422,52 @@ def evaluate_market_conditions():
         ema_kill_switch = last_closed_h4['Close'] < last_closed_h4['EMA_21']
         
         # Kondisi B: BTC Dominance Siphon (Altcoin Filter Siphon)
-        ticker_tgt = client.get_ticker(symbol=COIN_PAIR)
+        ticker_tgt = client.get_ticker(symbol=symbol)
         tgt_change_24h = float(ticker_tgt['priceChangePercent'])
         
         # Siphon terjadi jika BTC Dominance naik tinggi tapi Altcoin hancur (Liquidity dialirkan ke BTC doang)
         btc_siphon = (macro_state.get("BTC_Dom_Change", 0.0) >= 1.5) and (tgt_change_24h <= -1.0)
         
-        if (ema_kill_switch or btc_siphon) and not BotState.ALERTS_SENT["KILL_SWITCH"]:
-            msg = f"💀 *KILL SWITCH ACTIVATED:* {COIN_PAIR}\n"
+        if (ema_kill_switch or btc_siphon) and not BotState.ALERTS_SENT[symbol]["KILL_SWITCH"]:
+            msg = f"💀 <b>KILL SWITCH ACTIVATED:</b> {symbol}\n"
             
             if ema_kill_switch:
                 msg += f"Structural Breakdown! H4 Close di bawah EMA 21 (${last_closed_h4['EMA_21']:.4f}).\n"
             else:
                 msg += f"Korelasi Berbahaya (BTC.D Siphon terdeteksi. BTC.DOM naik {macro_state.get('BTC_Dom_Change', 0):.2f}%).\n"
                 
-            msg += f"❌ *Instruksi:* BUANG SEMUA POSISI. Tren Bullish resmi batal."
+            msg += f"❌ <b>Instruksi:</b> BUANG SEMUA POSISI. Tren Bullish resmi batal."
             
             send_telegram_alert(msg)
-            BotState.ALERTS_SENT["KILL_SWITCH"] = True
+            BotState.ALERTS_SENT[symbol]["KILL_SWITCH"] = True
 
     except (BinanceAPIException, BinanceRequestException) as bae:
         logger.error(f"Binance API Network Error: {bae}")
     except Exception as e:
-        logger.error(f"Kalkulasi Tracker Gagal: {e}")
+        logger.error(f"Kalkulasi Tracker Gagal untuk {symbol}: {e}")
+
+def run_cycle():
+    """Mengambil semua coin aktif dan menjalankan evaluasi."""
+    entries = load_trade_entries()
+    active_symbols = list(entries.keys())
+    
+    if not active_symbols:
+        # Fallback to default if no entries saved yet
+        active_symbols = [DEFAULT_PAIR]
+        
+    logger.info(f"🔄 Menjalankan siklus evaluasi untuk {len(active_symbols)} koin: {active_symbols}")
+    for symbol in active_symbols:
+        evaluate_market_conditions(symbol)
 
 # ==========================================
 # ⏱️ SCHEDULER & MAIN LOOP
 # ==========================================
 def main():
-    logger.info("Bot siap dijalankan. Memulai Tracker...")
-    evaluate_market_conditions() # Jalankan pertama kali segera setelah distart
+    logger.info("Bot siap dijalankan. Memulai Multi-Coin Tracker...")
+    run_cycle() # Jalankan pertama kali segera setelah distart
 
     # Jalankan pemeriksaan setiap 1 menit mengikuti standar responsivitas Protocol
-    schedule.every(1).minutes.do(evaluate_market_conditions)
+    schedule.every(1).minutes.do(run_cycle)
     
     while True:
         try:
@@ -325,4 +482,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
