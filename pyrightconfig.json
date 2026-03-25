@@ -4,7 +4,7 @@
   "venvPath": ".",
   "venv": ".venv",
   "extraPaths": [
-    "C:\\Users\\Bagas\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages",
+    "C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages",
     ".venv\\Lib\\site-packages"
   ],
   "reportMissingImports": "none",
