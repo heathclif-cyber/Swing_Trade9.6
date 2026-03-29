@@ -116,6 +116,7 @@ def get_entry_summary(symbol: str) -> dict:  # type: ignore
     current_qty = 0.0
     current_cost = 0.0
     realized_pnl = 0.0
+    rolling_avg_cost = 0.0
     for type_, date_, price, qty in events:
         if type_ == 'buy':
             current_cost += price * qty
@@ -127,16 +128,20 @@ def get_entry_summary(symbol: str) -> dict:  # type: ignore
             current_qty -= qty
             current_qty = max(0.0, current_qty)
             current_cost = max(0.0, current_cost)
+    
+    rolling_avg_cost = current_cost / current_qty if current_qty > 0 else avg_entry_price
 
-    remaining_qty = max(0.0, total_entry_qty - total_sold_qty)
-    # If sold everything, mark as closed? For now just show qty 0.
+    remaining_qty = max(0.0, current_qty)
+    remaining_cost = max(0.0, current_cost)
 
     return {
         'entries': entry_list,
         'sales': sales_list,
         'avg_price': round(avg_entry_price, 8),
+        'rolling_avg_cost': round(rolling_avg_cost, 8),
         'total_qty': round(total_entry_qty, 6),
         'remaining_qty': round(remaining_qty, 6),
+        'remaining_cost': round(remaining_cost, 4),
         'total_cost': round(total_entry_cost, 4),
         'num_entries': len(entry_list),
         'num_sales': len(sales_list),
@@ -147,8 +152,16 @@ def get_entry_summary(symbol: str) -> dict:  # type: ignore
 
 
 def get_entry_price(symbol: str) -> float:  # type: ignore
-    """Dapatkan RATA-RATA entry price untuk koin tertentu. Return 0.0 jika belum di-set."""
+    """Dapatkan rolling avg cost basis (accounting for sales). Return 0.0 jika belum di-set."""
     summary = get_entry_summary(symbol)
+    # If there are sales, use remaining cost / remaining qty as the effective entry price
+    if summary['remaining_qty'] > 0:
+        remaining_cost = summary['total_cost'] - (summary['avg_price'] * summary['total_sold_qty'])
+        # More accurate: use the rolling cost tracked in get_entry_summary
+        return summary['rolling_avg_cost']
+    elif summary['num_entries'] > 0 and summary['remaining_qty'] <= 0:
+        # All sold — no active position
+        return 0.0
     return summary['avg_price']
 
 
@@ -704,12 +717,21 @@ def api_data():
                         coin_state["status"] = "ACTIVE"
 
         # ── Lookup dynamic entry price for this coin ──
-        entry_price = get_entry_price(coin_pair)
+        entry_summary = get_entry_summary(coin_pair)
+        entry_price = entry_summary['rolling_avg_cost']  # Uses rolling cost basis after sales
         allocated_capital = get_allocated_capital(coin_pair)
+        remaining_qty = entry_summary['remaining_qty']
+        remaining_cost = entry_summary['remaining_cost']
+        realized_pnl = entry_summary['realized_pnl']
+        total_sold_qty = entry_summary['total_sold_qty']
+        total_sold_revenue = entry_summary['total_sold_revenue']
 
+        # PnL calculation based on REMAINING position
         pnl_pct = 0.0
-        if entry_price > 0:
+        floating_pnl_usd = 0.0
+        if entry_price > 0 and remaining_qty > 0:
             pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 4)  # type: ignore[call-overload]
+            floating_pnl_usd = round((current_price - entry_price) * remaining_qty, 4)
 
         state = {
             "user_input": {
@@ -724,6 +746,19 @@ def api_data():
                 "initial_sl": round(coin_state["initial_sl"], 8),
                 "active_sl": round(coin_state["active_sl"], 8),
                 "current_pnl_pct": pnl_pct,
+                "floating_pnl_usd": floating_pnl_usd,
+            },
+            "position": {
+                "remaining_qty": remaining_qty,
+                "remaining_cost": remaining_cost,
+                "realized_pnl": realized_pnl,
+                "total_sold_qty": total_sold_qty,
+                "total_sold_revenue": total_sold_revenue,
+                "avg_entry_price": entry_summary['avg_price'],
+                "rolling_avg_cost": entry_summary['rolling_avg_cost'],
+                "num_entries": entry_summary['num_entries'],
+                "num_sales": entry_summary['num_sales'],
+                "is_closed": remaining_qty <= 0 and entry_summary['num_entries'] > 0,
             },
             "alerts_sent": coin_state["alerts_sent"],
         }

@@ -841,12 +841,16 @@
                 <div class="status-value" id="statSL">—</div>
             </div>
             <div class="status-card purple">
-                <div class="status-label">Capital Allocated</div>
-                <div class="status-value" id="statCapital">—</div>
+                <div class="status-label">Remaining Qty</div>
+                <div class="status-value" id="statRemainingQty">—</div>
             </div>
             <div class="status-card" id="pnlRealizedCard">
                 <div class="status-label">Floating P&L ($)</div>
                 <div class="status-value" id="statRealizedPnL">—</div>
+            </div>
+            <div class="status-card" id="realizedPnlCard">
+                <div class="status-label">Realized P&L 💰</div>
+                <div class="status-value" id="statRealizedPnLTotal">—</div>
             </div>
             <div class="status-card" id="statusCardState">
                 <div class="status-label">Trade Status</div>
@@ -1222,26 +1226,53 @@
 
             document.getElementById('statCoin').textContent = userInput.coin_pair;
             document.getElementById('statPrice').textContent = `$${tracker.current_price.toFixed(4)}`;
+            
+            // Entry price and position info
+            const position = APP_DATA.state.position || {};
+            const isClosed = position.is_closed || false;
+            const remainingQty = position.remaining_qty || 0;
+            
             document.getElementById('statEntry').textContent = userInput.entry_price > 0
                 ? `$${userInput.entry_price.toFixed(4)}`
                 : 'Click to set 📝';
             document.getElementById('statSL').textContent = `$${tracker.active_sl.toFixed(4)}`;
-            document.getElementById('statCapital').textContent = `$${userInput.allocated_capital}`;
+            
+            // Remaining Qty
+            const remQtyEl = document.getElementById('statRemainingQty');
+            if (remQtyEl) {
+                remQtyEl.textContent = remainingQty > 0 ? remainingQty.toFixed(4) : (isClosed ? 'SOLD OUT' : '—');
+                remQtyEl.style.color = isClosed ? 'var(--google-red)' : '';
+            }
 
-            // PnL
+            // PnL — only show if position is active
             const pnl = tracker.current_pnl_pct;
             const pnlCard = document.getElementById('pnlCard');
             const pnlEl = document.getElementById('statPnl');
-            pnlEl.textContent = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`;
-            pnlEl.className = 'status-value ' + (pnl >= 0 ? 'tag-positive' : 'tag-negative');
-            pnlCard.className = 'status-card ' + (pnl >= 0 ? 'green' : 'red');
+            if (isClosed || remainingQty <= 0) {
+                pnlEl.textContent = '— (No Position)';
+                pnlEl.className = 'status-value';
+                pnlCard.className = 'status-card';
+            } else {
+                pnlEl.textContent = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`;
+                pnlEl.className = 'status-value ' + (pnl >= 0 ? 'tag-positive' : 'tag-negative');
+                pnlCard.className = 'status-card ' + (pnl >= 0 ? 'green' : 'red');
+            }
 
-            // Status tag
+            // Status tag — show CLOSED if fully sold
             const statusEl = document.getElementById('statStatus');
-            statusEl.textContent = userInput.status;
-            statusEl.className = 'status-tag ' + (userInput.status === 'ACTIVE' ? 'tag-active' : 'tag-killed');
+            if (isClosed) {
+                statusEl.textContent = 'CLOSED';
+                statusEl.className = 'status-tag' ;
+                statusEl.style.background = 'var(--google-gray-200)';
+                statusEl.style.color = 'var(--text-secondary)';
+            } else {
+                statusEl.textContent = userInput.status;
+                statusEl.className = 'status-tag ' + (userInput.status === 'ACTIVE' ? 'tag-active' : 'tag-killed');
+                statusEl.style.background = '';
+                statusEl.style.color = '';
+            }
             const statusCard = document.getElementById('statusCardState');
-            statusCard.className = 'status-card ' + (userInput.status === 'ACTIVE' ? 'green' : 'red');
+            statusCard.className = 'status-card ' + (isClosed ? '' : (userInput.status === 'ACTIVE' ? 'green' : 'red'));
 
             // Raw table
             renderRawTable();
@@ -1349,6 +1380,9 @@
             const alerts = state.alerts_sent;
             const bp = c.battle_plan || {};
             const tp1Label = bp.tp1_label || 'Target 6%';
+            const position = state.position || {};
+            const isClosed = position.is_closed || false;
+            const remainingQty = position.remaining_qty || 0;
 
             // Liquidity Borders
             document.getElementById('valPDH').textContent = `$${c.liquidity_borders.PDH.toFixed(4)}`;
@@ -1367,14 +1401,35 @@
 
 
 
-            // Floating P&L ($)
+            // Floating P&L ($) — uses backend-calculated value based on remaining qty
             const realizedEl = document.getElementById('statRealizedPnL');
             if (realizedEl) {
-                const cap = parseFloat(userInput.allocated_capital) || 0;
-                const floatingPnL = (tracker.current_pnl_pct / 100) * cap;
-                realizedEl.textContent = `${floatingPnL >= 0 ? '+$' : '-$'}${Math.abs(floatingPnL).toFixed(2)}`;
-                realizedEl.className = 'status-value ' + (floatingPnL >= 0 ? 'tag-positive' : 'tag-negative');
-                document.getElementById('pnlRealizedCard').className = 'status-card ' + (floatingPnL >= 0 ? 'green' : 'red');
+                const floatingPnL = tracker.floating_pnl_usd || 0;
+                if (isClosed || remainingQty <= 0) {
+                    realizedEl.textContent = '— (No Position)';
+                    realizedEl.className = 'status-value';
+                    document.getElementById('pnlRealizedCard').className = 'status-card';
+                } else {
+                    realizedEl.textContent = `${floatingPnL >= 0 ? '+$' : '-$'}${Math.abs(floatingPnL).toFixed(2)}`;
+                    realizedEl.className = 'status-value ' + (floatingPnL >= 0 ? 'tag-positive' : 'tag-negative');
+                    document.getElementById('pnlRealizedCard').className = 'status-card ' + (floatingPnL >= 0 ? 'green' : 'red');
+                }
+            }
+
+            // Realized PnL (from sales)
+            const realizedPnlEl = document.getElementById('statRealizedPnLTotal');
+            if (realizedPnlEl) {
+                const realizedPnl = position.realized_pnl || 0;
+                const numSales = position.num_sales || 0;
+                if (numSales > 0) {
+                    realizedPnlEl.textContent = `${realizedPnl >= 0 ? '+$' : '-$'}${Math.abs(realizedPnl).toFixed(2)}`;
+                    realizedPnlEl.className = 'status-value ' + (realizedPnl >= 0 ? 'tag-positive' : 'tag-negative');
+                    document.getElementById('realizedPnlCard').className = 'status-card ' + (realizedPnl >= 0 ? 'green' : 'red');
+                } else {
+                    realizedPnlEl.textContent = '—';
+                    realizedPnlEl.className = 'status-value';
+                    document.getElementById('realizedPnlCard').className = 'status-card';
+                }
             }
 
             // OI Delta
@@ -1817,9 +1872,16 @@
                     `<option value="${p}" ${p === currentBackendPair ? 'selected' : ''}>${p}</option>`
                 ).join('');
                 
-                // Prefill remaining qty
-                const summary = tradeSummaries[currentBackendPair] || {};
-                document.getElementById('sellQtyInput').value = summary.remaining_qty || 0;
+                // Prefill remaining qty & update on coin change
+                function updateSellQty() {
+                    const sym = select.value;
+                    const summary = tradeSummaries[sym] || {};
+                    const remQty = summary.remaining_qty || 0;
+                    document.getElementById('sellQtyInput').value = remQty > 0 ? remQty : '';
+                    document.getElementById('sellQtyInput').placeholder = remQty > 0 ? `Max: ${remQty}` : 'No position';
+                }
+                select.onchange = updateSellQty;
+                updateSellQty();
             }
         }
 
