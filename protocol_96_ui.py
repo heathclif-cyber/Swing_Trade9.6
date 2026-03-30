@@ -26,8 +26,7 @@ COIN_PAIR = AVAILABLE_PAIRS[0]
 ALLOCATED_CAPITAL = 200
 
 # File path untuk menyimpan entry price per koin
-data_dir = os.environ.get("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
-TRADE_ENTRIES_FILE = os.path.join(data_dir, 'trade_entries.json')
+TRADE_ENTRIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
 
 BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
