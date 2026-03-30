@@ -26,10 +26,11 @@ COIN_PAIR = AVAILABLE_PAIRS[0]
 ALLOCATED_CAPITAL = 200
 
 # File path untuk menyimpan entry price per koin
-TRADE_ENTRIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
+data_dir = os.environ.get("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+TRADE_ENTRIES_FILE = os.path.join(data_dir, 'trade_entries.json')
 
-BINANCE_API_KEY = ""
-BINANCE_API_SECRET = ""
+BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
 
 # ==========================================
 # Flask App & Logger
@@ -454,54 +455,45 @@ def api_data():
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"📡 Fetching dashboard data for {coin_pair}...")
 
-        # ── Section 1: Raw API Data ──
-        # Only fetch the last 20 candles for raw display (lighter requests)
-        raw_data = {}
+        # ── ⚡ Optimized Data Fetching ──
+        # Fetch each timeframe ONCE to reduce API calls and latency
+        df_cache: dict[str, pd.DataFrame] = {}
+        btc_cache: dict[str, pd.DataFrame] = {}
+        
         for label, interval in INTERVAL_MAP.items():
-            logger.info(f"  Fetching {coin_pair} {label}...")
-            df_coin = get_klines_df(coin_pair, interval, limit=20)
-            logger.info(f"  Fetching BTCUSDT {label}...")
-            df_btc = get_klines_df("BTCUSDT", interval, limit=20)
-            raw_data[label] = {
-                "coin": format_ohlcv_for_json(df_coin, last_n=10),
-                "btc": format_ohlcv_for_json(df_btc, last_n=10),
-            }
-            time.sleep(0.1)  # Gentle rate limit
+            # For H1/H4 we need 250 candles to compute EMA 200 properly.
+            # For others, 20 is enough since we only display the last 10.
+            req_limit = 250 if label in ['1h', '4h'] else 20
+            
+            # Fetch base pair
+            logger.info(f"  Fetching {coin_pair} {label} ({req_limit} candles)...")
+            df = get_klines_df(coin_pair, interval, limit=req_limit)
+            if label in ['1h', '4h'] and not df.empty:
+                df = apply_full_indicators(df)
+            df_cache[label] = df
+            
+            # Fetch BTC pair for SMT & visualization
+            logger.info(f"  Fetching BTCUSDT {label} (20 candles)...")
+            btc_df = get_klines_df("BTCUSDT", interval, limit=20)
+            btc_cache[label] = btc_df
 
-        # Futures OI Data
-        logger.info("  Fetching OI data...")
-        oi_raw = fetch_oi_data(limit=10, symbol=coin_pair)
-        oi_formatted = []
-        for item in oi_raw:
-            ts = item.get('timestamp', 0)
-            try:
-                oi_formatted.append({
-                    "timestamp": datetime.fromtimestamp(int(ts) / 1000).strftime('%Y-%m-%d %H:%M'),
-                    "sumOpenInterest": float(item.get('sumOpenInterest', 0)),
-                })
-            except Exception:
-                pass
+        # ── Section 1: Raw API Data ──
+        raw_data = {}
+        for label in INTERVAL_MAP.keys():
+            raw_data[label] = {
+                "coin": format_ohlcv_for_json(df_cache[label], last_n=10),
+                "btc": format_ohlcv_for_json(btc_cache[label], last_n=10),
+            }
 
         # ── Section 2: Computed Data ──
-        # Fetch H1 & H4 with indicators (need more data for EMA 200)
-        logger.info("  Computing H1 indicators...")
-        df_1h = get_klines_df(coin_pair, Client.KLINE_INTERVAL_1HOUR, limit=250)
-        df_1h = apply_full_indicators(df_1h)
-
-        logger.info("  Computing H4 indicators...")
-        df_4h = get_klines_df(coin_pair, Client.KLINE_INTERVAL_4HOUR, limit=250)
-        df_4h = apply_full_indicators(df_4h)
-
         computed = {
-            "indicators_1h": format_ohlcv_for_json(df_1h, last_n=10),
-            "indicators_4h": format_ohlcv_for_json(df_4h, last_n=10),
+            "indicators_1h": format_ohlcv_for_json(df_cache['1h'], last_n=10),
+            "indicators_4h": format_ohlcv_for_json(df_cache['4h'], last_n=10),
         }
 
         # Liquidity Borders
-        logger.info("  Fetching liquidity borders...")
-        df_1d = get_klines_df(coin_pair, Client.KLINE_INTERVAL_1DAY, limit=3)
-        df_1w = get_klines_df(coin_pair, Client.KLINE_INTERVAL_1WEEK, limit=3)
-
+        df_1d = df_cache['1d']
+        df_1w = df_cache['1w']
         liquidity: dict = {"PDH": 0.0, "PDL": 0.0, "PWH": 0.0, "PWL": 0.0}
         if len(df_1d) >= 2:
             liquidity["PDH"] = round(float(df_1d.iloc[-2]['High']), 6)  # type: ignore[call-overload]
@@ -513,10 +505,8 @@ def api_data():
         computed["liquidity_borders"] = liquidity  # type: ignore[assignment]
 
         # SMT Divergence
-        logger.info("  Computing SMT divergence...")
-        df_btc_h4 = get_klines_df("BTCUSDT", Client.KLINE_INTERVAL_4HOUR, limit=5)
-        df_tgt_h4 = get_klines_df(coin_pair, Client.KLINE_INTERVAL_4HOUR, limit=5)
-
+        df_btc_h4 = btc_cache['4h']
+        df_tgt_h4 = df_cache['4h']
         smt: dict = {"btc_trend_12h": "N/A", "coin_trend_12h": "N/A", "bearish_smt": False}
         if not df_btc_h4.empty and not df_tgt_h4.empty and len(df_btc_h4) >= 3 and len(df_tgt_h4) >= 3:
             btc_highs = df_btc_h4['High'].iloc[-3:].values
@@ -528,17 +518,15 @@ def api_data():
             smt["bearish_smt"] = bool(btc_hh and tgt_lh)
         computed["smt_divergence"] = smt  # type: ignore[assignment]
 
-        # OI Delta
-        oi_delta_pct = 0.0
-        if len(oi_raw) >= 2:
-            old_oi = float(oi_raw[0].get('sumOpenInterest', 1))
-            new_oi = float(oi_raw[-1].get('sumOpenInterest', 1))
-            if old_oi > 0:
-                oi_delta_pct = round(((new_oi - old_oi) / old_oi) * 100, 4)  # type: ignore[call-overload]
-        computed["oi_delta_pct"] = oi_delta_pct  # type: ignore[assignment]
+        # OI Delta (DEAD CODE REMOVED for Spot optimization)
+        computed["oi_delta_pct"] = 0.0
+        oi_formatted = []
 
         # ── Protocol 9.6 Battle Plan Computation (Wick Hunter Edition) ──
         # Uses ATR-based Structural SL and Liquidity-based TPs
+        df_1h = df_cache.get('1h', pd.DataFrame())
+        df_4h = df_cache.get('4h', pd.DataFrame())
+        
         battle_plan: dict = {}
         if not df_4h.empty and len(df_4h) >= 20:
             last4h  = df_4h.iloc[-1]
@@ -1365,5 +1353,6 @@ def export_excel():
 # 🚀 MAIN
 # ==========================================
 if __name__ == "__main__":
-    logger.info("🖥️  Protocol 9.6 Dashboard starting on http://127.0.0.1:5000")
-    app.run(debug=True, port=5000, threaded=True)
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"🖥️  Protocol 9.6 Dashboard starting on http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
