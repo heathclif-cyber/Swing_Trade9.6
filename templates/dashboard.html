@@ -771,6 +771,34 @@
         .status-value.editable { cursor: pointer; border-bottom: 1px dashed var(--text-secondary); }
         .status-value.editable:hover { color: var(--google-blue); border-bottom-color: var(--google-blue); }
 
+        /* ==========================================
+           📊 QUANTITATIVE ANALYST UI
+           ========================================== */
+        .quant-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+        .quant-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+        .decision-banner { padding: 20px; border-radius: var(--radius-lg); margin-bottom: 24px; text-align: center; border: 2px solid transparent; }
+        .decision-banner.FULL { background: #e6f4ea; border-color: #34a853; color: #137333; }
+        .decision-banner.HALF { background: #e8f0fe; border-color: #1a73e8; color: #174ea6; }
+        .decision-banner.WAIT { background: #fef7e0; border-color: #fbbc04; color: #b05e00; }
+        .decision-banner.SKIP { background: #fce8e6; border-color: #ea4335; color: #a50e0e; }
+        
+        .score-feature-grid { display: grid; gap: 12px; margin-top: 16px; }
+        .feature-row { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+        .feature-dot { width: 10px; height: 10px; border-radius: 50%; shrink: 0; }
+        .feature-name { flex-grow: 1; color: var(--text-secondary); font-weight: 500; }
+        .feature-val { font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
+        .feature-bar-bg { width: 80px; height: 6px; background: var(--google-gray-200); border-radius: 3px; position: relative; overflow: hidden; }
+        .feature-bar-fill { height: 100%; transition: width 0.3s ease; }
+        
+        .dot-3 { background: #34a853; box-shadow: 0 0 8px #34a853; }
+        .dot-2 { background: #fbbc04; }
+        .dot-1 { background: #80868b; }
+        .dot-0 { background: #ea4335; }
+
+        .narrative-box { background: var(--google-gray-50); border-radius: var(--radius-md); padding: 16px; border-left: 4px solid var(--google-blue); margin-top: 16px; font-size: 14px; line-height: 1.6; }
+        .level-pill { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--bg-primary); border-radius: 6px; margin-bottom: 6px; font-family: var(--font-mono); font-size: 13px; }
+        .tag-active-pos { background: #fee; border: 1px solid #f99; color: #c00; font-weight: 800; padding: 10px; border-radius: 10px; text-align: center; margin-bottom: 20px; animation: pulse 2s infinite; }
+
     </style>
 </head>
 <body>
@@ -807,6 +835,7 @@
                 <button class="btn btn-pdf" id="btnPdf" onclick="downloadPDF()">📄 Download PDF</button>
                 <div style="display:flex; align-items:center; border:2px solid var(--google-green); border-radius:24px; overflow:hidden;">
                     <select id="csvYears" style="border:none; outline:none; padding:10px 16px; background:var(--bg-card); color:var(--text-primary); font-family:var(--font-sans); font-size:14px; font-weight:600; cursor:pointer;">
+                        <option value="0.1">📊 250 Candle (~41 Hari)</option>
                         <option value="0.5">📊 6 Bulan (~1000 limit)</option>
                         <option value="1">📊 1 Tahun (~2190 limit)</option>
                         <option value="2">📊 2 Tahun (~4380 limit)</option>
@@ -1062,6 +1091,66 @@
 
             <!-- Removed Battle Plan and Alert Status per user request (Data Harvester Only) -->
         </div>
+
+        <!-- ═══════════ SECTION 3: QUANTITATIVE ANALYST (71-POINT) ═══════════ -->
+        <div class="section" id="sectionQuantitative" style="margin-top: 40px;">
+            <div class="section-header">
+                <div class="section-icon">🤖</div>
+                <div class="section-title">Quantitative Swing Analyst — Massive 71-Point Scoring</div>
+                <div class="section-badge" style="background:var(--google-blue); color:white">ALGO V2.0</div>
+            </div>
+
+            <!-- Long/Short Sub-tabs -->
+            <div class="tabs" id="quantSetupTabs">
+                <button class="tab-btn active" onclick="switchQuantTab('long')">🐂 LONG SETUP ANALYSIS</button>
+                <button class="tab-btn" onclick="switchQuantTab('short')">🐻 SHORT SETUP ANALYSIS</button>
+            </div>
+
+            <div id="quantContainer">
+                <div id="activePosBanner"></div>
+                <div id="decisionBanner" class="decision-banner">
+                    <div style="font-size: 14px; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; margin-bottom: 8px;">Institutional Mandate</div>
+                    <div id="quantDecisionName" style="font-size: 32px; font-weight: 800; letter-spacing: -1px;">LOADING ALGORITHM...</div>
+                    <div id="quantScoreSummary" style="font-size: 16px; margin-top: 8px; font-weight: 500; opacity: 0.8;">—</div>
+                </div>
+
+                <div class="quant-grid">
+                    <!-- Column 1: Feature Scoring -->
+                    <div class="quant-card">
+                        <div class="panel-title">📊 9-Feature Weighted Scoring</div>
+                        <div id="featureGrid" class="score-feature-grid">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Exit & Limits -->
+                    <div class="quant-card">
+                        <div class="panel-title">🛡️ Risk Management & Exit Monitor</div>
+                        <div style="margin-bottom: 20px;">
+                            <div class="entry-list-title">Stop Loss Levels (ATR Based)</div>
+                            <div id="slLevels"></div>
+                        </div>
+                        <div style="margin-bottom: 20px;">
+                            <div class="entry-list-title">Take Profit Targets (R:R 1:3+)</div>
+                            <div id="tpLevels"></div>
+                        </div>
+                        <div id="exitSignalBox"></div>
+                    </div>
+
+                    <!-- Column 3: Narratives -->
+                    <div class="quant-card">
+                        <div class="panel-title">🎙️ Analyst Narrative</div>
+                        <div id="quantNarrative" class="narrative-box">
+                            <!-- Populated by JS -->
+                        </div>
+                        <div style="margin-top: 20px;">
+                            <div class="entry-list-title">Market Context Context</div>
+                            <div id="marketContext"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ═══════════ ENTRY PRICE MODAL ═══════════ -->
@@ -1292,6 +1381,9 @@
             } else if (state.alerts_sent.VOL_FAKEOUT) {
                 showAlert('danger', '⚠️ VOLUME FAKEOUT — Heavy distribution detected!');
             }
+
+            // Render Quantitative Analyst
+            renderQuantitativeAnalysis();
         }
 
         function renderRawTable() {
@@ -1568,6 +1660,120 @@
                 : '✅ ALL CLEAR — NO DANGER DETECTED';
         }
 
+        // ==========================================
+        // 🤖 QUANTITATIVE ANALYSIS RENDERING
+        // ==========================================
+        let activeQuantTab = 'long';
+
+        function switchQuantTab(tab) {
+            activeQuantTab = tab;
+            document.querySelectorAll('#quantSetupTabs .tab-btn').forEach(btn => {
+                btn.classList.toggle('active', (tab === 'long' ? btn.textContent.includes('LONG') : btn.textContent.includes('SHORT')));
+            });
+            renderQuantitativeAnalysis();
+        }
+
+        function renderQuantitativeAnalysis() {
+            if (!APP_DATA || !APP_DATA.quant_analysis) return;
+            
+            const quant = APP_DATA.quant_analysis;
+            const data = quant[activeQuantTab];
+            if (!data) return;
+
+            // Decision Banner
+            const banner = document.getElementById('decisionBanner');
+            banner.className = `decision-banner ${data.code}`;
+            document.getElementById('quantDecisionName').textContent = data.decision;
+            document.getElementById('quantScoreSummary').textContent = `Final Score: ${data.total}/71 (${data.pct}%) — Based on 4H Multi-Window Matrix`;
+
+            // Active Position Check
+            const posBanner = document.getElementById('activePosBanner');
+            const hasEntry = APP_DATA.state.user_input.entry_price > 0;
+            if (hasEntry) {
+                posBanner.innerHTML = `<div class="tag-active-pos">⚠️ MONITORING ACTIVE POSITION — AVG ENTRY: $${APP_DATA.state.user_input.entry_price.toFixed(4)}</div>`;
+            } else {
+                posBanner.innerHTML = '';
+            }
+
+            // Feature Grid
+            const featureGrid = document.getElementById('featureGrid');
+            let featureHtml = '';
+            const scores = data.scores;
+            // Feature labels/keys mapping
+            const featureMap = {
+                'OI': 'Open Interest Change (Norm)',
+                'Vol': 'Relative Volume (MA20)',
+                'TakerBuy': 'Taker Buy/Sell Pressure',
+                'ATR': 'Volatility Range (ATR %)',
+                'CVD': 'Cumulative Volume Delta',
+                'EMA21': 'Distance from EMA 21',
+                'EMA50': 'Distance from EMA 50',
+                'EMA200': 'Distance from EMA 200',
+                'RSI': 'RSI 6 Internal Momentum'
+            };
+
+            for (const [key, val] of Object.entries(scores)) {
+                // val = [actual_points, max_points, raw_value, star_level]
+                const points = val[0];
+                const max = val[1];
+                const raw = val[2];
+                const stars = val[3];
+                const pct = (points / max * 100);
+                
+                featureHtml += `
+                <div class="feature-row">
+                    <div class="feature-dot dot-${stars}"></div>
+                    <div class="feature-name">${featureMap[key] || key}</div>
+                    <div class="feature-val">${typeof raw === 'number' ? raw.toFixed(2) : raw}${key === 'TakerBuy' ? '%' : ''}</div>
+                    <div class="feature-bar-bg">
+                        <div class="feature-bar-fill dot-${stars}" style="width: ${pct}%"></div>
+                    </div>
+                </div>`;
+            }
+            featureGrid.innerHTML = featureHtml;
+
+            // Levels
+            const levels = data.levels;
+            document.getElementById('slLevels').innerHTML = `
+                <div class="level-pill"><span>Ketat (1.0 ATR)</span><span class="val-neg">$${levels.sl_ketat.toFixed(5)}</span></div>
+                <div class="level-pill"><span>Normal (1.5 ATR)</span><span class="val-neg">$${levels.sl_normal.toFixed(5)}</span></div>
+                <div class="level-pill"><span>Lebar (2.0 ATR)</span><span class="val-neg">$${levels.sl_lebar.toFixed(5)}</span></div>
+            `;
+            document.getElementById('tpLevels').innerHTML = `
+                <div class="level-pill"><span>TP 1 (2.5%)</span><span class="val-pos">$${levels.tp1.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP 2 (4.6%)</span><span class="val-pos">$${levels.tp2.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP 3 (7.0%)</span><span class="val-pos">$${levels.tp3.toFixed(5)}</span></div>
+            `;
+
+            // Exit Message
+            const exitBox = document.getElementById('exitSignalBox');
+            if (hasEntry) {
+                const emergency = quant.emergency;
+                const isRsiOb = (activeQuantTab === 'long' ? APP_DATA.state.active_tracker.rsi_6 > 75 : APP_DATA.state.active_tracker.rsi_6 < 25);
+                exitBox.innerHTML = `
+                <div class="panel-row" style="border:1px solid var(--border); padding:10px; border-radius:8px; margin-top:20px; background:${emergency.sl_touched || isRsiOb ? '#fee' : '#e6f4ea'}">
+                    <div class="panel-row-label">Exit Condition Check:</div>
+                    <div class="panel-row-value" style="color:${emergency.sl_touched || isRsiOb ? '#c00' : '#282'}">${emergency.sl_touched ? '🚨 SL BREACHED' : (isRsiOb ? '⚠️ RSI EXTREME' : '✅ SAFE HOLD')}</div>
+                </div>`;
+            } else {
+                exitBox.innerHTML = '';
+            }
+
+            // Narrative
+            const n = data.narrative;
+            document.getElementById('quantNarrative').innerHTML = `
+                <p><strong>KONTEKS:</strong> ${n.kondisi}</p>
+                <p style="margin-top:10px"><strong>KEPUTUSAN:</strong> <span style="color:var(--google-blue); font-weight:700">${n.keputusan}</span></p>
+                <p style="margin-top:10px"><strong>SKENARIO:</strong> ${n.skenario}</p>
+            `;
+
+            // Market Context (Simple)
+            document.getElementById('marketContext').innerHTML = `
+                <div class="level-pill"><span>BTC Trend H12</span><span>${APP_DATA.computed.smt_divergence.btc_trend_12h}</span></div>
+                <div class="level-pill"><span>OI Delta 1H</span><span class="${APP_DATA.computed.oi_delta_pct >0 ? 'val-pos' : 'val-neg'}">${APP_DATA.computed.oi_delta_pct.toFixed(2)}%</span></div>
+            `;
+        }
+
 
         // ==========================================
         // 🔄 TAB SWITCHING
@@ -1690,7 +1896,8 @@
             const yearsSelect = document.getElementById('csvYears');
             if (yearsSelect) {
                 const years = parseFloat(yearsSelect.value);
-                if (years === 0.5) limit = 1000;
+                if (years === 0.1) limit = 250;
+                else if (years === 0.5) limit = 1000;
                 else limit = Math.floor(years * 2190);
             }
 

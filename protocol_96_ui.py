@@ -15,6 +15,7 @@ from flask import Flask, render_template, jsonify, Response, request as flask_re
 from binance.client import Client  # type: ignore
 from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
 import protocol_96_enrichment as enrichment  # type: ignore
+import algo_scoring  # type: ignore
 from requests.packages import urllib3  # type: ignore
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -749,6 +750,28 @@ def api_data():
             },
             "alerts_sent": coin_state["alerts_sent"],
         }
+
+        # ── [APEX] MODULE 5: 71-Point Quantitative Analyst ──
+        logger.info("  [Export] Executing 71-Point Quantitative Algorithm...")
+        try:
+            # We use the 4H DataFrame for higher resolution scoring indicators
+            df_quant = df_cache.get('4h', pd.DataFrame())
+            if not df_quant.empty:
+                # Prepare metadata for scoring
+                meta = {
+                    'Symbol': coin_pair,
+                    'AVG_ENTRY_PRICE': state['state']['position'].get('avg_entry_price') if state.get('state') else entry_summary.get('avg_price')
+                }
+                # Double check the metadata access
+                meta['AVG_ENTRY_PRICE'] = entry_summary.get('avg_price') if entry_summary.get('avg_price', 0) > 0 else None
+                
+                quant_results = algo_scoring.calculate_71point_score(df_quant, meta)
+                state["quant_analysis"] = quant_results
+            else:
+                state["quant_analysis"] = None
+        except Exception as e:
+            logger.error(f"Quant Analysis Error: {e}")
+            state["quant_analysis"] = None
 
         logger.info("✅ Dashboard data ready!")
         return jsonify({
