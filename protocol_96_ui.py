@@ -29,6 +29,12 @@ ALLOCATED_CAPITAL = 200
 # File path untuk menyimpan entry price per koin
 TRADE_ENTRIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
 
