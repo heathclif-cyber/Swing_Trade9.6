@@ -32,6 +32,9 @@ TRADE_ENTRIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 't
 BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET", "")
 
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
 # ==========================================
 # Flask App & Logger
 # ==========================================
@@ -49,6 +52,18 @@ try:
 except Exception as e:
     logger.warning(f"Binance Client init failed (will use REST fallback): {e}")
     binance_client = None
+
+
+def send_telegram_message(text: str):
+    """Kirim notifikasi Telegram menggunakan bot token & chat id dari env vars."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
+    try:
+        http_requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        logger.warning(f"Telegram notification failed: {e}")
 
 
 # ── REST-based API endpoint list (ordered by ISP accessibility) ──
@@ -903,6 +918,42 @@ def api_data():
                         lv = liquidity.get(lk, 0)
                         if lv: live_ctx[lk] = round(lv, 6)
                     quant_results['market_context'] = live_ctx
+                    
+                    # ── TELEGRAM SIGNAL ALERTS ──
+                    try:
+                        current_candle_time = int(last_q['Open_Time'].timestamp())
+                        last_alert_time = coin_state["alerts_sent"].get("last_candle_time", 0)
+                        
+                        if current_candle_time > last_alert_time:
+                            # New 4H candle -> reset signal tracking
+                            coin_state["alerts_sent"]["long_signal"] = None
+                            coin_state["alerts_sent"]["short_signal"] = None
+                            coin_state["alerts_sent"]["exit_signal"] = False
+                            coin_state["alerts_sent"]["last_candle_time"] = current_candle_time
+                        
+                        # Evaluate LONG signal
+                        curr_long_code = quant_results['long']['code']
+                        if curr_long_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("long_signal") != curr_long_code:
+                            msg = f"🟢 <b>LONG SETUP: {curr_long_code} SIZE ENTRY</b>\nSymbol: {coin_pair}\nScore: {quant_results['long']['total']}/71 ({quant_results['long']['pct']}%)\nPrice: ${quant_results['variables']['close_price']}"
+                            send_telegram_message(msg)
+                            coin_state["alerts_sent"]["long_signal"] = curr_long_code
+                            
+                        # Evaluate SHORT signal
+                        curr_short_code = quant_results['short']['code']
+                        if curr_short_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("short_signal") != curr_short_code:
+                            msg = f"🔴 <b>SHORT SETUP: {curr_short_code} SIZE ENTRY</b>\nSymbol: {coin_pair}\nScore: {quant_results['short']['total']}/71 ({quant_results['short']['pct']}%)\nPrice: ${quant_results['variables']['close_price']}"
+                            send_telegram_message(msg)
+                            coin_state["alerts_sent"]["short_signal"] = curr_short_code
+                            
+                        # Evaluate EXIT signal (only if active position)
+                        has_active = float(entry_summary.get('remaining_qty', 0)) > 0
+                        if has_active and quant_results['exit']['hard_count'] > 0 and not coin_state["alerts_sent"].get("exit_signal"):
+                            msg = f"⚠️ <b>MANDATORY EXIT SIGNAL</b>\nSymbol: {coin_pair}\nReason: {quant_results['exit']['recommendation']}\nPrice: ${quant_results['variables']['close_price']}\nTake action immediately to protect capital."
+                            send_telegram_message(msg)
+                            coin_state["alerts_sent"]["exit_signal"] = True
+                            
+                    except Exception as alert_err:
+                        logger.warning(f"Failed to process Telegram alerts: {alert_err}")
 
                 state["quant_analysis"] = quant_results
             else:
