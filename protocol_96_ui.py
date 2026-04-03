@@ -39,13 +39,89 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Protocol_9.6_UI")
 
-# Binance Client
+# Binance Client — resilient initialization (non-blocking)
+binance_client = None
 try:
-    binance_client = Client(BINANCE_API_KEY, BINANCE_API_SECRET, requests_params={'verify': False})
+    binance_client = Client(BINANCE_API_KEY, BINANCE_API_SECRET,
+                            requests_params={'verify': False, 'timeout': 5},
+                            tld='com')
     logger.info("Binance client initialized successfully.")
 except Exception as e:
-    logger.error(f"Failed to initialize Binance client: {e}")
+    logger.warning(f"Binance Client init failed (will use REST fallback): {e}")
     binance_client = None
+
+
+# ── REST-based API endpoint list (ordered by ISP accessibility) ──
+# fapi.binance.com is NOT blocked by Internet Positif (Indonesia ISP filter)
+# api.binance.com IS typically blocked → put it last
+BINANCE_KLINE_URLS = [
+    "https://fapi.binance.com/fapi/v1/klines",
+    "https://data-api.binance.vision/api/v3/klines",
+    "https://api1.binance.com/api/v3/klines",
+    "https://api2.binance.com/api/v3/klines",
+    "https://api3.binance.com/api/v3/klines",
+    "https://api4.binance.com/api/v3/klines",
+    "https://api.binance.com/api/v3/klines",
+]
+# Cache the last working URL for faster subsequent requests
+_last_working_url: str | None = None
+
+
+def get_klines_rest(symbol: str, interval: str, limit: int = 250) -> pd.DataFrame:
+    """REST klines fetcher — tries multiple Binance endpoints for ISP resilience."""
+    global _last_working_url
+    # Try last working URL first for speed
+    urls = list(BINANCE_KLINE_URLS)
+    if _last_working_url and _last_working_url in urls:
+        urls.remove(_last_working_url)
+        urls.insert(0, _last_working_url)
+
+    for url in urls:
+        try:
+            total_klines: list = []
+            end_time = None
+            ok = True
+            while len(total_klines) < limit:
+                req_limit = min(1000, limit - len(total_klines))
+                params: dict = {"symbol": symbol, "interval": interval, "limit": req_limit}
+                if end_time:
+                    params['endTime'] = end_time
+                resp = http_requests.get(url, params=params, timeout=8, verify=False)
+                if resp.status_code == 200:
+                    try:
+                        chunk = resp.json()
+                    except Exception:
+                        ok = False; break
+                    if not chunk or not isinstance(chunk, list):
+                        break
+                    total_klines = chunk + total_klines
+                    if len(chunk) < req_limit:
+                        break
+                    end_time = chunk[0][0] - 1
+                else:
+                    ok = False; break
+
+            if ok and total_klines:
+                _last_working_url = url
+                logger.info(f"  ✅ {symbol} {interval}: {len(total_klines)} candles via {url.split('/')[2]}")
+                df = pd.DataFrame(total_klines, columns=[
+                    'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
+                    'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
+                ])
+                df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
+                df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit='ms')
+                for col in ['Open', 'High', 'Low', 'Close', 'Total_Volume', 'Taker_Buy_Base']:
+                    df[col] = df[col].astype(float)
+                df['Buy_Volume'] = df['Taker_Buy_Base']
+                df['Sell_Volume'] = df['Total_Volume'] - df['Buy_Volume']
+                df['Volume_Delta'] = df['Buy_Volume'] - df['Sell_Volume']
+                return df
+        except Exception as e:
+            logger.debug(f"REST {url.split('/')[2]} failed: {e}")
+            continue
+
+    logger.warning(f"All REST endpoints failed for {symbol} {interval}")
+    return pd.DataFrame()
 
 
 # ==========================================
@@ -211,44 +287,47 @@ INTERVAL_MAP = {
 # 🛠️ DATA FETCHING HELPERS
 # ==========================================
 def get_klines_df(symbol: str, interval: str, limit: int = 100) -> pd.DataFrame:
-    """Fetch OHLCV data from Binance and process institutional volume structure."""
-    if not binance_client:
-        logger.error("Binance client not initialized. Cannot fetch data.")
-        return pd.DataFrame()
-    try:
-        total_klines = []
-        end_time = None
-        while len(total_klines) < limit:
-            req_limit = min(1000, limit - len(total_klines))
-            params = {'symbol': symbol, 'interval': interval, 'limit': req_limit}
-            if end_time:
-                params['endTime'] = end_time
-            chunk = binance_client.get_klines(**params)
-            if not chunk:
-                break
-            total_klines = chunk + total_klines
-            if len(chunk) < req_limit:
-                break
-            end_time = chunk[0][0] - 1
-        
-        df = pd.DataFrame(total_klines, columns=[
-            'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
-            'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
-        ])
+    """Fetch OHLCV data from Binance and process institutional volume structure.
+    Uses python-binance Client first, falls back to direct REST API if unavailable."""
+    # Try python-binance client first
+    if binance_client:
+        try:
+            total_klines = []
+            end_time = None
+            while len(total_klines) < limit:
+                req_limit = min(1000, limit - len(total_klines))
+                params = {'symbol': symbol, 'interval': interval, 'limit': req_limit}
+                if end_time:
+                    params['endTime'] = end_time
+                chunk = binance_client.get_klines(**params)
+                if not chunk:
+                    break
+                total_klines = chunk + total_klines
+                if len(chunk) < req_limit:
+                    break
+                end_time = chunk[0][0] - 1
+            
+            df = pd.DataFrame(total_klines, columns=[
+                'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
+                'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
+            ])
 
-        df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
-        df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit='ms')
-        for col in ['Open', 'High', 'Low', 'Close', 'Total_Volume', 'Taker_Buy_Base']:
-            df[col] = df[col].astype(float)
+            df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
+            df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit='ms')
+            for col in ['Open', 'High', 'Low', 'Close', 'Total_Volume', 'Taker_Buy_Base']:
+                df[col] = df[col].astype(float)
 
-        df['Buy_Volume'] = df['Taker_Buy_Base']
-        df['Sell_Volume'] = df['Total_Volume'] - df['Buy_Volume']
-        df['Volume_Delta'] = df['Buy_Volume'] - df['Sell_Volume']
+            df['Buy_Volume'] = df['Taker_Buy_Base']
+            df['Sell_Volume'] = df['Total_Volume'] - df['Buy_Volume']
+            df['Volume_Delta'] = df['Buy_Volume'] - df['Sell_Volume']
 
-        return df
-    except Exception as e:
-        logger.error(f"Error fetching klines for {symbol} {interval}: {e}")
-        return pd.DataFrame()
+            return df
+        except Exception as e:
+            logger.warning(f"Client klines failed for {symbol} {interval}: {e}, trying REST fallback...")
+
+    # Fallback: use direct REST API
+    logger.info(f"  Using REST fallback for {symbol} {interval}...")
+    return get_klines_rest(symbol, interval, limit)
 
 def get_klines_fapi(symbol: str, interval: str, limit: int = 1000) -> pd.DataFrame:
     """Fetch from Binance Futures for indices like BTCDOMUSDT and DEFIUSDT."""
@@ -752,25 +831,85 @@ def api_data():
         }
 
         # ── [APEX] MODULE 5: 71-Point Quantitative Analyst ──
-        logger.info("  [Export] Executing 71-Point Quantitative Algorithm...")
+        logger.info("  [APEX] Executing 71-Point Quantitative Algorithm...")
         try:
-            # We use the 4H DataFrame for higher resolution scoring indicators
-            df_quant = df_cache.get('4h', pd.DataFrame())
-            if not df_quant.empty:
-                # Prepare metadata for scoring
+            df_quant = df_cache.get('4h', pd.DataFrame()).copy()
+            if not df_quant.empty and len(df_quant) >= 22:
+                # ── Enrich 4H data with OI for scoring ──
+                try:
+                    oi_raw = fetch_oi_data(symbol=coin_pair, limit=500)
+                    if oi_raw:
+                        oi_df = pd.DataFrame(oi_raw)
+                        oi_df['Open_Time'] = pd.to_datetime(oi_df['timestamp'], unit='ms')
+                        oi_df['Open_Interest'] = oi_df['sumOpenInterest'].astype(float)
+                        oi_df = oi_df[['Open_Time', 'Open_Interest']]
+                        df_quant = pd.merge_asof(
+                            df_quant.sort_values('Open_Time'),
+                            oi_df.sort_values('Open_Time'),
+                            on='Open_Time', direction='backward'
+                        )
+                    else:
+                        df_quant['Open_Interest'] = 0.0
+                except Exception as oi_err:
+                    logger.warning(f"OI merge for quant: {oi_err}")
+                    df_quant['Open_Interest'] = 0.0
+
+                # ── Enrich with Funding Rate ──
+                try:
+                    fr_raw = fetch_funding_rate(symbol=coin_pair, limit=200)
+                    if fr_raw:
+                        fr_df = pd.DataFrame(fr_raw)
+                        fr_df['Open_Time'] = pd.to_datetime(fr_df['fundingTime'], unit='ms')
+                        fr_df['Funding_Rate'] = fr_df['fundingRate'].astype(float)
+                        fr_df = fr_df[['Open_Time', 'Funding_Rate']]
+                        df_quant = pd.merge_asof(
+                            df_quant.sort_values('Open_Time'),
+                            fr_df.sort_values('Open_Time'),
+                            on='Open_Time', direction='backward'
+                        )
+                    else:
+                        df_quant['Funding_Rate'] = 0.0
+                except Exception as fr_err:
+                    logger.warning(f"FR merge for quant: {fr_err}")
+                    df_quant['Funding_Rate'] = 0.0
+
+                # ── Apply CVD if missing ──
+                if 'CVD' not in df_quant.columns:
+                    df_quant = apply_cvd(df_quant)
+
                 meta = {
                     'Symbol': coin_pair,
-                    'AVG_ENTRY_PRICE': state['state']['position'].get('avg_entry_price') if state.get('state') else entry_summary.get('avg_price')
+                    'AVG_ENTRY_PRICE': entry_summary.get('rolling_avg_cost') if entry_summary.get('remaining_qty', 0) > 0 else None,
                 }
-                # Double check the metadata access
-                meta['AVG_ENTRY_PRICE'] = entry_summary.get('avg_price') if entry_summary.get('avg_price', 0) > 0 else None
-                
                 quant_results = algo_scoring.calculate_71point_score(df_quant, meta)
+
+                # ── Build live market context from enriched 4H data ──
+                if quant_results:
+                    last_q = df_quant.iloc[-1]
+                    live_ctx = {}
+                    ctx_map = {
+                        'StochRSI_K': 'StochRSI_K', 'StochRSI_D': 'StochRSI_D',
+                        'Funding_Rate': 'Funding_Rate', 'Open_Interest': 'Open_Interest',
+                    }
+                    for col, key in ctx_map.items():
+                        if col in df_quant.columns:
+                            v = last_q.get(col)
+                            try:
+                                if pd.notna(v): live_ctx[key] = round(float(v), 6)
+                            except Exception:
+                                pass
+                    # Add liquidity borders
+                    for lk in ['PDH', 'PDL', 'PWH', 'PWL']:
+                        lv = liquidity.get(lk, 0)
+                        if lv: live_ctx[lk] = round(lv, 6)
+                    quant_results['market_context'] = live_ctx
+
                 state["quant_analysis"] = quant_results
             else:
                 state["quant_analysis"] = None
         except Exception as e:
             logger.error(f"Quant Analysis Error: {e}")
+            import traceback; traceback.print_exc()
             state["quant_analysis"] = None
 
         logger.info("✅ Dashboard data ready!")
@@ -1368,6 +1507,113 @@ def export_excel():
         return jsonify({"success": False, "error": "openpyxl not installed. Run: pip install openpyxl"}), 500
     except Exception as e:
         logger.error(f"Export Excel failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ==========================================
+# 📤 CSV ANALYSIS ENDPOINT
+# ==========================================
+@app.route("/api/analyze-csv", methods=["POST"])
+def analyze_csv():
+    """
+    Upload a CSV file and run the 71-point quantitative scoring on it.
+    Returns JSON with the full analysis result.
+    """
+    try:
+        import re
+        from io import StringIO
+
+        if 'file' not in flask_request.files:
+            return jsonify({"success": False, "error": "No file uploaded"}), 400
+
+        f = flask_request.files['file']
+        raw_text = f.read().decode('utf-8', errors='replace')
+
+        # ── Parse '#' comment header for metadata ──
+        metadata = {'Symbol': 'UNKNOWN', 'Timeframe': '4H', 'AVG_ENTRY_PRICE': None,
+                    'TOTAL_QTY': None, 'TOTAL_COST': None, 'Export_Time': None}
+        data_lines = []
+        for line in raw_text.splitlines():
+            ls = line.strip()
+            if ls.startswith('#'):
+                if 'Symbol' in ls:
+                    parts = ls.split('Symbol')
+                    if len(parts) > 1: metadata['Symbol'] = parts[1].replace(':', '').replace('=', '').strip()
+                elif 'Timeframe' in ls:
+                    parts = ls.split('Timeframe')
+                    if len(parts) > 1: metadata['Timeframe'] = parts[1].replace(':', '').replace('=', '').strip()
+                elif 'AVG ENTRY PRICE' in ls or 'AVG_ENTRY_PRICE' in ls:
+                    m = re.search(r'[\d\.]+', ls.split('PRICE')[-1])
+                    if m: metadata['AVG_ENTRY_PRICE'] = float(m.group())
+                elif 'Entry #1: Price=' in ls:
+                    m = re.search(r'Price=([\d\.]+)', ls)
+                    if m and metadata['AVG_ENTRY_PRICE'] is None: metadata['AVG_ENTRY_PRICE'] = float(m.group(1))
+                elif 'TOTAL QTY' in ls:
+                    m = re.search(r'[\d\.]+', ls.split('QTY')[-1])
+                    if m: metadata['TOTAL_QTY'] = float(m.group())
+                elif 'TOTAL COST' in ls:
+                    m = re.search(r'[\d\.]+', ls.split('COST')[-1])
+                    if m: metadata['TOTAL_COST'] = float(m.group())
+            else:
+                data_lines.append(ls)
+
+        if not data_lines:
+            return jsonify({"success": False, "error": "CSV has no data rows"}), 400
+
+        csv_str = '\n'.join(data_lines)
+        df = pd.read_csv(StringIO(csv_str))
+
+        if len(df) < 22:
+            return jsonify({"success": False, "error": f"Need at least 22 rows, got {len(df)}"}), 400
+
+        # ── Apply indicators if missing ──
+        if 'EMA_21' not in df.columns:
+            import pandas_ta as ta2
+            df['EMA_21']  = ta2.ema(df['Close'], length=21)
+            df['EMA_50']  = ta2.ema(df['Close'], length=50)
+            df['EMA_200'] = ta2.ema(df['Close'], length=200)
+            df['RSI_6']   = ta2.rsi(df['Close'], length=6)
+            atr_res = ta2.atr(df['High'], df['Low'], df['Close'], length=14)
+            df['ATR_14'] = atr_res
+
+        result = algo_scoring.calculate_71point_score(df, metadata)
+        if result is None:
+            return jsonify({"success": False, "error": "Scoring returned None — insufficient indicators"}), 400
+
+        # Build market_context dict from last candle
+        ctx_cols = ['MSB','BOS','CHoCH','SFP_Sweep','FVG_Up_Top','FVG_Up_Bottom',
+                    'FVG_Down_Top','FVG_Down_Bottom','OB_Price','Fib_0.618','Fib_0.786',
+                    'POC','VAH','VAL','Buy_Liq','Sell_Liq','PDH','PDL','PWH','PWL',
+                    'EMA_7','EMA_7_H4','EMA_21_H4','EMA_50_H4','EMA_200_H4',
+                    'StochRSI_K','StochRSI_D','Funding_Rate','BTC_Price','BTC_Dominance','Altcoin_Index']
+        last = df.iloc[-1]
+        market_ctx = {}
+        for col in ctx_cols:
+            if col in df.columns:
+                v = last.get(col)
+                try:
+                    if pd.notna(v) and str(v) != '':
+                        market_ctx[col] = round(float(v), 6)
+                except Exception:
+                    pass
+
+        return jsonify({
+            "success":        True,
+            "metadata":       metadata,
+            "current_price":  float(last.get('Close', 0)),
+            "timestamp":      str(last.get('Timestamp', '')),
+            "long":           result['long'],
+            "short":          result['short'],
+            "emergency":      result['emergency'],
+            "exit":           result.get('exit', {}),
+            "variables":      result.get('variables', {}),
+            "market_context": market_ctx,
+            "rows":           len(df),
+        })
+
+    except Exception as e:
+        logger.error(f"CSV Analysis Error: {e}")
+        import traceback; traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 

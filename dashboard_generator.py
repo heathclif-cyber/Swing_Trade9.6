@@ -1,711 +1,514 @@
+"""
+Protocol 9.6 — CSV Dashboard Generator
+Reads a Protocol 9.6 enriched CSV, runs the 71-point scoring engine,
+and produces a standalone glassmorphism HTML analysis dashboard.
+
+Usage:
+    python dashboard_generator.py <path_to_csv>          # analyzes specified file
+    python dashboard_generator.py                         # tries enriched_export.csv
+"""
+
 import os
 import sys
+import re
 import pandas as pd
 import numpy as np
-import json
+from io import StringIO
 from datetime import datetime
-import re
 
-CSV_FILE = 'enriched_export.csv'
+# Import the spec-compliant scoring engine
+try:
+    from algo_scoring import calculate_71point_score
+except ImportError:
+    print("⚠️  algo_scoring.py not found in same directory. Exiting.")
+    sys.exit(1)
 
-def parse_csv_and_metadata(filepath):
-    """Parses `#` comments for metadata and loads the CSV."""
+
+# ────────────────────────────────────────────────────────────────────────────
+# CSV PARSING
+# ────────────────────────────────────────────────────────────────────────────
+
+def parse_csv_and_metadata(filepath: str):
+    """Parse Protocol 9.6 CSV: extract '#' comment metadata + load DataFrame."""
     metadata = {
         'Symbol': 'UNKNOWN',
-        'Timeframe': '4H', 
+        'Timeframe': '4H',
         'AVG_ENTRY_PRICE': None,
         'TOTAL_QTY': None,
         'TOTAL_COST': None,
-        'Export_Time': None
+        'Export_Time': None,
     }
-    
+
     if not os.path.exists(filepath):
-        print(f"Error: {filepath} not found.")
+        print(f"Error: '{filepath}' not found.")
         return metadata, pd.DataFrame()
-        
+
     data_lines = []
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
         for line in f:
-            line_str = line.strip()
-            if line_str.startswith('#'):
-                # Extract metadata
-                if 'Symbol' in line_str:
-                    parts = line_str.split('Symbol')
-                    if len(parts) > 1: metadata['Symbol'] = parts[1].replace(':', '').replace('=', '').strip()
-                elif 'Timeframe' in line_str:
-                    parts = line_str.split('Timeframe')
-                    if len(parts) > 1: metadata['Timeframe'] = parts[1].replace(':', '').replace('=', '').strip()
-                elif 'AVG ENTRY PRICE' in line_str or 'Entry #1: Price=' in line_str:
-                    # Try to extract the number
-                    match = re.search(r'[\d\.]+', line_str.split('PRICE')[-1] if 'PRICE' in line_str else line_str.split('Price=')[-1])
-                    if match: metadata['AVG_ENTRY_PRICE'] = float(match.group())
-                elif 'TOTAL QTY' in line_str:
-                    match = re.search(r'[\d\.]+', line_str.split('QTY')[-1])
-                    if match: metadata['TOTAL_QTY'] = float(match.group())
-                elif 'TOTAL COST' in line_str:
-                    match = re.search(r'[\d\.]+', line_str.split('COST')[-1])
-                    if match: metadata['TOTAL_COST'] = float(match.group())
-                elif 'Export Time' in line_str:
-                    parts = line_str.split('Export Time')
-                    if len(parts) > 1: metadata['Export_Time'] = parts[1].replace(':', '').replace('=', '').strip()
+            ls = line.strip()
+            if ls.startswith('#'):
+                if 'Symbol' in ls:
+                    p = ls.split('Symbol')
+                    if len(p) > 1: metadata['Symbol'] = p[1].replace(':', '').replace('=', '').strip()
+                elif 'Timeframe' in ls:
+                    p = ls.split('Timeframe')
+                    if len(p) > 1: metadata['Timeframe'] = p[1].replace(':', '').replace('=', '').strip()
+                elif 'AVG ENTRY PRICE' in ls or 'AVG_ENTRY_PRICE' in ls:
+                    m = re.search(r'[\d\.]+', ls.split('PRICE')[-1])
+                    if m: metadata['AVG_ENTRY_PRICE'] = float(m.group())
+                elif 'Entry #1: Price=' in ls and metadata['AVG_ENTRY_PRICE'] is None:
+                    m = re.search(r'Price=([\d\.]+)', ls)
+                    if m: metadata['AVG_ENTRY_PRICE'] = float(m.group(1))
+                elif 'TOTAL QTY' in ls:
+                    m = re.search(r'[\d\.]+', ls.split('QTY')[-1])
+                    if m: metadata['TOTAL_QTY'] = float(m.group())
+                elif 'TOTAL COST' in ls:
+                    m = re.search(r'[\d\.]+', ls.split('COST')[-1])
+                    if m: metadata['TOTAL_COST'] = float(m.group())
+                elif 'Export Time' in ls:
+                    p = ls.split('Export Time')
+                    if len(p) > 1: metadata['Export_Time'] = p[1].replace(':', '').strip()
             else:
-                data_lines.append(line_str)
-                
+                data_lines.append(ls)
+
     if not data_lines:
         return metadata, pd.DataFrame()
-        
-    from io import StringIO
+
     df = pd.read_csv(StringIO('\n'.join(data_lines)))
     return metadata, df
 
-def get_market_session(timestamp_str):
+
+def ensure_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute missing EMA/RSI/ATR columns using pandas_ta if not already present."""
     try:
-        # Expected format: 2026-03-18 04:14:59
-        dt = pd.to_datetime(timestamp_str)
-        hour = dt.hour
-        # Simplified UTC sessions
-        if 0 <= hour < 8: return "ASIAN"
-        elif 8 <= hour < 13: return "LONDON"
-        elif 13 <= hour < 22: return "NEW YORK"
-        else: return "ASIAN (Late)"
-    except:
-        return "UNKNOWN"
+        import pandas_ta as ta
+        if 'EMA_21' not in df.columns:
+            df['EMA_21']  = ta.ema(df['Close'], length=21)
+        if 'EMA_50' not in df.columns:
+            df['EMA_50']  = ta.ema(df['Close'], length=50)
+        if 'EMA_200' not in df.columns:
+            df['EMA_200'] = ta.ema(df['Close'], length=200)
+        if 'RSI_6' not in df.columns:
+            df['RSI_6']   = ta.rsi(df['Close'], length=6)
+        if 'ATR_14' not in df.columns:
+            df['ATR_14']  = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+    except ImportError:
+        print("⚠️  pandas_ta not installed; some indicators may be missing.")
+    return df
 
-def safe_float(val, default=0.0):
-    try:
-        if pd.isna(val): return default
-        return float(val)
-    except:
-        return default
 
-def calculate_scoring(df, metadata):
-    if len(df) < 22:
-        print("Not enough data. Need at least 22 candles.")
-        return None
-        
-    # Ensure CVD exists
-    if 'CVD' not in df.columns:
-        if 'Buy_Volume' in df.columns and 'Total_Volume' in df.columns and 'Sell_Volume' not in df.columns:
-            df['Sell_Volume'] = df['Total_Volume'] - df['Buy_Volume']
-        if 'Buy_Volume' in df.columns and 'Sell_Volume' in df.columns:
-            df['CVD'] = (df['Buy_Volume'] - df['Sell_Volume']).cumsum()
-        else:
-            df['CVD'] = 0.0
+# ────────────────────────────────────────────────────────────────────────────
+# HTML GENERATION
+# ────────────────────────────────────────────────────────────────────────────
 
-    # Basic Variables
-    last_idx = -1
-    prev20_start = -21
-    prev20_end = -1
-    
-    # Slicing
-    recent_20 = df.iloc[prev20_start:prev20_end]
-    last_candle = df.iloc[-1]
-    candle_21_ago = df.iloc[-21]
-    
-    # 1. Open Interest
-    A = safe_float(last_candle.get('Open_Interest', 0))
-    B = recent_20['Open_Interest'].mean() if 'Open_Interest' in df.columns else 0
-    C = ((A - B) / B * 100) if B != 0 else 0
-    
-    # 2. Volume
-    D = safe_float(last_candle.get('Total_Volume', 0))
-    E = recent_20['Total_Volume'].mean() if 'Total_Volume' in df.columns else 0
-    F = ((D - E) / E * 100) if E != 0 else 0
-    
-    # 3. TakerBuy
-    buy_vol = safe_float(last_candle.get('Buy_Volume', 0))
-    G = (buy_vol / D * 100) if D != 0 else 50.0
-    
-    # 4. ATR%
-    close_price = safe_float(last_candle.get('Close', 0))
-    atr = safe_float(last_candle.get('ATR_14', 0))
-    H = (atr / close_price * 100) if close_price != 0 else 0
-    
-    is_altcoin = True
-    if metadata['Symbol'] in ['BTC', 'BTCUSDT', 'ETHUSDT'] or close_price > 3000:
-        is_altcoin = False
-        
-    atr_multiplier = 2.0 if is_altcoin else 1.0
+FEATURE_LABELS = {
+    'OI':       'Open Interest Change',
+    'Vol':      'Relative Volume (MA20)',
+    'TakerBuy': 'Taker Buy Pressure',
+    'ATR':      'Volatility ATR %',
+    'CVD':      'Cumulative Vol Delta',
+    'EMA21':    'Distance EMA 21',
+    'EMA50':    'Distance EMA 50',
+    'EMA200':   'Distance EMA 200',
+    'RSI':      'RSI 6 Momentum',
+}
 
-    # 5. CVD
-    I = safe_float(last_candle.get('CVD', 0))
-    J = safe_float(candle_21_ago.get('CVD', 0))
-    K = ((I - J) / abs(J) * 100) if J != 0 else 0
-    
-    close_21_ago = safe_float(candle_21_ago.get('Close', 0))
-    cvd_div_bull = (I > J) and (close_price < close_21_ago)
-    cvd_div_bear = (I < J) and (close_price > close_21_ago)
-    
-    # EMA Distances
-    ema21 = safe_float(last_candle.get('EMA_21', close_price))
-    ema50 = safe_float(last_candle.get('EMA_50', close_price))
-    ema200 = safe_float(last_candle.get('EMA_200', close_price))
-    
-    is_active_pos = metadata.get('AVG_ENTRY_PRICE') is not None
-    ref_price_long = close_price if is_active_pos else safe_float(last_candle.get('Low', close_price))
-    ref_price_short = safe_float(last_candle.get('High', close_price))
-    
-    L = (ref_price_long - ema21) / ema21 * 100 if ema21 else 0
-    M = (ref_price_long - ema50) / ema50 * 100 if ema50 else 0
-    N = (ref_price_long - ema200) / ema200 * 100 if ema200 else 0
-    
-    Lp = (ref_price_short - ema21) / ema21 * 100 if ema21 else 0
-    Mp = (ref_price_short - ema50) / ema50 * 100 if ema50 else 0
-    Np = (ref_price_short - ema200) / ema200 * 100 if ema200 else 0
-    
-    O_rsi = safe_float(last_candle.get('RSI_6', 50))
-    
-    # ==========================
-    # SCORING LONG
-    # ==========================
-    scores_long = {}
-    details_long = {}
-    
-    # 1. OI
-    if C > 30: s1 = 3
-    elif 5 <= C <= 30: s1 = 2
-    elif -20 <= C < 5: s1 = 1
-    else: s1 = 0
-    scores_long['OI'] = s1 * 5; details_long['OI'] = (s1, C)
+FEATURE_UNIT = {
+    'OI': '%', 'Vol': '%', 'TakerBuy': '%', 'ATR': '%',
+    'CVD': '%', 'EMA21': '%', 'EMA50': '%', 'EMA200': '%', 'RSI': '',
+}
 
-    # 2. Vol
-    if F > 70: s2 = 3
-    elif 20 <= F <= 70: s2 = 2
-    elif -10 <= F < 20: s2 = 1
-    else: s2 = 0
-    scores_long['Vol'] = s2 * 4; details_long['Vol'] = (s2, F)
+DECISION_COLORS = {
+    'FULL': ('#10b981', 'rgba(16,185,129,0.12)', 'rgba(16,185,129,0.35)'),
+    'HALF': ('#3b82f6', 'rgba(59,130,246,0.12)',  'rgba(59,130,246,0.35)'),
+    'WAIT': ('#f59e0b', 'rgba(245,158,11,0.12)',  'rgba(245,158,11,0.35)'),
+    'SKIP': ('#ef4444', 'rgba(239,68,68,0.12)',   'rgba(239,68,68,0.35)'),
+}
 
-    # 3. TakerBuy (max 2)
-    if G < 49: s3 = 2
-    elif 49 <= G <= 51: s3 = 1
-    else: s3 = 0
-    scores_long['TakerBuy'] = s3 * 4; details_long['TakerBuy'] = (s3, G)
+DOT_COLORS = {3: '#10b981', 2: '#f59e0b', 1: '#f97316', 0: '#ef4444'}
 
-    # 4. ATR
-    # For Altcoin bounds are multiplied by 2:
-    # Orig: 3-5 (3), 2-3|5-7 (2), 1.8-2|7-10 (1) -> Wait, sweet spot altcoin is 3-5% (noted in prompt). So if NOT altcoin, it is 1.5-2.5%.
-    # Prompt says: "batas ATR% dikalikan ×2 untuk altcoin (sweet spot altcoin = 3–5%, bukan 1.5–2.5%)"
-    # Oh, the rule given in prompt is ALREADY the altcoin scaled version? Wait.
-    # Prompt:
-    # 3.0% ≤ H ≤ 5.0%                        -> skor 3
-    # (2.0% ≤ H < 3.0%) ATAU (5.0% < H ≤ 7.0%) -> skor 2
-    # (1.8% ≤ H < 2.0%) ATAU (7.0% < H ≤ 10%)  -> skor 1
-    # "CATATAN ATR ALTCOIN: semua batas ATR% dikalikan ×2 untuk altcoin"
-    # That implies the numbers given in the prompt ARE the BTC ones, or THEY ARE the altcoin ones. 
-    # Usually BTC ATR is 1.5-2.5%. So 3-5% is clearly the ALTCOIN sweet spot. Let's assume the limits provided in the prompt are the ALTCOIN limits. If it's BTC, divide by 2.
-    if is_altcoin:
-        b1, b2, b3, b4, b5, b6 = 3.0, 5.0, 2.0, 7.0, 1.8, 10.0
-    else:
-        # BTC limits
-        b1, b2, b3, b4, b5, b6 = 1.5, 2.5, 1.0, 3.5, 0.9, 5.0
 
-    if b1 <= H <= b2: s4 = 3
-    elif (b3 <= H < b1) or (b2 < H <= b4): s4 = 2
-    elif (b5 <= H < b3) or (b4 < H <= b6): s4 = 1
-    else: s4 = 0
-    scores_long['ATR'] = s4 * 3; details_long['ATR'] = (s4, H)
+def _fmt(v, decimals=5):
+    """Format a float price (altcoin precision)."""
+    if v is None: return '—'
+    return f"${v:.{decimals}f}"
 
-    # 5. CVD
-    if cvd_div_bull: s5 = 3
-    elif K > 1: s5 = 2
-    elif 0 <= K <= 1: s5 = 1
-    else: s5 = 0
-    scores_long['CVD'] = s5 * 3; details_long['CVD'] = (s5, K)
 
-    # 6. vs EMA21
-    if L < -3: s6 = 3
-    elif -3 <= L < -1.5: s6 = 2
-    elif -1.5 <= L < -0.5: s6 = 1
-    else: s6 = 0
-    scores_long['EMA21'] = s6 * 2; details_long['EMA21'] = (s6, L)
+def _pct(v, decimals=2, sign=True):
+    if v is None: return '—'
+    prefix = '+' if (sign and v >= 0) else ''
+    return f"{prefix}{v:.{decimals}f}%"
 
-    # 7. vs EMA50
-    if M < -4: s7 = 3
-    elif -4 <= M < -2: s7 = 2
-    elif -2 <= M < 0: s7 = 1
-    else: s7 = 0
-    scores_long['EMA50'] = s7 * 2; details_long['EMA50'] = (s7, M)
 
-    # 8. vs EMA200
-    if N < -7: s8 = 3
-    elif -7 <= N < -3: s8 = 2
-    elif -3 <= N < 0: s8 = 1
-    else: s8 = 0
-    scores_long['EMA200'] = s8 * 1; details_long['EMA200'] = (s8, N)
-
-    # 9. RSI
-    if O_rsi < 25: s9 = 3
-    elif 25 <= O_rsi < 40: s9 = 2
-    elif 40 <= O_rsi < 55: s9 = 1
-    else: s9 = 0
-    scores_long['RSI'] = s9 * 1; details_long['RSI'] = (s9, O_rsi)
-
-    total_long = sum(scores_long.values())
-    pct_long = total_long / 71 * 100
-
-    # ==========================
-    # SCORING SHORT
-    # ==========================
-    scores_short = {}
-    details_short = {}
-    
-    # 1 & 2 & 4 exact same as long
-    scores_short['OI'] = s1 * 5; details_short['OI'] = (s1, C)
-    scores_short['Vol'] = s2 * 4; details_short['Vol'] = (s2, F)
-    scores_short['ATR'] = s4 * 3; details_short['ATR'] = (s4, H)
-
-    # 3. TakerBuy SHORT
-    if G > 53: s3_s = 2
-    elif 51 <= G <= 53: s3_s = 1
-    else: s3_s = 0
-    scores_short['TakerBuy'] = s3_s * 4; details_short['TakerBuy'] = (s3_s, G)
-
-    # 5. CVD Bear
-    if cvd_div_bear: s5_s = 3
-    elif K < -1: s5_s = 2
-    elif K <= 0: s5_s = 1
-    else: s5_s = 0
-    scores_short['CVD'] = s5_s * 3; details_short['CVD'] = (s5_s, K)
-
-    # 6. vs EMA21 SHORT
-    if Lp > 5: s6_s = 3
-    elif 3 <= Lp <= 5: s6_s = 2
-    elif 1.5 <= Lp < 3: s6_s = 1
-    else: s6_s = 0
-    scores_short['EMA21'] = s6_s * 2; details_short['EMA21'] = (s6_s, Lp)
-
-    # 7. vs EMA50 SHORT
-    if Mp > 6: s7_s = 3
-    elif 4 <= Mp <= 6: s7_s = 2
-    elif 2 <= Mp < 4: s7_s = 1
-    else: s7_s = 0
-    scores_short['EMA50'] = s7_s * 2; details_short['EMA50'] = (s7_s, Mp)
-
-    # 8. vs EMA200 SHORT
-    if Np > 10: s8_s = 3
-    elif 5 <= Np <= 10: s8_s = 2
-    elif 2 <= Np < 5: s8_s = 1
-    else: s8_s = 0
-    scores_short['EMA200'] = s8_s * 1; details_short['EMA200'] = (s8_s, Np)
-
-    # 9. RSI SHORT
-    if O_rsi > 75: s9_s = 3
-    elif 60 <= O_rsi <= 75: s9_s = 2
-    elif 45 <= O_rsi < 60: s9_s = 1
-    else: s9_s = 0
-    scores_short['RSI'] = s9_s * 1; details_short['RSI'] = (s9_s, O_rsi)
-
-    total_short = sum(scores_short.values())
-    pct_short = total_short / 71 * 100
-
-    def get_decision(scores_total):
-        if scores_total >= 53: return "FULL SIZE ENTRY", 1.0, "FULL"
-        elif scores_total >= 36: return "HALF SIZE ENTRY", 1.5, "HALF"
-        elif scores_total >= 21: return "WAIT & MONITOR", 2.0, "WAIT"
-        else: return "SKIP", 0.0, "SKIP"
-
-    dec_long_str, sl_mul_long, dec_long_code = get_decision(total_long)
-    dec_short_str, sl_mul_short, dec_short_code = get_decision(total_short)
-
-    # SL and TP Levels
-    entry_val = float(metadata['AVG_ENTRY_PRICE']) if metadata['AVG_ENTRY_PRICE'] else close_price
-
-    # Long Levels
-    sl_ketat_L = close_price - (atr * 1.0)
-    sl_normal_L = close_price - (atr * 1.5)
-    sl_lebar_L = close_price - (atr * 2.0)
-
-    tp1_L = entry_val * 1.025
-    tp2_L = entry_val * 1.046
-    tp3_L = entry_val * 1.070
-
-    # Short Levels
-    sl_ketat_S = close_price + (atr * 1.0)
-    sl_normal_S = close_price + (atr * 1.5)
-    sl_lebar_S = close_price + (atr * 2.0)
-
-    tp1_S = entry_val * 0.975
-    tp2_S = entry_val * 0.954
-    tp3_S = entry_val * 0.930
-
-    # Risk Reward
-    def calc_rr_L(tp, sl): return (tp - close_price) / (close_price - sl) if sl < close_price else 0
-    def calc_rr_S(tp, sl): return (close_price - tp) / (sl - close_price) if sl > close_price else 0
-
-    # Exit signals logic (Posisi aktif)
-    exit_signals = []
-    if is_active_pos:
-        # PnL
-        pnl_pct = (close_price / entry_val - 1) * 100
-
-        # Signals
-        if O_rsi > 75: exit_signals.append(("❌", "RSI_6 overbought", O_rsi, "> 75"))
-        if ((close_price/ema21 - 1)*100) > 3.6: exit_signals.append(("❌", "vs EMA21 extended", (close_price/ema21 - 1)*100, "> +3.6%"))
-        if ((close_price/ema50 - 1)*100) > 4.6: exit_signals.append(("❌", "vs EMA50 extended", (close_price/ema50 - 1)*100, "> +4.6%"))
-        
-        if G > 53: exit_signals.append(("⚠️", "TakerBuy FOMO", G, "> 53%"))
-        bos_val = safe_float(last_candle.get('BOS', 0))
-        if bos_val == -1: exit_signals.append(("⚠️", "BOS bearish", bos_val, "== -1"))
-        fr_val = safe_float(last_candle.get('Funding_Rate', 0))
-        if fr_val > 0.001: exit_signals.append(("⚠️", "Funding rate tinggi", fr_val, "> +0.001"))
-        
-        atr_entry = atr # Approximation: we don't have historical ATR from entry
-        if atr < atr_entry * 0.75: exit_signals.append(("⚠️", "ATR mengempis", atr, f"< {atr_entry*0.75:.4f}"))
-
-    exit_x = sum(1 for e in exit_signals if e[0] == "❌")
-    exit_w = sum(1 for e in exit_signals if e[0] == "⚠️")
-    exit_reco = "HOLD"
-    if exit_x >= 1: exit_reco = "PARTIAL EXIT atau FULL EXIT"
-    elif exit_w >= 1: exit_reco = "HOLD dengan monitoring ketat"
-
-    # Narrative Generation
-    sess = get_market_session(str(last_candle.get('Timestamp', datetime.now(datetime.timezone.utc))))
-    
-    vol_desc = f"di atas MA20 (+{F:.1f}%)" if F > 0 else f"di bawah MA20 ({F:.1f}%)"
-    cvd_desc = "bullish divergence" if cvd_div_bull else ("bearish divergence" if cvd_div_bear else f"perubahan {K:.1f}% dari 20 candle lalu")
-    
-    narrative_long = {
-        'kondisi': f"Sesi pasar {sess}. Volume {vol_desc}. Posisi harga (${close_price:.4f}) berada di {'atas' if L>0 else 'bawah'} EMA21 berjarak {L:.1f}%. CVD menunjukkan {cvd_desc}. Momentum RSI di {O_rsi:.1f}.",
-        'keputusan': f"Skor setup mencapai {total_long}/71 ({pct_long:.1f}%) menghasilkan keputusan {dec_long_str}. " + ("Faktor dominan mendukung: RSI oversold." if O_rsi < 40 else ""),
-        'skenario': f"Skenario validasi: pantau pada sesi berikutnya. Jika harga > {tp1_L:.4f}, tier akan membaik."
-    }
-
-    narrative_short = {
-        'kondisi': f"Sesi pasar {sess}. Volume {vol_desc}. Harga berjarak {Lp:.1f}% terhadap EMA21 (short focus). CVD {cvd_desc}. RSI di {O_rsi:.1f}.",
-        'keputusan': f"Skor setup mencapai {total_short}/71 ({pct_short:.1f}%) menghasilkan keputusan {dec_short_str}. ",
-        'skenario': f"Monitor level SL ketat di {sl_ketat_S:.4f}. Break bawah {tp1_S:.4f} mengkonfirmasi setup."
-    }
-
-    # Market context
-    market_context = {}
-    for col in ['MSB', 'BOS', 'CHoCH', 'SFP_Sweep', 'FVG_Up_Top', 'FVG_Up_Bottom', 'FVG_Down_Top', 'FVG_Down_Bottom', 'OB_Price', 'Fib_0.618', 'Fib_0.786', 'POC', 'VAH', 'VAL', 'Buy_Liq', 'Sell_Liq', 'PDH', 'PDL', 'PWH', 'PWL', 'EMA_7', 'EMA_7_H4', 'EMA_21_H4', 'EMA_50_H4', 'EMA_200_H4', 'StochRSI_K', 'StochRSI_D', 'Funding_Rate', 'BTC_Price', 'BTC_Dominance', 'Altcoin_Index']:
-        if col in df.columns:
-            val = last_candle.get(col)
-            if pd.notna(val) and val != "":
-                market_context[col] = val
-
-    return {
-        'metadata': metadata,
-        'current_price': close_price,
-        'timestamp': last_candle.get('Timestamp', ''),
-        'session': sess,
-        'is_active': is_active_pos,
-        'long': {
-            'total': total_long,
-            'pct': pct_long,
-            'decision': dec_long_str,
-            'code': dec_long_code,
-            'scores': scores_long,
-            'details': details_long,
-            'levels': {
-                'sl_ketat': sl_ketat_L, 'sl_normal': sl_normal_L, 'sl_lebar': sl_lebar_L, 'tp1': tp1_L, 'tp2': tp2_L, 'tp3': tp3_L,
-                'rr1': calc_rr_L(tp1_L, sl_normal_L), 'rr2': calc_rr_L(tp2_L, sl_normal_L), 'rr3': calc_rr_L(tp3_L, sl_normal_L)
-            },
-            'narrative': narrative_long
-        },
-        'short': {
-            'total': total_short,
-            'pct': pct_short,
-            'decision': dec_short_str,
-            'code': dec_short_code,
-            'scores': scores_short,
-            'details': details_short,
-            'levels': {
-                'sl_ketat': sl_ketat_S, 'sl_normal': sl_normal_S, 'sl_lebar': sl_lebar_S, 'tp1': tp1_S, 'tp2': tp2_S, 'tp3': tp3_S,
-                'rr1': calc_rr_S(tp1_S, sl_normal_S), 'rr2': calc_rr_S(tp2_S, sl_normal_S), 'rr3': calc_rr_S(tp3_S, sl_normal_S)
-            },
-            'narrative': narrative_short
-        },
-        'exit': {
-            'active': is_active_pos,
-            'pnl_pct': pnl_pct if is_active_pos else 0,
-            'signals': exit_signals,
-            'recommendation': exit_reco
-        },
-        'context': market_context,
-        'emergency': {
-            'sl_hit': is_active_pos and close_price < sl_ketat_L,
-            'rsi_overbought': is_active_pos and O_rsi > 75
-        }
-    }
-
-def generate_html(data):
-    # Determine color logic
-    def get_color(code):
-        return {'FULL': '#1D9E75', 'HALF': '#10b981', 'WAIT': '#BA7517', 'SKIP': '#E24B4A'}.get(code, '#555')
-        
-    def get_dot(score, max_score):
-        # normalize to 0-3
-        ratio = score / (max_score+0.0001)
-        if ratio >= 0.99: return "#1D9E75"
-        elif ratio >= 0.66: return "#BA7517"
-        elif ratio >= 0.33: return "#D85A30"
-        else: return "#E24B4A"
-
-    def render_scores(scores, details, maxes):
-        html = "<div class='scoring-grid'>"
-        for k in ['OI', 'Vol', 'TakerBuy', 'ATR', 'CVD', 'EMA21', 'EMA50', 'EMA200', 'RSI']:
-            sc = scores.get(k, 0)
-            mx = maxes.get(k, 0)
-            val = details.get(k, (0, 0))[1]
-            dot = get_dot(details.get(k, (0,0))[0], maxes.get(k, 3) / maxes.get(k, 1)) if maxes.get(k, 1) else "#E24B4A"
-            if k == 'RSI': dot = get_dot(details.get(k, (0,0))[0], 3)
-            if k == 'EMA200': dot = get_dot(details.get(k, (0,0))[0], 3)
-            # just direct score to dot lookup
-            score_val = details.get(k, (0,0))[0]
-            if score_val == 3: dot = "#1D9E75"
-            elif score_val == 2: dot = "#BA7517"
-            elif score_val == 1: dot = "#D85A30"
-            else: dot = "#E24B4A"
-            
-            html += f"""
-            <div class='score-item'>
-                <div class='score-hdr'>
-                    <span class='dot' style='background:{dot}'></span> {k}
-                </div>
-                <div class='score-val'>{val:+.2f}</div>
-                <div class='score-bar'><div class='fill' style='width:{(sc/(mx+0.001))*100}%; background:{dot}'></div></div>
-                <div class='score-pts'>{sc}/{mx} pts</div>
+def render_feature_rows(scores: dict) -> str:
+    rows = ''
+    for key, (pts, max_pts, raw, stars) in scores.items():
+        fill_pct = (pts / max_pts * 100) if max_pts > 0 else 0
+        bar_color = DOT_COLORS.get(stars, '#ef4444')
+        dot_color = bar_color
+        unit = FEATURE_UNIT.get(key, '')
+        raw_fmt = ('+' if raw >= 0 else '') + f'{raw:.2f}{unit}' if isinstance(raw, (int, float)) else str(raw)
+        rows += f'''
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+            <div style="width:9px;height:9px;border-radius:50%;background:{dot_color};flex-shrink:0"></div>
+            <div style="flex:1;font-size:12px;color:#94a3b8">{FEATURE_LABELS.get(key, key)}</div>
+            <div style="font-family:monospace;font-size:12px;font-weight:600;min-width:56px;text-align:right">{raw_fmt}</div>
+            <div style="width:72px;height:5px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;flex-shrink:0">
+                <div style="width:{fill_pct:.0f}%;height:100%;background:{bar_color};border-radius:3px"></div>
             </div>
-            """
-        html += "</div>"
-        return html
+            <div style="font-size:10px;color:#64748b;font-family:monospace;min-width:40px;text-align:right">{pts}/{max_pts}</div>
+        </div>'''
+    return rows
 
-    maxes = {'OI': 15, 'Vol': 12, 'TakerBuy': 8, 'ATR': 9, 'CVD': 9, 'EMA21': 6, 'EMA50': 6, 'EMA200': 3, 'RSI': 3}
 
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="id">
-    <head>
-        <meta charset="UTF-8">
-        <title>Quantitative Swing Dashboard</title>
-        <style>
-            :root {{
-                --bg-main: #0a0a0b;
-                --bg-card: #151518;
-                --bg-card-hover: #1c1c1f;
-                --text-main: #f0f0f5;
-                --text-muted: #8b8b99;
-                --border: #2a2a35;
-                --brand: #2563eb;
-                --green: #1D9E75;
-                --red: #E24B4A;
-                --yellow: #BA7517;
-            }}
-            * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', system-ui, sans-serif; }}
-            body {{ background: var(--bg-main); color: var(--text-main); font-size: 14px; padding: 20px; }}
-            .container {{ max-width: 1200px; margin: 0 auto; }}
-            
-            /* Header */
-            .header {{ background: var(--bg-card); padding: 20px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }}
-            .header-info h1 {{ font-size: 20px; font-weight: 600; margin-bottom: 8px; }}
-            .header-info p {{ color: var(--text-muted); }}
-            .active-pos-badge {{ background: rgba(29, 158, 117, 0.1); border: 1px solid var(--green); color: var(--green); padding: 12px 16px; border-radius: 8px; font-weight: 500; text-align: right; }}
-            
-            /* Emergency */
-            .emergency-banner {{ background: rgba(226, 75, 74, 0.15); border: 2px solid var(--red); color: #ff6b6b; padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: bold; text-align: center; }}
-            
-            /* Tabs */
-            .tabs {{ display: flex; gap: 12px; margin-bottom: 24px; }}
-            .tab-btn {{ background: var(--bg-card); border: 1px solid var(--border); color: var(--text-muted); padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s; }}
-            .tab-btn.active {{ background: var(--border); color: var(--text-main); }}
-            
-            /* Tab Content */
-            .tab-content {{ display: none; margin-bottom: 24px; }}
-            .tab-content.active {{ display: block; }}
-            
-            /* Decision Banner */
-            .decision {{ padding: 24px; border-radius: 12px; margin-bottom: 24px; text-align: center; border-left: 6px solid; }}
-            .decision.FULL {{ background: rgba(29, 158, 117, 0.1); border-color: var(--green); }}
-            .decision.HALF {{ background: rgba(16, 185, 129, 0.1); border-color: #10b981; }}
-            .decision.WAIT {{ background: rgba(186, 117, 23, 0.1); border-color: var(--yellow); }}
-            .decision.SKIP {{ background: rgba(226, 75, 74, 0.1); border-color: var(--red); }}
-            .decision h2 {{ font-size: 28px; margin-bottom: 8px; }}
-            .decision p {{ font-size: 16px; opacity: 0.9; }}
-            
-            /* Grid Modules */
-            .section {{ background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }}
-            .section h3 {{ margin-bottom: 20px; font-size: 16px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }}
-            
-            /* Scoring */
-            .scoring-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }}
-            .score-item {{ background: var(--bg-main); padding: 16px; border-radius: 8px; border: 1px solid var(--border); }}
-            .score-hdr {{ display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }}
-            .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
-            .score-val {{ font-size: 20px; font-weight: 700; margin-bottom: 12px; }}
-            .score-bar {{ height: 4px; background: var(--bg-card); border-radius: 2px; overflow: hidden; margin-bottom: 8px; }}
-            .score-bar .fill {{ height: 100%; }}
-            .score-pts {{ font-size: 12px; color: var(--text-muted); text-align: right; }}
-            
-            /* Levels */
-            .levels-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }}
-            .level-card {{ background: var(--bg-main); border: 1px solid var(--border); padding: 16px; border-radius: 8px; }}
-            .level-card .lbl {{ font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }}
-            .level-card .val {{ font-size: 18px; font-weight: 600; margin-bottom: 8px; }}
-            .rr-badge {{ display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }}
-            .rr-good {{ background: rgba(29, 158, 117, 0.2); color: var(--green); }}
-            .rr-bad {{ background: rgba(226, 75, 74, 0.2); color: var(--red); }}
-            
-            /* Exits */
-            .exit-row {{ display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--border); }}
-            .exit-row:last-child {{ border: none; }}
-            
-            /* Narrative */
-            .narrative p {{ line-height: 1.6; margin-bottom: 12px; font-size: 15px; }}
-            .nar-lbl {{ font-weight: 600; color: var(--text-muted); display: block; margin-top: 20px; margin-bottom: 4px; font-size: 12px; text-transform: uppercase; }}
-            .pos {{ color: #10b981; font-weight: 500; }}
-            .neg {{ color: #ef4444; font-weight: 500; }}
-            .neu {{ font-weight: 600; color: #fff; }}
-            
-            @media (max-width: 768px) {{
-                .levels-grid {{ grid-template-columns: 1fr 1fr; }}
-                .header {{ flex-direction: column; align-items: flex-start; gap: 16px; }}
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <!-- HEADER -->
-            <div class="header">
-                <div class="header-info">
-                    <h1>{data['metadata'].get('Symbol', 'UNKNOWN')} &middot; {data['metadata'].get('Timeframe', '4H')} &middot; {data['session']}</h1>
-                    <p>Current Close: ${data['current_price']:.5f} &nbsp;|&nbsp; Updated: {data['timestamp']}</p>
-                </div>
-                """
-    if data['is_active']:
-        html += f"""
-                <div class="active-pos-badge">
-                    <div style="font-size:12px; opacity:0.8;">POSISI AKTIF</div>
-                    <div>Entry: ${data['metadata']['AVG_ENTRY_PRICE']} &middot; P&L: {data['exit']['pnl_pct']:+.2f}%</div>
-                </div>
-        """
-    html += """
-            </div>
-    """
+def render_levels(lv: dict, is_long: bool) -> str:
+    sign = '+' if is_long else '−'
+    rr1_cls = 'rr-good' if lv.get('rr1', 0) >= 2 else 'rr-bad'
+    rr2_cls = 'rr-good' if lv.get('rr2', 0) >= 2 else 'rr-bad'
+    rr3_cls = 'rr-good' if lv.get('rr3', 0) >= 2 else 'rr-bad'
+    return f'''
+    <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Stop Loss (ATR-based)</div>
+    <div class="pill"><span>Ketat 1.0×ATR</span><span class="val-neg">{_fmt(lv["sl_ketat"])}</span></div>
+    <div class="pill"><span>Normal 1.5×ATR</span><span class="val-neg">{_fmt(lv["sl_normal"])}</span>
+        <span class="rr {rr1_cls}">R:R {lv["rr1"]}×</span></div>
+    <div class="pill"><span>Lebar 2.0×ATR</span><span class="val-neg">{_fmt(lv["sl_lebar"])}</span></div>
+    <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin:12px 0 6px">Take Profit Targets</div>
+    <div class="pill"><span>TP1 {sign}2.5%</span><span class="val-pos">{_fmt(lv["tp1"])}</span>
+        <span class="rr {rr1_cls}">R:R {lv["rr1"]}×</span></div>
+    <div class="pill"><span>TP2 {sign}4.6%</span><span class="val-pos">{_fmt(lv["tp2"])}</span>
+        <span class="rr {rr2_cls}">R:R {lv["rr2"]}×</span></div>
+    <div class="pill"><span>TP3 {sign}7.0%</span><span class="val-pos">{_fmt(lv["tp3"])}</span>
+        <span class="rr {rr3_cls}">R:R {lv["rr3"]}×</span></div>'''
 
-    if data['emergency']['sl_hit'] or data['emergency']['rsi_overbought']:
-        msg = "⚠️ SL SUDAH TERSENTUH — EVALUASI EXIT SEGERA" if data['emergency']['sl_hit'] else "⚠️ RSI OVERBOUGHT — CEK EXIT SIGNAL"
-        html += f"<div class='emergency-banner'>{msg}</div>"
 
-    # Navigation
-    html += """
-            <div class="tabs">
-                <button class="tab-btn active" onclick="openTab('LONG')">LONG Setup</button>
-                <button class="tab-btn" onclick="openTab('SHORT')">SHORT Setup</button>
-            </div>
-    """
+def render_narrative(n: dict, is_long: bool) -> str:
+    border = '#10b981' if is_long else '#ef4444'
+    return f'''
+    <div style="background:rgba(255,255,255,0.04);border-left:3px solid {border};
+                border-radius:8px;padding:14px;font-size:12.5px;line-height:1.75;color:#94a3b8;margin-top:0">
+        <div style="margin-bottom:10px"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;display:block;margin-bottom:3px">📍 Kondisi Pasar</span>{n["kondisi"]}</div>
+        <div style="margin-bottom:10px"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;display:block;margin-bottom:3px">🎯 Keputusan</span><strong style="color:#3b82f6">{n["keputusan"]}</strong></div>
+        <div><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;display:block;margin-bottom:3px">🗺️ Skenario</span>{n["skenario"]}</div>
+    </div>'''
 
-    for setup, key in [('LONG', 'long'), ('SHORT', 'short')]:
-        act = "active" if setup == 'LONG' else ""
-        d = data[key]
-        html += f"""
-            <div id="{setup}" class="tab-content {act}">
-                <div class="decision {d['code']}">
-                    <h2 style="color:var(--{'green' if d['code'] in ['FULL','HALF'] else ('yellow' if d['code']=='WAIT' else 'red')})">
-                        {d['decision']} <span style="font-weight:400; opacity:0.7">|</span> {d['total']}/71
-                    </h2>
-                    <p>Persentase Akurasi Syarat: {d['pct']:.1f}%</p>
-                </div>
-                
-                <div class="section">
-                    <h3>Technical Scoring Breakdown</h3>
-                    {render_scores(d['scores'], d['details'], maxes)}
-                </div>
-                
-                <div class="section">
-                    <h3>Risk Management & Targets</h3>
-                    <div class="levels-grid">
-                        <div class="level-card">
-                            <div class="lbl">🛑 SL Ketat (1.0 ATR)</div>
-                            <div class="val">${d['levels']['sl_ketat']:.5f}</div>
-                        </div>
-                        <div class="level-card">
-                            <div class="lbl">🛑 SL Normal (1.5 ATR)</div>
-                            <div class="val">${d['levels']['sl_normal']:.5f}</div>
-                            <div class="rr-badge {'rr-good' if d['levels']['rr1'] >= 2 else ('' if d['levels']['rr1']==0 else 'rr-bad')}">
-                                Min R:R: {d['levels']['rr1']:.2f}
-                            </div>
-                        </div>
-                        <div class="level-card">
-                            <div class="lbl">🛑 SL Lebar (2.0 ATR)</div>
-                            <div class="val">${d['levels']['sl_lebar']:.5f}</div>
-                        </div>
-                        <div class="level-card" style="border-color: var(--brand);">
-                            <div class="lbl">🎯 Target TP</div>
-                            <div class="val" style="color: var(--text-main);">
-                                TP1: ${d['levels']['tp1']:.5f}<br>
-                                TP2: ${d['levels']['tp2']:.5f}<br>
-                                TP3: ${d['levels']['tp3']:.5f}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-        """
-        
-        if data['is_active']:
-            html += f"""
-                <div class="section">
-                    <h3>Exit Signals Monitor</h3>
-                    <div style="background: var(--bg-main); border: 1px solid var(--border); border-radius: 8px;">
-            """
-            for icon, name, val, th in data['exit']['signals']:
-                html += f"""<div class="exit-row">
-                    <div><span>{icon}</span> <span style="margin-left:8px; font-weight:500">{name}</span></div>
-                    <div style="color:var(--text-muted)">{val:.2f} ({th})</div>
-                </div>"""
-            if not data['exit']['signals']:
-                html += "<div style='padding:16px; text-align:center; color:var(--text-muted)'>Semua indikator masih dalam batas aman.</div>"
-            
-            reco_color = '#E24B4A' if 'EXIT' in data['exit']['recommendation'] else ('#BA7517' if 'ketat' in data['exit']['recommendation'] else '#1D9E75')
-            html += f"""
-                    </div>
-                    <div style="margin-top: 16px; padding: 12px; border-radius: 8px; background: {reco_color}22; border: 1px solid {reco_color}; text-align: center; font-weight: 600; color: {reco_color}">
-                        MANDATE: {data['exit']['recommendation']}
-                    </div>
-                </div>
-            """
 
-        nar = d['narrative']
-        hd_color = "var(--green)" if setup=="LONG" else "var(--red)"
-        html += f"""
-                <div class="section narrative">
-                    <h3 style="color:{hd_color}">Narasi Analis Utama</h3>
-                    <span class="nar-lbl">Kondisi Pasar</span>
-                    <p>{nar['kondisi'].replace('-', '—')}</p>
-                    <span class="nar-lbl">Keputusan Rasional</span>
-                    <p>{nar['keputusan']}</p>
-                    <span class="nar-lbl">Skenario Lanjutan</span>
-                    <p>{nar['skenario']}</p>
-                </div>
-            </div>
-        """
+def render_exit_signals(exit_data: dict) -> str:
+    if not exit_data or not exit_data.get('signals'):
+        return '<div style="font-size:12px;color:#64748b;padding:10px 0">✅ Semua indikator dalam batas aman</div>'
+    rows = ''
+    for icon, name, val, thresh in exit_data['signals']:
+        val_fmt = f'{val:.2f}' if isinstance(val, float) else str(val)
+        rows += f'<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px"><span>{icon}</span><span style="flex:1;color:#94a3b8">{name}</span><span style="font-family:monospace;font-size:11px;color:#64748b">{val_fmt} ({thresh})</span></div>'
+    hard = exit_data.get('hard_count', 0)
+    warn = exit_data.get('warn_count', 0)
+    mcolor = '#ef4444' if hard > 0 else '#f59e0b' if warn > 0 else '#10b981'
+    mbg    = 'rgba(239,68,68,.1)' if hard > 0 else 'rgba(245,158,11,.1)' if warn > 0 else 'rgba(16,185,129,.1)'
+    mbd    = 'rgba(239,68,68,.3)' if hard > 0 else 'rgba(245,158,11,.3)' if warn > 0 else 'rgba(16,185,129,.2)'
+    return rows + f'<div style="margin-top:10px;padding:10px;border-radius:8px;text-align:center;font-weight:700;font-size:13px;color:{mcolor};background:{mbg};border:1px solid {mbd}">MANDATE: {exit_data["recommendation"]}</div>'
 
-    html += """
+
+def render_context_grid(ctx: dict) -> str:
+    if not ctx:
+        return '<span style="color:#64748b;font-size:12px">—</span>'
+    items = ''
+    for k, v in ctx.items():
+        v_fmt = f'{v:.4f}' if isinstance(v, (int, float)) else str(v)
+        items += f'<div class="pill"><span>{k}</span><span style="font-family:monospace">{v_fmt}</span></div>'
+    return f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">{items}</div>'
+
+
+def render_setup_card(tab_data: dict, is_long: bool, exit_data: dict, has_entry: bool) -> str:
+    d = tab_data
+    lv = d['levels']
+    code = d['code']
+    text_color, bg_color, border_color = DECISION_COLORS.get(code, DECISION_COLORS['WAIT'])
+    bar_pct = d['total'] / 71 * 100
+    bar_width = f"{bar_pct:.1f}%"
+    icon = '🐂' if is_long else '🐻'
+    label = 'LONG' if is_long else 'SHORT'
+
+    feature_rows = render_feature_rows(d['scores'])
+    levels_html  = render_levels(lv, is_long)
+    narrative_html = render_narrative(d['narrative'], is_long)
+
+    exit_html = ''
+    if has_entry:
+        exit_html = f'''
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)">
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Exit Signal Monitor</div>
+            {render_exit_signals(exit_data)}
+        </div>'''
+
+    return f'''
+    <div class="glass" style="padding:22px;display:flex;flex-direction:column;gap:16px">
+        <!-- Decision Banner -->
+        <div style="text-align:center;padding:18px;border-radius:12px;
+                    background:{bg_color};border:1px solid {border_color}">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:2px;color:#64748b;margin-bottom:4px">{icon} {label} Setup</div>
+            <div style="font-size:26px;font-weight:800;letter-spacing:-0.5px;color:{text_color}">{d["decision"]}</div>
+            <div style="font-size:14px;color:#94a3b8;margin-top:4px">{d["total"]}/71 · {d["pct"]:.1f}%</div>
         </div>
-        <script>
-            function openTab(tabId) {
-                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-                document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-                document.getElementById(tabId).classList.add('active');
-                event.currentTarget.classList.add('active');
-            }
-        </script>
-    </body>
-    </html>
-    """
-    
-    with open('analysis_dashboard.html', 'w', encoding='utf-8') as f:
-        f.write(html)
-    print("✅ Successfully generated analysis_dashboard.html")
+        <!-- Score bar -->
+        <div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-bottom:4px"><span>Total Score</span><span>{d["total"]}/71</span></div>
+            <div style="height:7px;background:rgba(255,255,255,0.07);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:{bar_width};background:{text_color};border-radius:4px;transition:width .5s ease"></div>
+            </div>
+        </div>
+        <!-- Feature scoring -->
+        <div>
+            <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">9-Feature Weighted Scoring</div>
+            {feature_rows}
+        </div>
+        <!-- Risk Levels -->
+        <div>{levels_html}</div>
+        <!-- Exit signals (if active position) -->
+        {exit_html}
+        <!-- Narrative -->
+        <div>
+            <div style="font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Analyst Narrative</div>
+            {narrative_html}
+        </div>
+    </div>'''
 
-if __name__ == "__main__":
-    filepath = CSV_FILE
-    if len(sys.argv) > 1:
-        filepath = sys.argv[1]
-        
-    print(f"Loading {filepath}...")
-    metadata, df = parse_csv_and_metadata(filepath)
-    print("Computing metrics...")
-    data = calculate_scoring(df, metadata)
-    if data:
-        generate_html(data)
+
+def build_html(metadata: dict, df: pd.DataFrame, result: dict, output_file: str):
+    """Build and write the complete standalone HTML dashboard."""
+
+    last = df.iloc[-1]
+    close_price = float(last.get('Close', 0))
+    timestamp   = str(last.get('Timestamp', ''))
+    is_active   = bool(metadata.get('AVG_ENTRY_PRICE'))
+    has_entry   = is_active
+    vdata = result.get('variables', {})
+    em    = result.get('emergency', {})
+    exit_data = result.get('exit', {})
+
+    # Market context (optional columns)
+    ctx_cols = ['MSB','BOS','CHoCH','SFP_Sweep','FVG_Up_Top','FVG_Up_Bottom',
+                'FVG_Down_Top','FVG_Down_Bottom','OB_Price','Fib_0.618','Fib_0.786',
+                'POC','VAH','VAL','Buy_Liq','Sell_Liq','PDH','PDL','PWH','PWL',
+                'EMA_7','EMA_7_H4','EMA_21_H4','EMA_50_H4','EMA_200_H4',
+                'StochRSI_K','StochRSI_D','Funding_Rate','BTC_Price','BTC_Dominance','Altcoin_Index']
+    market_ctx = {}
+    for col in ctx_cols:
+        if col in df.columns:
+            v = last.get(col)
+            try:
+                if pd.notna(v): market_ctx[col] = float(v)
+            except Exception:
+                pass
+
+    # Emergency banners
+    emergency_html = ''
+    if is_active and (em.get('sl_touched') or em.get('rsi_ob')):
+        msg = '⚠️ SL SUDAH TERSENTUH — EVALUASI EXIT SEGERA' if em.get('sl_touched') else '⚠️ RSI OVERBOUGHT — CEK EXIT SIGNAL'
+        emergency_html = f'<div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:14px 20px;margin-bottom:16px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:12px;color:#fca5a5;font-weight:700;font-size:14px">{msg}</div>'
+
+    # Header metadata strip
+    meta_items = [
+        ('Symbol', metadata['Symbol']),
+        ('Timeframe', metadata['Timeframe']),
+        ('Close Price', f"${close_price:.5f}"),
+        ('Session', vdata.get('session', '—')),
+        ('Last Candle', timestamp),
+    ]
+    if is_active:
+        meta_items += [
+            ('Avg Entry', f"${metadata['AVG_ENTRY_PRICE']:.5f}"),
+        ]
+        if metadata.get('TOTAL_QTY'):
+            meta_items.append(('Total Qty', str(metadata['TOTAL_QTY'])))
+        if metadata.get('TOTAL_COST'):
+            meta_items.append(('Total Cost', f"${metadata['TOTAL_COST']:.2f}"))
+
+    meta_html = ''.join(f'''
+        <div style="text-align:center">
+            <div style="font-size:10px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.6px">{k}</div>
+            <div style="font-size:16px;font-weight:600;font-family:monospace;margin-top:3px">{v}</div>
+        </div>''' for k, v in meta_items)
+
+    long_card  = render_setup_card(result['long'],  True,  exit_data, has_entry)
+    short_card = render_setup_card(result['short'], False, exit_data, has_entry)
+    ctx_html   = render_context_grid(market_ctx)
+
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    html = f'''<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Protocol 9.6 Analysis — {metadata["Symbol"]} {metadata["Timeframe"]}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {{
+    --bg:   #080c14;
+    --surf: #0d1220;
+    --gb:   rgba(255,255,255,0.04);
+    --gbr:  rgba(255,255,255,0.09);
+    --t1:   #f1f5f9; --t2: #94a3b8; --t3: #64748b;
+    --blue: #3b82f6; --cyan: #06b6d4; --green: #10b981;
+    --red:  #ef4444; --yellow: #f59e0b; --purple: #8b5cf6;
+    --font: 'Inter', sans-serif; --mono: 'JetBrains Mono', monospace;
+}}
+*,*::before,*::after {{ box-sizing:border-box; margin:0; padding:0; }}
+body {{
+    font-family:var(--font); background:var(--bg); color:var(--t1);
+    min-height:100vh; -webkit-font-smoothing:antialiased; line-height:1.5;
+    background-image:radial-gradient(ellipse 80% 60% at 20% 0%,rgba(59,130,246,0.06) 0%,transparent 60%),
+                     radial-gradient(ellipse 60% 50% at 80% 100%,rgba(139,92,246,0.05) 0%,transparent 60%);
+}}
+.container {{ max-width:1400px; margin:0 auto; padding:24px; }}
+.glass {{
+    background:var(--gb); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--gbr); border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.5);
+}}
+.val-pos {{ color:var(--green) !important; }}
+.val-neg {{ color:var(--red)   !important; }}
+.pill {{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 12px; background:var(--gb); border:1px solid var(--gbr);
+    border-radius:8px; margin-bottom:5px; font-family:var(--mono); font-size:12px;
+    gap:8px;
+}}
+.rr {{ display:inline-block; padding:2px 7px; border-radius:8px; font-size:10px; font-weight:700; }}
+.rr-good {{ background:rgba(16,185,129,.2);  color:var(--green); }}
+.rr-bad  {{ background:rgba(239,68,68,.2);   color:var(--red); }}
+.two-col {{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }}
+@media(max-width:900px) {{ .two-col {{ grid-template-columns:1fr; }} }}
+.section-title {{ font-size:13px; font-weight:700; color:var(--t2); text-transform:uppercase; letter-spacing:.8px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }}
+.btn-toggle {{
+    background:none; border:1px solid var(--gbr); border-radius:20px;
+    color:var(--t2); padding:6px 16px; cursor:pointer; font-size:12px;
+    font-family:var(--font); transition:.2s;
+}}
+.btn-toggle:hover {{ background:rgba(255,255,255,0.05); color:var(--t1); }}
+@media print {{ .btn-toggle {{ display:none; }} }}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- HEADER -->
+<div class="glass" style="padding:20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 0 24px rgba(59,130,246,0.2)">🛡️</div>
+        <div>
+            <div style="font-size:20px;font-weight:700;letter-spacing:-0.5px">Protocol 9.6</div>
+            <div style="font-size:12px;color:var(--t3)">Quantitative Swing Analysis — 71-Point Scoring</div>
+        </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;color:var(--t3);background:var(--gb);border:1px solid var(--gbr);padding:6px 16px;border-radius:20px">Generated: {now_str}</span>
+        <button class="btn-toggle" onclick="toggleTheme()">🌓 Theme</button>
+    </div>
+</div>
+
+<!-- EMERGENCY BANNER -->
+{emergency_html}
+
+<!-- META STRIP -->
+<div class="glass" style="padding:18px 24px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:28px;align-items:center">
+    {meta_html}
+    {"<div style='margin-left:auto'><span style=\"font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.6px\">Mode</span><br><span style=\"font-weight:700;color:#f59e0b\">POSISI AKTIF</span></div>" if is_active else "<div style='margin-left:auto'><span style=\"font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.6px\">Mode</span><br><span style=\"font-weight:700;color:#06b6d4\">ENTRY BARU</span></div>"}
+</div>
+
+<!-- LONG & SHORT SIDE BY SIDE -->
+<div class="two-col" style="margin-bottom:16px">
+    {long_card}
+    {short_card}
+</div>
+
+<!-- MARKET CONTEXT -->
+{"" if not market_ctx else f"""
+<div class="glass" style="padding:20px;margin-bottom:16px">
+    <div class="section-title">🔍 Market Context (from CSV)</div>
+    {ctx_html}
+</div>"""}
+
+<!-- VARIABLES TABLE -->
+<div class="glass" style="padding:20px;margin-bottom:16px">
+    <div class="section-title">📐 Intermediate Variables</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
+        {"".join(f'<div class="pill"><span>{k}</span><span>{v if isinstance(v, str) else f"{v:.4f}" if isinstance(v, float) else str(v)}</span></div>' for k, v in vdata.items())}
+    </div>
+</div>
+
+<!-- FOOTER -->
+<div style="text-align:center;padding:20px;color:var(--t3);font-size:11px">
+    Protocol 9.6 · 71-Point Quantitative Swing Engine · Generated {now_str}
+</div>
+
+</div><!-- /container -->
+<script>
+function toggleTheme() {{
+    const h = document.documentElement;
+    const d = h.getAttribute('data-theme') === 'dark';
+    h.setAttribute('data-theme', d ? 'light' : 'dark');
+    document.body.style.background  = d ? '#f0f4ff' : '#080c14';
+    document.body.style.color       = d ? '#0f172a' : '#f1f5f9';
+}}
+</script>
+</body>
+</html>'''
+
+    with open(output_file, 'w', encoding='utf-8') as fh:
+        fh.write(html)
+    print(f"✅ Dashboard written to: {output_file}")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ────────────────────────────────────────────────────────────────────────────
+
+def main():
+    csv_path = sys.argv[1] if len(sys.argv) > 1 else 'enriched_export.csv'
+
+    print(f"📂 Reading: {csv_path}")
+    metadata, df = parse_csv_and_metadata(csv_path)
+
+    if df.empty:
+        print("❌ No data loaded. Exiting."); return
+
+    print(f"📊 Rows loaded: {len(df)} | Symbol: {metadata['Symbol']} | Timeframe: {metadata['Timeframe']}")
+
+    df = ensure_indicators(df)
+
+    if len(df) < 22:
+        print("❌ Need ≥ 22 candles."); return
+
+    print("🤖 Running 71-point quantitative scoring...")
+    result = calculate_71point_score(df, metadata)
+
+    if result is None:
+        print("❌ Scoring returned None — check indicator columns."); return
+
+    long_d  = result['long']
+    short_d = result['short']
+    print(f"\n{'─'*55}")
+    print(f"  LONG  → {long_d['decision']:20s}  Score: {long_d['total']}/71  ({long_d['pct']:.1f}%)")
+    print(f"  SHORT → {short_d['decision']:20s}  Score: {short_d['total']}/71  ({short_d['pct']:.1f}%)")
+    print(f"  Session: {result['variables']['session']}")
+    print(f"{'─'*55}\n")
+
+    # Output filename
+    sym = metadata['Symbol'].replace('/', '-')
+    tf  = metadata['Timeframe'].replace('/', '-')
+    now = datetime.now().strftime('%Y%m%d_%H%M')
+    out_file = f"analysis_{sym}_{tf}_{now}.html"
+
+    build_html(metadata, df, result, out_file)
+
+    # Try to open in browser
+    try:
+        import webbrowser
+        webbrowser.open(os.path.abspath(out_file))
+    except Exception:
+        pass
+
+
+if __name__ == '__main__':
+    main()
