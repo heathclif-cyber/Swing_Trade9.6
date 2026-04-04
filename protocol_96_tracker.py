@@ -11,7 +11,11 @@ from binance.client import Client  # type: ignore
 from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
 
 # Pengaturan Sesi & Lokasi Data
-TRADE_ENTRIES_FILE = "trade_entries.json"
+# Railway: set env var TRADE_DATA_PATH=/app/data/trade_entries.json dan mount Volume ke /app/data
+_default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
+TRADE_ENTRIES_FILE = os.environ.get('TRADE_DATA_PATH', _default_path)
+# Auto-create direktori jika belum ada (penting untuk Railway Volume)
+os.makedirs(os.path.dirname(os.path.abspath(TRADE_ENTRIES_FILE)), exist_ok=True)
 # Default pair if JSON is empty (for bootstrapping)
 DEFAULT_PAIR = "SUIUSDT"
 

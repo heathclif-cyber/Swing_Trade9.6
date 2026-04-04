@@ -27,7 +27,11 @@ COIN_PAIR = AVAILABLE_PAIRS[0]
 ALLOCATED_CAPITAL = 200
 
 # File path untuk menyimpan entry price per koin
-TRADE_ENTRIES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
+# Railway: set env var TRADE_DATA_PATH=/app/data/trade_entries.json dan mount Volume ke /app/data
+_default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
+TRADE_ENTRIES_FILE = os.environ.get('TRADE_DATA_PATH', _default_path)
+# Auto-create direktori jika belum ada (penting untuk Railway Volume)
+os.makedirs(os.path.dirname(os.path.abspath(TRADE_ENTRIES_FILE)), exist_ok=True)
 
 try:
     from dotenv import load_dotenv
