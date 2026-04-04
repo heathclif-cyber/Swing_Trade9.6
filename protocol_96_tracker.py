@@ -68,7 +68,43 @@ client = Client(BINANCE_API_KEY, BINANCE_API_SECRET)
 # ==========================================
 # 📂 DATA PERSISTENCE HELPERS
 # ==========================================
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+def _get_pg_conn():
+    if not DATABASE_URL:
+        return None
+    try:
+        import psycopg2
+        from urllib.parse import urlparse
+        url_str = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        parsed = urlparse(url_str)
+        return psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            dbname=parsed.path.lstrip('/'),
+            sslmode='require'
+        )
+    except Exception as e:
+        logger.warning(f"PostgreSQL connection failed (fallback ke file): {e}")
+        return None
+
 def load_trade_entries() -> dict:
+    conn = _get_pg_conn()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM kv_store WHERE key = 'trade_entries'")
+                row = cur.fetchone()
+            conn.close()
+            if row:
+                return json.loads(row[0])
+            return {}
+        except Exception as e:
+            logger.warning(f"PostgreSQL load failed (fallback ke file): {e}")
+            if conn: conn.close()
+
     if os.path.exists(TRADE_ENTRIES_FILE):
         try:
             with open(TRADE_ENTRIES_FILE, 'r') as f:

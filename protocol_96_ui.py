@@ -16,6 +16,7 @@ from binance.client import Client  # type: ignore
 from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
 import protocol_96_enrichment as enrichment  # type: ignore
 import algo_scoring  # type: ignore
+import signal_monitor  # type: ignore
 from requests.packages import urllib3  # type: ignore
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -162,9 +163,18 @@ def _get_pg_conn():  # type: ignore
         return None
     try:
         import psycopg2  # type: ignore
+        from urllib.parse import urlparse
         # Railway kadang pakai postgres:// prefix, psycopg2 butuh postgresql://
-        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-        return psycopg2.connect(url, sslmode='require')
+        url_str = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        parsed = urlparse(url_str)
+        return psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            dbname=parsed.path.lstrip('/'),
+            sslmode='require'
+        )
     except Exception as e:
         logger.warning(f"PostgreSQL connection failed (fallback ke file): {e}")
         return None
@@ -1746,4 +1756,6 @@ def analyze_csv():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"🖥️  Protocol 9.6 Dashboard starting on http://0.0.0.0:{port}")
+    # ── Start background signal monitor (15-min polling + Telegram alerts) ──
+    signal_monitor.start_background_monitor()
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
