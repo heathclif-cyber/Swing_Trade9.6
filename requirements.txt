@@ -6,3 +6,5 @@ python-binance>=1.0.21
 openpyxl==3.1.2
 gunicorn==22.0.0
 urllib3==2.2.1
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.0

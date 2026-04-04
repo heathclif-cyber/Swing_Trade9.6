@@ -150,41 +150,103 @@ def get_klines_rest(symbol: str, interval: str, limit: int = 250) -> pd.DataFram
 
 
 # ==========================================
-# 💾 TRADE ENTRIES (Persistent JSON Storage — Multi-Entry DCA)
+# 💾 TRADE ENTRIES — Hybrid Storage (PostgreSQL on Railway, JSON locally)
 # ==========================================
-# Format baru: { "SUIUSDT": { "entries": [{"price": 1.05, "qty": 100, "date": "..."}, ...], "allocated_capital": 200 } }
+# Format: { "SUIUSDT": { "entries": [{"price":1.05, "qty":100, "date":"..."}, ...], "sales":[...], "allocated_capital": 200 } }
+
+DATABASE_URL = os.environ.get('DATABASE_URL')  # Set automatically by Railway PostgreSQL plugin
+
+def _get_pg_conn():  # type: ignore
+    """Buat koneksi PostgreSQL. Return None jika tidak tersedia."""
+    if not DATABASE_URL:
+        return None
+    try:
+        import psycopg2  # type: ignore
+        # Railway kadang pakai postgres:// prefix, psycopg2 butuh postgresql://
+        url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        return psycopg2.connect(url, sslmode='require')
+    except Exception as e:
+        logger.warning(f"PostgreSQL connection failed (fallback ke file): {e}")
+        return None
+
+def _ensure_pg_table(conn) -> None:  # type: ignore
+    """Buat tabel kv_store jika belum ada."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS kv_store (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to create kv_store table: {e}")
+
+def _migrate_format(data: dict) -> dict:  # type: ignore
+    """Migrate format lama (single entry_price) ke multi-entry."""
+    for sym, val in data.items():
+        if isinstance(val, dict):
+            if 'sales' not in val:
+                val['sales'] = []
+            if 'entry_price' in val and 'entries' not in val:
+                old_price = float(val.get('entry_price', 0))
+                old_cap   = float(val.get('allocated_capital', ALLOCATED_CAPITAL))
+                old_date  = val.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                if old_price > 0:
+                    val['entries'] = [{'price': old_price, 'qty': old_cap / old_price, 'date': old_date}]
+                    val['allocated_capital'] = old_cap
+                else:
+                    val['entries'] = []
+                    val['allocated_capital'] = old_cap
+    return data
 
 def load_trade_entries() -> dict:  # type: ignore
-    """Load entry prices & capital per coin dari file JSON."""
+    """Load trade entries — PostgreSQL jika DATABASE_URL ada, fallback ke file JSON."""
+    conn = _get_pg_conn()
+    if conn:
+        try:
+            _ensure_pg_table(conn)
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM kv_store WHERE key = 'trade_entries'")
+                row = cur.fetchone()
+            conn.close()
+            if row:
+                return _migrate_format(json.loads(row[0]))
+            return {}
+        except Exception as e:
+            logger.warning(f"PostgreSQL load failed (fallback ke file): {e}")
+            if conn: conn.close()
+    # ── Fallback: local JSON file (development) ──
     if os.path.exists(TRADE_ENTRIES_FILE):
         try:
             with open(TRADE_ENTRIES_FILE, 'r') as f:
-                data = json.load(f)
-            # ── Migrate old format (single entry_price) to new multi-entry format ──
-            for sym, val in data.items():
-                if isinstance(val, dict):
-                    # Ensure sales list exists
-                    if 'sales' not in val:
-                        val['sales'] = []
-                    # Migrate old format
-                    if 'entry_price' in val and 'entries' not in val:
-                        old_price = float(val.get('entry_price', 0))
-                        old_cap = float(val.get('allocated_capital', ALLOCATED_CAPITAL))
-                        old_date = val.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                        if old_price > 0:
-                            val['entries'] = [{'price': old_price, 'qty': old_cap / old_price if old_price else 0, 'date': old_date}]
-                            val['allocated_capital'] = old_cap
-                        else:
-                            val['entries'] = []
-                            val['allocated_capital'] = old_cap
-            return data
+                return _migrate_format(json.load(f))
         except Exception as e:
-            logger.warning(f"Failed to load trade entries: {e}")
+            logger.warning(f"Failed to load trade entries from file: {e}")
     return {}
 
-
 def save_trade_entries(entries: dict) -> None:  # type: ignore
-    """Simpan entry prices & capital per coin ke file JSON."""
+    """Simpan trade entries — PostgreSQL jika DATABASE_URL ada, fallback ke file JSON."""
+    conn = _get_pg_conn()
+    if conn:
+        try:
+            _ensure_pg_table(conn)
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO kv_store (key, value, updated_at)
+                    VALUES ('trade_entries', %s, NOW())
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """, (json.dumps(entries),))
+            conn.commit()
+            conn.close()
+            logger.info("💾 Trade entries saved to PostgreSQL")
+            return
+        except Exception as e:
+            logger.warning(f"PostgreSQL save failed (fallback ke file): {e}")
+            if conn: conn.close()
+    # ── Fallback: local JSON file ──
     try:
         with open(TRADE_ENTRIES_FILE, 'w') as f:
             json.dump(entries, f, indent=2)
