@@ -620,6 +620,69 @@ def index():
     return render_template("dashboard.html")
 
 
+@app.route("/api/test-signal")
+def api_test_signal():
+    """Trigger manual test: evaluasi 1 pair dan kirim hasil ke Telegram."""
+    pair = flask_request.args.get("pair", "SUIUSDT").upper()
+    try:
+        trade_entries = load_trade_entries()
+        signal_monitor._evaluate_pair(pair, trade_entries)
+
+        # Juga kirim summary skor langsung ke Telegram
+        df = signal_monitor._fetch_klines(pair, interval="4h", limit=250)
+        if len(df) >= 22:
+            df = signal_monitor._apply_indicators(df)
+            coin_data  = trade_entries.get(pair, {})
+            entry_list = coin_data.get("entries", [])
+            total_cost = sum(e["price"] * e["qty"] for e in entry_list)
+            total_qty  = sum(e["qty"] for e in entry_list)
+            avg_entry  = (total_cost / total_qty) if total_qty > 0 else None
+
+            import algo_scoring as _as
+            meta   = {"Symbol": pair, "AVG_ENTRY_PRICE": avg_entry, "ENTRY_DATE": None}
+            result = _as.calculate_71point_score(df, meta)
+            close  = float(df.iloc[-1]["Close"])
+
+            if result:
+                adj_L  = result["long"]["total"]
+                adj_S  = result["short"]["total"]
+                code_L = result["long"]["code"]
+                code_S = result["short"]["code"]
+                lvl_L  = result["long"]["levels"]
+                lvl_S  = result["short"]["levels"]
+
+                pnl_str = ""
+                if avg_entry:
+                    pnl = (close / avg_entry - 1) * 100
+                    pnl_str = f"\n💼 Avg Entry: ${avg_entry:.4f} | PnL: {pnl:+.2f}%"
+
+                msg = (
+                    f"🧪 <b>TEST SIGNAL — {pair}</b>\n"
+                    f"{'─'*28}\n"
+                    f"💰 Harga: <b>${close:.6f}</b>{pnl_str}\n\n"
+                    f"📊 <b>LONG</b>: {adj_L:.0f}/71 pts → <b>{code_L}</b>\n"
+                    f"  SL: ${lvl_L['sl_structure']:.4f} | TP1: ${lvl_L['tp1']:.4f} (R:R {lvl_L['rr1']}×)\n\n"
+                    f"📊 <b>SHORT</b>: {adj_S:.0f}/71 pts → <b>{code_S}</b>\n"
+                    f"  SL: ${lvl_S['sl_structure']:.4f} | TP1: ${lvl_S['tp1']:.4f} (R:R {lvl_S['rr1']}×)\n\n"
+                    f"{'─'*28}\n"
+                    f"✅ Signal Monitor berjalan normal di Railway!"
+                )
+                signal_monitor._send_telegram(msg)
+                return jsonify({
+                    "ok": True, "pair": pair,
+                    "long": {"score": adj_L, "code": code_L},
+                    "short": {"score": adj_S, "code": code_S},
+                    "close": close,
+                    "telegram": "sent"
+                })
+
+        return jsonify({"ok": False, "error": "Insufficient data", "pair": pair}), 400
+
+    except Exception as e:
+        logger.exception(f"test-signal error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/data")
 def api_data():
     """Master endpoint: returns ALL data categories for the dashboard."""
