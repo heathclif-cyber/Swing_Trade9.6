@@ -683,6 +683,54 @@ def api_test_signal():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/ping-telegram")
+def api_ping_telegram():
+    """Debug: baca env var real-time dan langsung kirim ke Telegram, tampilkan response API."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat  = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+    # Mask token untuk security
+    token_masked = f"{token[:10]}...{token[-5:]}" if len(token) > 15 else f"[len={len(token)}]"
+
+    if not token or not chat:
+        return jsonify({
+            "ok": False,
+            "error": "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set",
+            "token_masked": token_masked,
+            "chat_id": chat or "(empty)"
+        }), 400
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat,
+        "text": (
+            "✅ <b>Protocol 9.6 — PING TEST</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🟢 Koneksi Railway → Telegram: OK!\n"
+            "🟢 Signal Monitor aktif di Railway\n"
+            "🟢 Database Supabase terhubung\n\n"
+            "⏱ Update setiap 15 menit otomatis.\n"
+            "Notifikasi akan muncul saat ada\n"
+            "sinyal LONG/SHORT/EXIT/KILL SWITCH."
+        ),
+        "parse_mode": "HTML"
+    }
+    try:
+        resp = http_requests.post(url, json=payload, timeout=15)
+        tg_json = resp.json()
+        return jsonify({
+            "ok": True,
+            "token_masked": token_masked,
+            "chat_id": chat,
+            "telegram_status": resp.status_code,
+            "telegram_ok": tg_json.get("ok"),
+            "telegram_message_id": tg_json.get("result", {}).get("message_id"),
+            "telegram_error": tg_json.get("description") if not tg_json.get("ok") else None,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "token_masked": token_masked}), 500
+
+
 @app.route("/api/data")
 def api_data():
     """Master endpoint: returns ALL data categories for the dashboard."""
