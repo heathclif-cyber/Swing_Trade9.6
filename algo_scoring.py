@@ -361,26 +361,30 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # ═══════════════════════════════════════════════════════════
     # BAGIAN 6 — STRUCTURE-BASED TP
     # ═══════════════════════════════════════════════════════════
-    # TP LONG pool
+    # TP LONG pool — spec 6A: semua level struktural, tanpa flat di pool
     tp_pool_L = []
-    for col, lbl in [('Sell_Liq', 'Likuiditas Jual'), ('FVG_Down_Top', 'FVG Bearish Top'),
-                      ('FVG_Up_Bottom', 'FVG Bullish Bottom'), ('OB_Price', 'Order Block'),
-                      ('Fib_0.618', 'Fibonacci 0.618'), ('POC', 'Point of Control'),
-                      ('VAH', 'Value Area High'), ('PDH', 'Prev Day High'), ('PWH', 'Prev Week High')]:
+    for col, lbl in [('Sell_Liq',       'Likuiditas Jual'),
+                      ('FVG_Down_Top',   'FVG Bearish Top'),
+                      ('FVG_Down_Bottom','FVG Bearish Bottom'),
+                      ('FVG_Up_Top',     'FVG Bullish Top'),
+                      ('FVG_Up_Bottom',  'FVG Bullish Bottom'),
+                      ('OB_Price',       'Order Block'),
+                      ('Fib_0.618',      'Fibonacci 0.618'),
+                      ('Fib_0.786',      'Fibonacci 0.786'),
+                      ('POC',            'Point of Control'),
+                      ('VAH',            'Value Area High'),
+                      ('PDH',            'Prev Day High'),
+                      ('PWH',            'Prev Week High')]:
         v = _last_val(last, col)
-        if v and v > close_price:
+        if v and v > 0 and v > close_price:
             tp_pool_L.append((v, lbl))
     for e_val, e_lbl in [(ema21, 'EMA 21'), (ema50, 'EMA 50'), (ema200, 'EMA 200')]:
-        if e_val > close_price:
+        if e_val and e_val > close_price:
             tp_pool_L.append((e_val, e_lbl))
-    # flat fallbacks
-    tp_pool_L.append((entry_val * 1.025, "flat +2.5%"))
-    tp_pool_L.append((entry_val * 1.046, "flat +4.6%"))
-    tp_pool_L.append((entry_val * 1.070, "flat +7.0%"))
 
+    # Sort terendah → tertinggi (resistance terdekat di atas Close = TP1 LONG)
     tp_pool_L = [(v, l) for v, l in tp_pool_L if v > close_price]
     tp_pool_L.sort(key=lambda x: x[0])
-    # dedupe
     seen = set()
     tp_dedup_L = []
     for v, l in tp_pool_L:
@@ -389,26 +393,38 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             tp_dedup_L.append((v, l))
     tp_pool_L = tp_dedup_L
 
-    tp1_L = tp_pool_L[0] if len(tp_pool_L) >= 1 else (entry_val * 1.025, "flat +2.5%")
-    tp2_L = tp_pool_L[1] if len(tp_pool_L) >= 2 else (entry_val * 1.046, "flat +4.6%")
-    tp3_L = tp_pool_L[2] if len(tp_pool_L) >= 3 else (entry_val * 1.070, "flat +7.0%")
+    # Flat fallback HANYA jika slot struktural tidak tersedia
+    _flat_L = [
+        (entry_val * 1.025, "flat fallback — no structure (+2.5%)"),
+        (entry_val * 1.046, "flat fallback — no structure (+4.6%)"),
+        (entry_val * 1.070, "flat fallback — no structure (+7.0%)"),
+    ]
+    tp1_L = tp_pool_L[0] if len(tp_pool_L) >= 1 else _flat_L[0]
+    tp2_L = tp_pool_L[1] if len(tp_pool_L) >= 2 else _flat_L[1]
+    tp3_L = tp_pool_L[2] if len(tp_pool_L) >= 3 else _flat_L[2]
 
-    # TP SHORT pool
+    # TP SHORT pool — spec 6B: 15 level struktural, bukan flat
     tp_pool_S = []
-    for col, lbl in [('Buy_Liq', 'Likuiditas Beli'), ('FVG_Up_Top', 'FVG Bullish Top'),
-                      ('FVG_Down_Bottom', 'FVG Bearish Bottom'), ('OB_Price', 'Order Block'),
-                      ('Fib_0.786', 'Fibonacci 0.786'), ('POC', 'Point of Control'),
-                      ('VAL', 'Value Area Low'), ('PDL', 'Prev Day Low'), ('PWL', 'Prev Week Low')]:
+    for col, lbl in [('Buy_Liq',         'Likuiditas Beli'),
+                      ('FVG_Up_Top',      'FVG Bullish Top'),
+                      ('FVG_Up_Bottom',   'FVG Bullish Bottom'),
+                      ('FVG_Down_Top',    'FVG Bearish Top'),
+                      ('FVG_Down_Bottom', 'FVG Bearish Bottom'),
+                      ('OB_Price',        'Order Block'),
+                      ('Fib_0.786',       'Fibonacci 0.786'),
+                      ('Fib_0.618',       'Fibonacci 0.618'),
+                      ('POC',             'Point of Control'),
+                      ('VAL',             'Value Area Low'),
+                      ('PDL',             'Prev Day Low'),
+                      ('PWL',             'Prev Week Low')]:
         v = _last_val(last, col)
-        if v and v < close_price:
+        if v and v > 0 and v < close_price:
             tp_pool_S.append((v, lbl))
     for e_val, e_lbl in [(ema21, 'EMA 21'), (ema50, 'EMA 50'), (ema200, 'EMA 200')]:
-        if e_val < close_price:
+        if e_val and e_val < close_price:
             tp_pool_S.append((e_val, e_lbl))
-    tp_pool_S.append((entry_val * 0.975, "flat -2.5%"))
-    tp_pool_S.append((entry_val * 0.954, "flat -4.6%"))
-    tp_pool_S.append((entry_val * 0.930, "flat -7.0%"))
 
+    # Sort tertinggi → terendah (support terdekat di bawah Close = TP1 SHORT)
     tp_pool_S = [(v, l) for v, l in tp_pool_S if v < close_price]
     tp_pool_S.sort(key=lambda x: x[0], reverse=True)
     seen = set()
@@ -419,9 +435,15 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             tp_dedup_S.append((v, l))
     tp_pool_S = tp_dedup_S
 
-    tp1_S = tp_pool_S[0] if len(tp_pool_S) >= 1 else (entry_val * 0.975, "flat -2.5%")
-    tp2_S = tp_pool_S[1] if len(tp_pool_S) >= 2 else (entry_val * 0.954, "flat -4.6%")
-    tp3_S = tp_pool_S[2] if len(tp_pool_S) >= 3 else (entry_val * 0.930, "flat -7.0%")
+    # Flat fallback HANYA jika slot struktural tidak tersedia
+    _flat_S = [
+        (entry_val * 0.975, "flat fallback — no structure (-2.5%)"),
+        (entry_val * 0.954, "flat fallback — no structure (-4.6%)"),
+        (entry_val * 0.930, "flat fallback — no structure (-7.0%)"),
+    ]
+    tp1_S = tp_pool_S[0] if len(tp_pool_S) >= 1 else _flat_S[0]
+    tp2_S = tp_pool_S[1] if len(tp_pool_S) >= 2 else _flat_S[1]
+    tp3_S = tp_pool_S[2] if len(tp_pool_S) >= 3 else _flat_S[2]
 
     # ── Select SL_STRUCTURE ────────────────────────────────────
     def select_sl_long(cands, tp1_val):
