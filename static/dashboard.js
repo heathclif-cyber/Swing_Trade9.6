@@ -243,14 +243,23 @@ function renderQuantAnalysis(quant, state) {
     // SL/TP Levels
     const lv = data.levels;
     const isLong = activeQuantTab === 'long';
+    const slStruct = lv.sl_structure;
+    const slLabel = lv.sl_label || '';
+    const hasStructSL = slStruct && slLabel && !slLabel.includes('fallback');
     document.getElementById('slLevels').innerHTML = `
+        ${hasStructSL ? `<div class="level-pill" style="border-left:3px solid var(--accent-red)"><span><strong style="color:var(--accent-red)">SL Utama</strong> — ${slLabel}</span><span class="val-neg">$${slStruct.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl>=0?'+':''}${lv.dist_sl.toFixed(2)}%</span></div>` : ''}
+        <div style="font-size:9px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:${hasStructSL?'8':'0'}px 0 4px">Referensi ATR</div>
         <div class="level-pill"><span>Ketat (1.0 ATR)</span><span class="val-neg">$${lv.sl_ketat.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_ketat>=0?'+':''}${lv.dist_sl_ketat.toFixed(2)}%</span></div>
         <div class="level-pill"><span>Normal (1.5 ATR)</span><span class="val-neg">$${lv.sl_normal.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_normal>=0?'+':''}${lv.dist_sl_normal.toFixed(2)}%</span></div>
         <div class="level-pill"><span>Lebar (2.0 ATR)</span><span class="val-neg">$${lv.sl_lebar.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_lebar>=0?'+':''}${lv.dist_sl_lebar.toFixed(2)}%</span></div>`;
+    const tp1Lbl = lv.tp1_label || (isLong?'+':'-')+'2.5%';
+    const tp2Lbl = lv.tp2_label || (isLong?'+':'-')+'4.6%';
+    const tp3Lbl = lv.tp3_label || (isLong?'+':'-')+'7.0%';
+    const rrBadge = (rr) => `<span class="rr-badge ${rr>=2?'rr-good':'rr-bad'}">${rr.toFixed(1)}x</span>`;
     document.getElementById('tpLevels').innerHTML = `
-        <div class="level-pill"><span>TP1 ${isLong?'+':'−'}2.5%</span><span class="val-pos">$${lv.tp1.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp1>=0?'+':''}${lv.dist_tp1.toFixed(2)}%</span></div>
-        <div class="level-pill"><span>TP2 ${isLong?'+':'−'}4.6%</span><span class="val-pos">$${lv.tp2.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp2>=0?'+':''}${lv.dist_tp2.toFixed(2)}%</span></div>
-        <div class="level-pill"><span>TP3 ${isLong?'+':'−'}7.0%</span><span class="val-pos">$${lv.tp3.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp3>=0?'+':''}${lv.dist_tp3.toFixed(2)}%</span></div>`;
+        <div class="level-pill"><span>TP1 <span style="font-size:10px;color:var(--text-3)">${tp1Lbl}</span></span><span class="val-pos">$${lv.tp1.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp1>=0?'+':''}${lv.dist_tp1.toFixed(2)}%</span>${lv.rr1!=null?rrBadge(lv.rr1):''}</div>
+        <div class="level-pill"><span>TP2 <span style="font-size:10px;color:var(--text-3)">${tp2Lbl}</span></span><span class="val-pos">$${lv.tp2.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp2>=0?'+':''}${lv.dist_tp2.toFixed(2)}%</span>${lv.rr2!=null?rrBadge(lv.rr2):''}</div>
+        <div class="level-pill"><span>TP3 <span style="font-size:10px;color:var(--text-3)">${tp3Lbl}</span></span><span class="val-pos">$${lv.tp3.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp3>=0?'+':''}${lv.dist_tp3.toFixed(2)}%</span>${lv.rr3!=null?rrBadge(lv.rr3):''}</div>`;
     // R:R Matrix
     const rrm = lv.rr_matrix;
     if (rrm && rrm.length >= 3) {
