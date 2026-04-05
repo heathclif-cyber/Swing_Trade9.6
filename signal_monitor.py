@@ -177,11 +177,100 @@ def _apply_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+    df["EMA_7"]   = ta.ema(df["Close"], length=7)
     df["EMA_21"]  = ta.ema(df["Close"], length=21)
     df["EMA_50"]  = ta.ema(df["Close"], length=50)
     df["EMA_200"] = ta.ema(df["Close"], length=200)
     df["RSI_6"]   = ta.rsi(df["Close"], length=6)
     df["ATR_14"]  = ta.atr(df["High"], df["Low"], df["Close"], length=14)
+    try:
+        stoch = ta.stochrsi(df["Close"], length=14, rsi_length=14, k=3, d=3)
+        if stoch is not None and not stoch.empty:
+            df["StochRSI_K"] = stoch.iloc[:, 0]
+            df["StochRSI_D"] = stoch.iloc[:, 1]
+        else:
+            df["StochRSI_K"] = None
+            df["StochRSI_D"] = None
+    except Exception:
+        df["StochRSI_K"] = None
+        df["StochRSI_D"] = None
+    # CVD
+    if "Buy_Volume" in df.columns and "Sell_Volume" in df.columns:
+        df["Volume_Delta"] = df["Buy_Volume"] - df["Sell_Volume"]
+        df["CVD"]          = df["Volume_Delta"].cumsum()
+    return df
+
+
+def _fetch_oi(symbol: str, limit: int = 500) -> pd.DataFrame:
+    """Fetch Open Interest history dari Binance Futures."""
+    try:
+        url = "https://fapi.binance.com/futures/data/openInterestHist"
+        params = {"symbol": symbol, "period": "15m", "limit": limit}
+        resp = requests.get(url, params=params, timeout=10, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data:
+                oi_df = pd.DataFrame(data)
+                oi_df["Open_Time"]     = pd.to_datetime(oi_df["timestamp"], unit="ms")
+                oi_df["Open_Interest"] = oi_df["sumOpenInterest"].astype(float)
+                return oi_df[["Open_Time", "Open_Interest"]]
+    except Exception as e:
+        logger.debug(f"OI fetch failed for {symbol}: {e}")
+    return pd.DataFrame()
+
+
+def _fetch_funding_rate(symbol: str, limit: int = 200) -> pd.DataFrame:
+    """Fetch Funding Rate dari Binance Futures."""
+    try:
+        url = "https://fapi.binance.com/fapi/v1/fundingRate"
+        resp = requests.get(url, params={"symbol": symbol, "limit": limit}, timeout=10, verify=False)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data:
+                fr_df = pd.DataFrame(data)
+                fr_df["Open_Time"]    = pd.to_datetime(fr_df["fundingTime"], unit="ms")
+                fr_df["Funding_Rate"] = fr_df["fundingRate"].astype(float)
+                return fr_df[["Open_Time", "Funding_Rate"]]
+    except Exception as e:
+        logger.debug(f"Funding Rate fetch failed for {symbol}: {e}")
+    return pd.DataFrame()
+
+
+def _enrich_df(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    """Enrichment pipeline lengkap — OI + Funding Rate + CVD + Indicators.
+    Identik dengan yang digunakan web dashboard agar skor konsisten."""
+    df = _apply_indicators(df)
+
+    # Merge Open Interest
+    oi_df = _fetch_oi(symbol)
+    if not oi_df.empty:
+        try:
+            df = pd.merge_asof(
+                df.sort_values("Open_Time"),
+                oi_df.sort_values("Open_Time"),
+                on="Open_Time", direction="backward"
+            )
+        except Exception as e:
+            logger.debug(f"OI merge failed: {e}")
+            df["Open_Interest"] = 0.0
+    else:
+        df["Open_Interest"] = 0.0
+
+    # Merge Funding Rate
+    fr_df = _fetch_funding_rate(symbol)
+    if not fr_df.empty:
+        try:
+            df = pd.merge_asof(
+                df.sort_values("Open_Time"),
+                fr_df.sort_values("Open_Time"),
+                on="Open_Time", direction="backward"
+            )
+        except Exception as e:
+            logger.debug(f"FR merge failed: {e}")
+            df["Funding_Rate"] = 0.0
+    else:
+        df["Funding_Rate"] = 0.0
+
     return df
 
 
@@ -197,7 +286,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             logger.warning(f"[{symbol}] Insufficient data")
             return
 
-        df = _apply_indicators(df)
+        df = _enrich_df(df, symbol)
 
         coin_data     = trade_entries.get(symbol, {})
         entry_list    = coin_data.get("entries", [])
