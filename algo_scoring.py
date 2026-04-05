@@ -28,6 +28,24 @@ def safe_float(val, default=0.0):
         return default
 
 
+def json_safe(obj):
+    """Recursively convert numpy/pandas types to JSON-serializable Python natives."""
+    if isinstance(obj, dict):
+        return {k: json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        converted = [json_safe(i) for i in obj]
+        return tuple(converted) if isinstance(obj, tuple) else converted
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
 def _has_col(df, col):
     return col in df.columns and df[col].notna().any()
 
@@ -108,8 +126,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # K = CVD_norm% — WAJIB gunakan formula delta/abs, BUKAN nilai absolut CVD
     K = ((I_cvd - J_cvd) / abs(J_cvd) * 100) if J_cvd != 0 else 0.0
     close_21 = safe_float(candle_21_ago.get('Close', 0))
-    cvd_div_bull = (I_cvd > J_cvd) and (close_price < close_21)
-    cvd_div_bear = (I_cvd < J_cvd) and (close_price > close_21)
+    # bool() wajib: pandas comparison → numpy.bool_ → tidak JSON-serializable
+    cvd_div_bull = bool((I_cvd > J_cvd) and (close_price < close_21))
+    cvd_div_bear = bool((I_cvd < J_cvd) and (close_price > close_21))
 
     # ── StochRSI ───────────────────────────────────────────────
     stoch_k   = _last_val(last, 'StochRSI_K')
@@ -121,8 +140,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     stoch_cross_up   = False
     stoch_cross_down = False
     if has_stoch and stoch_k_prev is not None and stoch_d_prev is not None:
-        stoch_cross_up   = (stoch_k > stoch_d)   and (stoch_k_prev <= stoch_d_prev)
-        stoch_cross_down = (stoch_k < stoch_d)   and (stoch_k_prev >= stoch_d_prev)
+        # bool() wajib: mencegah numpy.bool_ masuk ke return dict
+        stoch_cross_up   = bool((stoch_k > stoch_d)   and (stoch_k_prev <= stoch_d_prev))
+        stoch_cross_down = bool((stoch_k < stoch_d)   and (stoch_k_prev >= stoch_d_prev))
 
     # ── EMA ────────────────────────────────────────────────────
     ema21 = safe_float(last.get('EMA_21', close_price)) or close_price
@@ -971,11 +991,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             ('StochRSI',   *_ppi_stoch_long()),
         ],
         'tier3': {
-            'vol_above_ma': F_final > 0,
-            'oi_positive':  C_final > 5,
-            'price_below_ema': L < -1.5 or M < -2,
-            'atr_ok': s4 >= 2,
-            'positives': sum([F_final > 0, C_final > 5, L < -1.5 or M < -2, s4 >= 2]),
+            'vol_above_ma':    bool(F_final > 0),
+            'oi_positive':     bool(C_final > 5),
+            'price_below_ema': bool(L < -1.5 or M < -2),
+            'atr_ok':          bool(s4 >= 2),
+            'positives':       int(sum([F_final > 0, C_final > 5, L < -1.5 or M < -2, s4 >= 2])),
         },
     }
 
@@ -1028,11 +1048,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             ('StochRSI',   *_ppi_stoch_short()),
         ],
         'tier3': {
-            'vol_above_ma': F_final > 0,
-            'oi_positive':  C_final > 5,
-            'price_above_ema': Lp > 3 or Mp > 4,
-            'atr_ok': s4 >= 2,
-            'positives': sum([F_final > 0, C_final > 5, Lp > 3 or Mp > 4, s4 >= 2]),
+            'vol_above_ma':    bool(F_final > 0),
+            'oi_positive':     bool(C_final > 5),
+            'price_above_ema': bool(Lp > 3 or Mp > 4),
+            'atr_ok':          bool(s4 >= 2),
+            'positives':       int(sum([F_final > 0, C_final > 5, Lp > 3 or Mp > 4, s4 >= 2])),
         },
     }
 
@@ -1045,11 +1065,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         code_S = 'SKIP'
 
     # ═══════════════════════════════════════════════════════════
-    # RETURN
+    # RETURN — json_safe() memastikan semua numpy type dikonversi
     # ═══════════════════════════════════════════════════════════
     pnl_pct = round((close_price / entry_val - 1) * 100, 4) if is_active and entry_val else None
 
-    return {
+    result = {
         'long': {
             'raw': RAW_L, 'total': ADJ_L,
             'pct': round(ADJ_L / 71 * 100, 2),
@@ -1093,9 +1113,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'sl_candidates': [(round(p, 8), l) for p, l in sl_cands_S],
         },
         'emergency': {
-            'sl_touched': is_active and (close_price < sl_struct_L),
-            'rsi_ob': O_rsi > 75,
-            'stale': aging_status == "STALE",
+            'sl_touched': bool(is_active and (close_price < sl_struct_L)),
+            'rsi_ob': bool(O_rsi > 75),
+            'stale': bool(aging_status == "STALE"),
         },
         'exit': {
             'signals': exit_signals, 'recommendation': exit_reco,
@@ -1104,7 +1124,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         'momentum_hold': momentum_hold,
         'sl_wick':       sl_wick_result,
         'validation': {
-            'ok': valid_ok,
+            'ok': bool(valid_ok),
             'issues': validations,
             'badge': '✅ Kalkulasi v12 valid' if valid_ok else f'⚠️ {len(validations)} isu validasi'
         },
@@ -1132,13 +1152,15 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
                 't1_lo': round(t1_lo, 2), 't1_hi': round(t1_hi, 2),
             },
             'SESSION_MULT': SESSION_MULT, 'session': session_label,
-            'is_altcoin': not is_major,
-            'is_active_pos': is_active, 'entry_price': entry_val if is_active else None,
-            'aging_status': aging_status, 'candles_since_entry': candles_since_entry,
+            'is_altcoin': bool(not is_major),
+            'is_active_pos': bool(is_active), 'entry_price': entry_val if is_active else None,
+            'aging_status': aging_status, 'candles_since_entry': int(candles_since_entry),
             'pnl_pct': pnl_pct,
             'bos_val': bos_val, 'funding_val': funding_val,
             'buy_liq_val': buy_liq_val, 'sell_liq_val': sell_liq_val,
         },
     }
+    # Sanitize ALL numpy types sebelum dikembalikan ke Flask jsonify
+    return json_safe(result)
 
 
