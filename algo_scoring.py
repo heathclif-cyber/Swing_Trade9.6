@@ -105,10 +105,24 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # ── CVD ────────────────────────────────────────────────────
     I_cvd = safe_float(last.get('CVD', 0))
     J_cvd = safe_float(candle_21_ago.get('CVD', 0))
+    # K = CVD_norm% — WAJIB gunakan formula delta/abs, BUKAN nilai absolut CVD
     K = ((I_cvd - J_cvd) / abs(J_cvd) * 100) if J_cvd != 0 else 0.0
     close_21 = safe_float(candle_21_ago.get('Close', 0))
     cvd_div_bull = (I_cvd > J_cvd) and (close_price < close_21)
     cvd_div_bear = (I_cvd < J_cvd) and (close_price > close_21)
+
+    # ── StochRSI ───────────────────────────────────────────────
+    stoch_k   = _last_val(last, 'StochRSI_K')
+    stoch_d   = _last_val(last, 'StochRSI_D')
+    prev_row  = df.iloc[-2] if len(df) >= 2 else last
+    stoch_k_prev = _last_val(prev_row, 'StochRSI_K')
+    stoch_d_prev = _last_val(prev_row, 'StochRSI_D')
+    has_stoch = stoch_k is not None and stoch_d is not None
+    stoch_cross_up   = False
+    stoch_cross_down = False
+    if has_stoch and stoch_k_prev is not None and stoch_d_prev is not None:
+        stoch_cross_up   = (stoch_k > stoch_d)   and (stoch_k_prev <= stoch_d_prev)
+        stoch_cross_down = (stoch_k < stoch_d)   and (stoch_k_prev >= stoch_d_prev)
 
     # ── EMA ────────────────────────────────────────────────────
     ema21 = safe_float(last.get('EMA_21', close_price)) or close_price
@@ -184,7 +198,90 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         aging_status = "NORMAL"
 
     # ═══════════════════════════════════════════════════════════
-    # BAGIAN 2 — SCORING LONG
+    # BAGIAN 2 — GATE CHECK (jalankan SEBELUM scoring)
+    # ═══════════════════════════════════════════════════════════
+    bos_val     = _last_val(last, 'BOS')
+    funding_val = _last_val(last, 'Funding_Rate')
+    buy_liq_val = _last_val(last, 'Buy_Liq')
+    sell_liq_val= _last_val(last, 'Sell_Liq')
+    has_bos     = bos_val is not None
+    has_funding = funding_val is not None
+    has_buy_liq = buy_liq_val is not None and buy_liq_val > 0
+    has_sell_liq= sell_liq_val is not None and sell_liq_val > 0
+
+    # ── Gate LONG ───────────────────────────────────────────────
+    gate_L = {'status': 'CLEAR', 'gates': {}}
+
+    # L1: Struktur tidak bearish
+    if not has_bos:
+        gate_L['gates']['L1'] = ('PASS', 'BOS tidak tersedia — skip')
+    elif bos_val != -1:
+        gate_L['gates']['L1'] = ('PASS', f'BOS={bos_val} — struktur netral/bullish')
+    elif cvd_div_bull and O_rsi < 25 and has_funding and funding_val <= 0:
+        gate_L['gates']['L1'] = ('PASS', 'BOS=-1 tapi exception: CVD div bull + RSI<25 + funding≤0')
+    else:
+        gate_L['gates']['L1'] = ('FAIL', '❌ GATE L1: Struktur bearish aktif (BOS=−1). Tunggu BOS flip atau konfirmasi reversal.')
+        gate_L['status'] = 'BLOCKED'
+
+    # L2: Likuiditas sudah/hampir diambil
+    if not has_buy_liq:
+        gate_L['gates']['L2'] = ('PASS', 'Buy_Liq tidak tersedia — skip')
+    elif close_price <= buy_liq_val * 1.005:
+        gate_L['gates']['L2'] = ('PASS', f'Harga ≤ Buy_Liq×1.005 — sweep sudah terjadi')
+    elif close_price <= buy_liq_val * 1.020:
+        gate_L['gates']['L2'] = ('WARN', f'⚠️ Harga dalam 2% di atas Buy_Liq ${buy_liq_val:.4f} — mendekati sweep')
+        if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
+    else:
+        jarak_pct = (close_price / buy_liq_val - 1) * 100
+        gate_L['gates']['L2'] = ('FAIL', f'❌ GATE L2: Likuiditas belum diambil. Harga +{jarak_pct:.2f}% di atas Buy_Liq ${buy_liq_val:.4f}.')
+        gate_L['status'] = 'BLOCKED'
+
+    # L3: Funding tidak positif berlebihan
+    if not has_funding:
+        gate_L['gates']['L3'] = ('PASS', 'Funding_Rate tidak tersedia — skip')
+    elif funding_val <= 0.0003:
+        gate_L['gates']['L3'] = ('PASS', f'Funding {funding_val:.5f} ≤ +0.0003 — netral/negatif')
+    else:
+        gate_L['gates']['L3'] = ('FAIL', f'❌ GATE L3: Funding positif tinggi ({funding_val:.5f}). Tunggu funding ≤ +0.0003.')
+        gate_L['status'] = 'BLOCKED'
+
+    # ── Gate SHORT ──────────────────────────────────────────────
+    gate_S = {'status': 'CLEAR', 'gates': {}}
+
+    # S1: Struktur tidak bullish
+    if not has_bos:
+        gate_S['gates']['S1'] = ('PASS', 'BOS tidak tersedia — skip')
+    elif bos_val != 1:
+        gate_S['gates']['S1'] = ('PASS', f'BOS={bos_val} — struktur netral/bearish')
+    elif cvd_div_bear and O_rsi > 75 and has_funding and funding_val >= 0:
+        gate_S['gates']['S1'] = ('PASS', 'BOS=+1 tapi exception: CVD div bear + RSI>75 + funding≥0')
+    else:
+        gate_S['gates']['S1'] = ('FAIL', '❌ GATE S1: Struktur bullish aktif (BOS=+1). Tunggu BOS flip ke 0/−1.')
+        gate_S['status'] = 'BLOCKED'
+
+    # S2: Sell liquidity sudah/hampir diambil
+    if not has_sell_liq:
+        gate_S['gates']['S2'] = ('PASS', 'Sell_Liq tidak tersedia — skip')
+    elif close_price >= sell_liq_val * 0.995:
+        gate_S['gates']['S2'] = ('PASS', f'Harga ≥ Sell_Liq×0.995 — sweep sudah terjadi')
+    elif close_price >= sell_liq_val * 0.980:
+        gate_S['gates']['S2'] = ('WARN', f'⚠️ Harga dalam 2% di bawah Sell_Liq ${sell_liq_val:.4f} — mendekati sweep')
+        if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+    else:
+        gate_S['gates']['S2'] = ('FAIL', f'❌ GATE S2: Sell liquidity belum diambil (${sell_liq_val:.4f}).')
+        gate_S['status'] = 'BLOCKED'
+
+    # S3: Funding tidak negatif berlebihan
+    if not has_funding:
+        gate_S['gates']['S3'] = ('PASS', 'Funding_Rate tidak tersedia — skip')
+    elif funding_val >= -0.0003:
+        gate_S['gates']['S3'] = ('PASS', f'Funding {funding_val:.5f} ≥ −0.0003 — normal')
+    else:
+        gate_S['gates']['S3'] = ('FAIL', f'❌ GATE S3: Funding sangat negatif ({funding_val:.5f}) — short squeeze risk.')
+        gate_S['status'] = 'BLOCKED'
+
+    # ═══════════════════════════════════════════════════════════
+    # BAGIAN 3 — SCORING LONG
     # ═══════════════════════════════════════════════════════════
     def score_oi(v):
         if v > 30: return 3
@@ -301,24 +398,27 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # Collect SL candidates LONG (must be < close)
     sl_cands_L = []
     buy_liq = _last_val(last, 'Buy_Liq')
-    if buy_liq and buy_liq * 0.997 < close_price:
+    if buy_liq and buy_liq > 0 and buy_liq * 0.997 < close_price:
         sl_cands_L.append((buy_liq * 0.997, "Likuiditas Buy"))
     fvg_db = _last_val(last, 'FVG_Down_Bottom')
-    if fvg_db and fvg_db * 0.998 < close_price:
-        sl_cands_L.append((fvg_db * 0.998, "FVG Bearish"))
+    if fvg_db and fvg_db > 0 and fvg_db * 0.998 < close_price:
+        sl_cands_L.append((fvg_db * 0.998, "FVG Bearish Bottom"))
     # swing low 3 candle
     if len(df) >= 3:
         sw3 = min(safe_float(df.iloc[-3].get('Low', 1e18)),
                   safe_float(df.iloc[-2].get('Low', 1e18)),
                   low_price) * 0.998
-        if sw3 < close_price:
+        if sw3 > 0 and sw3 < close_price:
             sl_cands_L.append((sw3, "Swing Low 3C"))
     fib786 = _last_val(last, 'Fib_0.786')
-    if fib786 and fib786 * 0.998 < close_price:
+    if fib786 and fib786 > 0 and fib786 * 0.998 < close_price:
         sl_cands_L.append((fib786 * 0.998, "Fibonacci 0.786"))
     val_lev = _last_val(last, 'VAL')
-    if val_lev and val_lev * 0.998 < close_price:
+    if val_lev and val_lev > 0 and val_lev * 0.998 < close_price:
         sl_cands_L.append((val_lev * 0.998, "Value Area Low"))
+    pdl_lev = _last_val(last, 'PDL')
+    if pdl_lev and pdl_lev > 0 and pdl_lev * 0.998 < close_price:
+        sl_cands_L.append((pdl_lev * 0.998, "Prev Day Low"))
     # ATR fallbacks always added
     if sl_atr1_L < close_price:
         sl_cands_L.append((sl_atr1_L, "ATR ×1.0 (fallback)"))
@@ -332,11 +432,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # Collect SL candidates SHORT (must be > close)
     sl_cands_S = []
     sell_liq = _last_val(last, 'Sell_Liq')
-    if sell_liq and sell_liq * 1.003 > close_price:
+    if sell_liq and sell_liq > 0 and sell_liq * 1.003 > close_price:
         sl_cands_S.append((sell_liq * 1.003, "Likuiditas Sell"))
     fvg_ut = _last_val(last, 'FVG_Up_Top')
-    if fvg_ut and fvg_ut * 1.002 > close_price:
-        sl_cands_S.append((fvg_ut * 1.002, "FVG Bullish"))
+    if fvg_ut and fvg_ut > 0 and fvg_ut * 1.002 > close_price:
+        sl_cands_S.append((fvg_ut * 1.002, "FVG Bullish Top"))
     if len(df) >= 3:
         sw3h = max(safe_float(df.iloc[-3].get('High', 0)),
                    safe_float(df.iloc[-2].get('High', 0)),
@@ -344,11 +444,14 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         if sw3h > close_price:
             sl_cands_S.append((sw3h, "Swing High 3C"))
     fib618 = _last_val(last, 'Fib_0.618')
-    if fib618 and fib618 * 1.002 > close_price:
+    if fib618 and fib618 > 0 and fib618 * 1.002 > close_price:
         sl_cands_S.append((fib618 * 1.002, "Fibonacci 0.618"))
     vah_lev = _last_val(last, 'VAH')
-    if vah_lev and vah_lev * 1.002 > close_price:
+    if vah_lev and vah_lev > 0 and vah_lev * 1.002 > close_price:
         sl_cands_S.append((vah_lev * 1.002, "Value Area High"))
+    pdh_lev = _last_val(last, 'PDH')
+    if pdh_lev and pdh_lev > 0 and pdh_lev * 1.002 > close_price:
+        sl_cands_S.append((pdh_lev * 1.002, "Prev Day High"))
     if sl_atr1_S > close_price:
         sl_cands_S.append((sl_atr1_S, "ATR ×1.0 (fallback)"))
     if sl_atr15_S > close_price:
@@ -528,31 +631,54 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         exit_reco = "HOLD"
 
     # ═══════════════════════════════════════════════════════════
-    # BAGIAN 8 — VALIDATION
+    # BAGIAN 8 — VALIDASI INTERNAL v12
     # ═══════════════════════════════════════════════════════════
     validations = []
+    # V1–V2: Skor dalam range
     if not (0 <= RAW_L <= 71):
-        validations.append("⚠️ Skor long anomali")
+        validations.append("⚠️ V1: Skor long anomali")
     if not (0 <= RAW_S <= 71):
-        validations.append("⚠️ Skor short anomali")
+        validations.append("⚠️ V2: Skor short anomali")
+    # V3: Tiap fitur tidak overflow maks
     for k, (pts, mx, _, _) in scores_L.items():
         if pts > mx:
-            validations.append(f"⚠️ Overflow: {k} (L)")
+            validations.append(f"⚠️ V3: Overflow {k} (L)")
     for k, (pts, mx, _, _) in scores_S.items():
         if pts > mx:
-            validations.append(f"⚠️ Overflow: {k} (S)")
+            validations.append(f"⚠️ V3: Overflow {k} (S)")
+    # V4: TakerBuy poin maks 8
+    if scores_L['TakerBuy'][0] > 8 or scores_S['TakerBuy'][0] > 8:
+        validations.append("⚠️ V4: TakerBuy overflow (maks 8)")
+    # V5–V6: SL posisi benar
     if sl_struct_L >= close_price:
-        validations.append("⚠️ SL long di atas harga")
+        validations.append("⚠️ V5: SL long di atas harga")
     if sl_struct_S <= close_price:
-        validations.append("⚠️ SL short di bawah harga")
+        validations.append("⚠️ V6: SL short di bawah harga")
+    # V7–V8: Urutan TP
     if not (tp1_L[0] <= tp2_L[0] <= tp3_L[0]):
-        validations.append("⚠️ TP long urutan tidak logis")
+        validations.append("⚠️ V7: Urutan TP long terbalik")
     if not (tp1_S[0] >= tp2_S[0] >= tp3_S[0]):
-        validations.append("⚠️ TP short urutan tidak logis")
+        validations.append("⚠️ V8: Urutan TP short terbalik")
+    # V9–V10: TP sisi benar
+    if any(t <= close_price for t in [tp1_L[0], tp2_L[0], tp3_L[0]]):
+        validations.append("⚠️ V9: Ada TP long di bawah harga")
+    if any(t >= close_price for t in [tp1_S[0], tp2_S[0], tp3_S[0]]):
+        validations.append("⚠️ V10: Ada TP short di atas harga")
+    # V11: RR positif
     if rr1_L <= 0:
-        validations.append("⚠️ RR long negatif")
+        validations.append("⚠️ V11: RR long negatif")
     if rr1_S <= 0:
-        validations.append("⚠️ RR short negatif")
+        validations.append("⚠️ V11: RR short negatif")
+    # V12: Session mult diterapkan
+    if round(ADJ_L, 1) != round(RAW_L * SESSION_MULT, 1):
+        validations.append("⚠️ V12: Session mult tidak diterapkan (L)")
+    # V13: ATR scoring pakai ATR_MULT
+    if ATR_MULT == 1.0 and not is_major:
+        validations.append("⚠️ V13: ATR_MULT=1.0 tapi bukan BTC/ETH")
+    # V14: CVD scoring pakai CVD_norm% bukan absolut
+    # K adalah CVD_norm% — validasi range masuk akal
+    if abs(I_cvd) > 0 and abs(K) == abs(I_cvd):
+        validations.append("⚠️ V14: CVD scoring mungkin pakai nilai absolut")
     valid_ok = len(validations) == 0
 
     # ═══════════════════════════════════════════════════════════
@@ -756,6 +882,132 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             sl_wick_result['action']         = '✅ Posisi aman. SL belum disentuh.'
 
     # ═══════════════════════════════════════════════════════════
+    # BAGIAN 9 — PARAMETER PRIORITY INDICATOR (Tier 1/2/3)
+    # ═══════════════════════════════════════════════════════════
+
+    # --- LONG Priority ---
+    def _ppi_bos_long():
+        if not has_bos: return ('⚠️', 'N/A', 'Kolom tidak tersedia')
+        if bos_val == 1:  return ('✅', f'BOS={bos_val}', 'Bullish')
+        if bos_val == 0:  return ('⚠️', f'BOS={bos_val}', 'Netral')
+        return ('❌', f'BOS={bos_val}', 'Bearish aktif')
+
+    def _ppi_cvd_long():
+        if cvd_div_bull: return ('✅', f'CVD div bull', f'K={K:+.2f}%')
+        if K > 0:        return ('⚠️', f'K={K:+.2f}%', 'Naik tapi tanpa divergence')
+        return ('❌', f'K={K:+.2f}%', 'CVD negatif')
+
+    def _ppi_funding_long():
+        if not has_funding: return ('⚠️', 'N/A', 'Tidak tersedia')
+        if funding_val <= 0:      return ('✅', f'{funding_val:.5f}', 'Negatif/netral')
+        if funding_val <= 0.0003: return ('⚠️', f'{funding_val:.5f}', 'Sedikit positif')
+        return ('❌', f'{funding_val:.5f}', 'Positif tinggi — long trap')
+
+    def _ppi_liqsweep_long():
+        if not has_buy_liq: return ('⚠️', 'N/A', 'Tidak tersedia')
+        j = (close_price / buy_liq_val - 1) * 100
+        if close_price <= buy_liq_val * 1.005: return ('✅', f'${buy_liq_val:.4f}', 'Sweep selesai')
+        if close_price <= buy_liq_val * 1.020: return ('⚠️', f'+{j:.2f}%', 'Mendekati')
+        return ('❌', f'+{j:.2f}%', 'Belum diambil')
+
+    def _ppi_rsi_long():
+        if O_rsi < 25:  return ('✅', f'{O_rsi:.1f}', 'Oversold ekstrem')
+        if O_rsi < 40:  return ('⚠️', f'{O_rsi:.1f}', 'Mendekati oversold')
+        return ('❌', f'{O_rsi:.1f}', 'Tidak oversold')
+
+    def _ppi_stoch_long():
+        if not has_stoch: return ('⚠️', 'N/A', 'Tidak tersedia')
+        sk, sd = round(stoch_k, 1), round(stoch_d, 1)
+        if stoch_cross_up and stoch_k < 20: return ('✅', f'K={sk} D={sd}', 'Cross up dari <20')
+        if stoch_k < stoch_d and stoch_k < 30: return ('⚠️', f'K={sk} D={sd}', 'K<D area rendah')
+        return ('❌', f'K={sk} D={sd}', 'Tidak menguntungkan')
+
+    ppi_long = {
+        'tier1': [
+            ('BOS/CHoCH',    *_ppi_bos_long()),
+            ('CVD Diverg.',  *_ppi_cvd_long()),
+            ('Funding Rate', *_ppi_funding_long()),
+        ],
+        'tier2': [
+            ('Liq Sweep',  *_ppi_liqsweep_long()),
+            ('RSI_6',      *_ppi_rsi_long()),
+            ('StochRSI',   *_ppi_stoch_long()),
+        ],
+        'tier3': {
+            'vol_above_ma': F_final > 0,
+            'oi_positive':  C_final > 5,
+            'price_below_ema': L < -1.5 or M < -2,
+            'atr_ok': s4 >= 2,
+            'positives': sum([F_final > 0, C_final > 5, L < -1.5 or M < -2, s4 >= 2]),
+        },
+    }
+
+    # --- SHORT Priority ---
+    def _ppi_bos_short():
+        if not has_bos: return ('⚠️', 'N/A', 'Kolom tidak tersedia')
+        if bos_val == -1: return ('✅', f'BOS={bos_val}', 'Bearish')
+        if bos_val == 0:  return ('⚠️', f'BOS={bos_val}', 'Netral')
+        return ('❌', f'BOS={bos_val}', 'Bullish aktif')
+
+    def _ppi_cvd_short():
+        if cvd_div_bear: return ('✅', f'CVD div bear', f'K={K:+.2f}%')
+        if K < 0:        return ('⚠️', f'K={K:+.2f}%', 'Turun tapi tanpa divergence')
+        return ('❌', f'K={K:+.2f}%', 'CVD positif')
+
+    def _ppi_funding_short():
+        if not has_funding: return ('⚠️', 'N/A', 'Tidak tersedia')
+        if funding_val >= 0:       return ('✅', f'{funding_val:.5f}', 'Positif/netral')
+        if funding_val >= -0.0003: return ('⚠️', f'{funding_val:.5f}', 'Sedikit negatif')
+        return ('❌', f'{funding_val:.5f}', 'Sangat negatif — squeeze risk')
+
+    def _ppi_liqsweep_short():
+        if not has_sell_liq: return ('⚠️', 'N/A', 'Tidak tersedia')
+        j = (sell_liq_val / close_price - 1) * 100
+        if close_price >= sell_liq_val * 0.995: return ('✅', f'${sell_liq_val:.4f}', 'Sweep selesai')
+        if close_price >= sell_liq_val * 0.980: return ('⚠️', f'-{j:.2f}%', 'Mendekati')
+        return ('❌', f'-{j:.2f}%', 'Belum diambil')
+
+    def _ppi_rsi_short():
+        if O_rsi > 75:  return ('✅', f'{O_rsi:.1f}', 'Overbought ekstrem')
+        if O_rsi > 60:  return ('⚠️', f'{O_rsi:.1f}', 'Mendekati overbought')
+        return ('❌', f'{O_rsi:.1f}', 'Tidak overbought')
+
+    def _ppi_stoch_short():
+        if not has_stoch: return ('⚠️', 'N/A', 'Tidak tersedia')
+        sk, sd = round(stoch_k, 1), round(stoch_d, 1)
+        if stoch_cross_down and stoch_k > 80: return ('✅', f'K={sk} D={sd}', 'Cross down dari >80')
+        if stoch_k > stoch_d and stoch_k > 70: return ('⚠️', f'K={sk} D={sd}', 'K>D area tinggi')
+        return ('❌', f'K={sk} D={sd}', 'Tidak menguntungkan')
+
+    ppi_short = {
+        'tier1': [
+            ('BOS/CHoCH',    *_ppi_bos_short()),
+            ('CVD Diverg.',  *_ppi_cvd_short()),
+            ('Funding Rate', *_ppi_funding_short()),
+        ],
+        'tier2': [
+            ('Liq Sweep',  *_ppi_liqsweep_short()),
+            ('RSI_6',      *_ppi_rsi_short()),
+            ('StochRSI',   *_ppi_stoch_short()),
+        ],
+        'tier3': {
+            'vol_above_ma': F_final > 0,
+            'oi_positive':  C_final > 5,
+            'price_above_ema': Lp > 3 or Mp > 4,
+            'atr_ok': s4 >= 2,
+            'positives': sum([F_final > 0, C_final > 5, Lp > 3 or Mp > 4, s4 >= 2]),
+        },
+    }
+
+    # ── Gate overrides keputusan ─────────────────────────────
+    if gate_L['status'] == 'BLOCKED':
+        dec_L = 'SKIP'
+        code_L = 'SKIP'
+    if gate_S['status'] == 'BLOCKED':
+        dec_S = 'SKIP'
+        code_S = 'SKIP'
+
+    # ═══════════════════════════════════════════════════════════
     # RETURN
     # ═══════════════════════════════════════════════════════════
     pnl_pct = round((close_price / entry_val - 1) * 100, 4) if is_active and entry_val else None
@@ -765,7 +1017,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'raw': RAW_L, 'total': ADJ_L,
             'pct': round(ADJ_L / 71 * 100, 2),
             'decision': dec_L, 'code': code_L,
+            'gate': gate_L,
             'scores': scores_L, 'narrative': narrative_L,
+            'ppi': ppi_long,
             'levels': {
                 'sl_structure': round(sl_struct_L, 8), 'sl_label': sl_label_L,
                 'sl_ketat': round(sl_atr1_L, 8), 'sl_normal': round(sl_atr15_L, 8), 'sl_lebar': round(sl_atr2_L, 8),
@@ -784,7 +1038,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'raw': RAW_S, 'total': ADJ_S,
             'pct': round(ADJ_S / 71 * 100, 2),
             'decision': dec_S, 'code': code_S,
+            'gate': gate_S,
             'scores': scores_S, 'narrative': narrative_S,
+            'ppi': ppi_short,
             'levels': {
                 'sl_structure': round(sl_struct_S, 8), 'sl_label': sl_label_S,
                 'sl_ketat': round(sl_atr1_S, 8), 'sl_normal': round(sl_atr15_S, 8), 'sl_lebar': round(sl_atr2_S, 8),
@@ -810,7 +1066,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         },
         'momentum_hold': momentum_hold,
         'sl_wick':       sl_wick_result,
-        'validation': {'ok': valid_ok, 'issues': validations},
+        'validation': {
+            'ok': valid_ok,
+            'issues': validations,
+            'badge': '✅ Kalkulasi v12 valid' if valid_ok else f'⚠️ {len(validations)} isu validasi'
+        },
         'market_context': ctx,
         'variables': {
             'C_oi_short': round(C, 2), 'C_oi_long': round(C2, 2), 'C_final': round(C_final, 2),
@@ -818,17 +1078,29 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'C_oi_norm': round(C_final, 2), 'F_vol_norm': round(F_final, 2),
             'G_taker_buy': round(G, 2), 'H_atr_pct': round(H, 2),
             'K_cvd_norm': round(K, 2), 'cvd_div_bull': cvd_div_bull, 'cvd_div_bear': cvd_div_bear,
+            'I_cvd_abs': round(I_cvd, 2), 'J_cvd_abs': round(J_cvd, 2),
             'L_ema21': round(L, 2), 'M_ema50': round(M, 2), 'N_ema200': round(N, 2),
             'Lp_ema21': round(Lp, 2), 'Mp_ema50': round(Mp, 2), 'Np_ema200': round(Np, 2),
             'O_rsi': round(O_rsi, 2),
+            'stoch_k': round(stoch_k, 2) if has_stoch else None,
+            'stoch_d': round(stoch_d, 2) if has_stoch else None,
+            'stoch_cross_up': stoch_cross_up,
+            'stoch_cross_down': stoch_cross_down,
             'close_price': round(close_price, 8), 'low_price': round(low_price, 8), 'high_price': round(high_price, 8),
             'ema21': round(ema21, 8), 'ema50': round(ema50, 8), 'ema200': round(ema200, 8),
             'atr': round(atr, 8), 'ATR_MULT': ATR_MULT, 'atr_mult_reason': atr_mult_reason,
+            'atr_thresholds': {
+                'sweet_lo': round(sweet_lo, 2), 'sweet_hi': round(sweet_hi, 2),
+                't2_lo': round(t2_lo, 2), 't2_hi': round(t2_hi, 2),
+                't1_lo': round(t1_lo, 2), 't1_hi': round(t1_hi, 2),
+            },
             'SESSION_MULT': SESSION_MULT, 'session': session_label,
             'is_altcoin': not is_major,
             'is_active_pos': is_active, 'entry_price': entry_val if is_active else None,
             'aging_status': aging_status, 'candles_since_entry': candles_since_entry,
             'pnl_pct': pnl_pct,
+            'bos_val': bos_val, 'funding_val': funding_val,
+            'buy_liq_val': buy_liq_val, 'sell_liq_val': sell_liq_val,
         },
     }
 
