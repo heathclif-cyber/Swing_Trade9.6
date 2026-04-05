@@ -220,13 +220,15 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             return
 
         close_price = float(df.iloc[-1]["Close"])
-        adj_L = result["long"]["total"]
-        adj_S = result["short"]["total"]
-        code_L = result["long"]["code"]
-        code_S = result["short"]["code"]
-        lvl_L  = result["long"]["levels"]
-        lvl_S  = result["short"]["levels"]
-        exit_r = result.get("exit", {})
+        adj_L     = result["long"]["total"]
+        adj_S     = result["short"]["total"]
+        code_L    = result["long"]["code"]
+        code_S    = result["short"]["code"]
+        lvl_L     = result["long"]["levels"]
+        lvl_S     = result["short"]["levels"]
+        exit_r    = result.get("exit", {})
+        mom_hold  = result.get("momentum_hold", {})
+        sl_wick   = result.get("sl_wick", {})
 
         now_ts = time.time()
 
@@ -246,6 +248,38 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 and "EMA_21" in df.columns
                 and float(df.iloc[-2]["Close"]) < float(df.iloc[-2].get("EMA_21", float("inf")))
             )
+            # ── SL WICK FAKEOUT ALERT (jika ada posisi aktif & wick menyentuh SL) ──
+            if is_active and sl_wick.get("sl_touched_wick") and not state.get("wick_alerted"):
+                verdict = sl_wick.get("verdict", "N/A")
+                action  = sl_wick.get("action", "")
+                conf    = sl_wick.get("confidence_pct", 0)
+                pnl_str = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
+                body_ok = "✅ Body di atas SL" if sl_wick.get("body_above_sl") else "❌ Body TEMBUS SL"
+                cvd_ok  = "✅ CVD masih defend" if sl_wick.get("cvd_defending") else "❌ CVD memburuk"
+                vol_ok  = "✅ Volume drop lemah" if sl_wick.get("low_volume_drop") else "⚠️ Volume normal"
+                bull_ok = "✅ Candle berbalik hijau" if sl_wick.get("bullish_body") else "❌ Candle masih merah"
+                _send_telegram(
+                    f"🕯️ <b>SL WICK ALERT — {symbol}</b>\n"
+                    f"{'─'*28}\n"
+                    f"Harga: <b>${close_price:.6f}</b> | PnL: {pnl_str}\n"
+                    f"SL Level: ${lvl_L['sl_structure']:.6f}\n\n"
+                    f"<b>Analisis Wick:</b>\n"
+                    f"  {body_ok}\n"
+                    f"  {cvd_ok}\n"
+                    f"  {vol_ok}\n"
+                    f"  {bull_ok}\n\n"
+                    f"🔍 Verdict: <b>{verdict}</b> ({conf}% yakin)\n"
+                    f"📋 {action}"
+                )
+                state["wick_alerted"] = (verdict != "BREAKDOWN NYATA")
+                if verdict == "BREAKDOWN NYATA":
+                    state["last_alert_ts"] = now_ts
+                    return
+
+            # Reset wick alert jika harga kembali aman
+            if not sl_wick.get("sl_touched_wick"):
+                state["wick_alerted"] = False
+
             if is_active and kill_switch and not state["kill_alerted"]:
                 ema21_val = float(df.iloc[-2].get("EMA_21", 0))
                 pnl_str   = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
@@ -299,6 +333,14 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 rr1        = lvl_L.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
                 wib        = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+                # Momentum Hold advisory
+                hold_str = ""
+                if mom_hold.get("signal"):
+                    reasons = " · ".join(mom_hold.get("reasons", [])[:3])
+                    hold_str = (
+                        f"\n💡 <b>MOMENTUM {mom_hold['strength']}</b> — Pertimbangkan TAHAN TP1\n"
+                        f"   {reasons}\n"
+                    )
                 _send_telegram(
                     f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                     f"{'─'*28}\n"
@@ -311,7 +353,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"🎯 <b>Take Profit:</b>\n"
                     f"  TP1: ${lvl_L['tp1']:.6f} (+{lvl_L['dist_tp1']:.2f}%) | R:R {lvl_L['rr1']}× [{lvl_L['tp1_label']}]\n"
                     f"  TP2: ${lvl_L['tp2']:.6f} (+{lvl_L['dist_tp2']:.2f}%) | R:R {lvl_L['rr2']}×\n"
-                    f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n\n"
+                    f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
+                    f"{hold_str}"
                     f"R:R Quality: {rr_q}\n"
                     f"🕐 {wib} WIB"
                 )

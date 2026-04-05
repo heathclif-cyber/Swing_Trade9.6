@@ -624,6 +624,138 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     }
 
     # ═══════════════════════════════════════════════════════════
+    # BAGIAN 11 — MOMENTUM HOLD ANALYSIS
+    # Apakah momentum masih kuat sehingga sebaiknya TAHAN TP?
+    # ═══════════════════════════════════════════════════════════
+    # 5 faktor penentu momentum masih kuat:
+    # 1. CVD naik  (buyers mengakumulasi, tidak distribusi)
+    # 2. Taker Buy dominan  (order buy lebih banyak dari sell)
+    # 3. RSI belum overbought  (ruang naik masih ada)
+    # 4. OI naik  (uang baru masuk ke pasar = bullish)
+    # 5. Harga belum terlalu jauh dari EMA21  (belum extended)
+
+    cvd_rising     = K > 1.0                  # CVD naik >1%
+    buy_dominant   = G > 55.0                 # Taker Buy >55%
+    rsi_not_ob     = O_rsi < 68.0             # RSI belum mendekati OB
+    oi_net_rising  = C_final > 3.0            # OI di atas MA >3%
+    not_extended   = L < 3.0                  # Jarak dari EMA21 < 3%
+
+    momentum_factors = [cvd_rising, buy_dominant, rsi_not_ob, oi_net_rising, not_extended]
+    momentum_score   = sum(momentum_factors)
+
+    hold_tp_signal   = False
+    hold_tp_strength = ""
+    hold_tp_reasons: list[str] = []
+
+    if momentum_score >= 4:
+        hold_tp_signal   = True
+        hold_tp_strength = "KUAT"
+    elif momentum_score == 3:
+        hold_tp_signal   = True
+        hold_tp_strength = "SEDANG"
+
+    if hold_tp_signal:
+        if cvd_rising:    hold_tp_reasons.append(f"CVD naik ({K:+.1f}%)")
+        if buy_dominant:  hold_tp_reasons.append(f"Buy Vol dominan ({G:.1f}%)")
+        if rsi_not_ob:    hold_tp_reasons.append(f"RSI aman ({O_rsi:.1f})")
+        if oi_net_rising: hold_tp_reasons.append(f"OI naik ({C_final:.1f}%)")
+        if not_extended:  hold_tp_reasons.append(f"Jarak EMA21 aman ({L:.1f}%)")
+
+    momentum_hold = {
+        'signal':    hold_tp_signal,
+        'strength':  hold_tp_strength,
+        'score':     momentum_score,
+        'max_score': 5,
+        'reasons':   hold_tp_reasons,
+        'factors': {
+            'cvd_rising':    cvd_rising,
+            'buy_dominant':  buy_dominant,
+            'rsi_not_ob':    rsi_not_ob,
+            'oi_net_rising': oi_net_rising,
+            'not_extended':  not_extended,
+        },
+    }
+
+    # ═══════════════════════════════════════════════════════════
+    # BAGIAN 12 — SL WICK FAKEOUT DETECTION
+    # Apakah sentuhan ke level SL hanya wick palsu atau breakdown nyata?
+    # ═══════════════════════════════════════════════════════════
+    # Logika:
+    #   • Low menyentuh / melewati SL  → ada potensi analisis
+    #   • Close candle masih di atas SL → body aman = kandidat fakeout
+    #   • CVD tidak turun               → buyer masih hadir (defend)
+    #   • Volume drop di bawah MA20     → tidak ada conviction bearish
+    #   • Close > Open (body hijau)     → candle berbalik bullish
+    #
+    # Confidence scale:
+    #   Semua sinyal fakeout terpenuhi  → FAKEOUT TINGGI (≥80%)
+    #   2 dari 3                        → FAKEOUT SEDANG (~60%)
+    #   1 atau tidak ada                → BREAKDOWN NYATA
+
+    sl_wick_result: dict = {
+        'applicable':       False,
+        'sl_touched_wick':  False,
+        'body_above_sl':    False,
+        'cvd_defending':    False,
+        'low_volume_drop':  False,
+        'bullish_body':     False,
+        'fakeout_count':    0,
+        'verdict':          'N/A',
+        'confidence_pct':   0,
+        'action':           'N/A',
+    }
+
+    if is_active:
+        sl_wick_result['applicable'] = True
+        _sl_val = sl_struct_L
+
+        sl_wick_result['sl_touched_wick'] = low_price <= _sl_val
+        sl_wick_result['body_above_sl']   = close_price > _sl_val
+        sl_wick_result['cvd_defending']   = K >= 0.0           # CVD tidak memburuk
+        sl_wick_result['low_volume_drop'] = D < E20             # Volume saat ini < MA20 Vol
+        sl_wick_result['bullish_body']    = close_price > safe_float(last.get('Open', close_price))
+
+        if sl_wick_result['sl_touched_wick'] and sl_wick_result['body_above_sl']:
+            # Wick menyentuh SL tapi body selamat → evaluasi fakeout
+            fakeout_signals = [
+                sl_wick_result['cvd_defending'],
+                sl_wick_result['low_volume_drop'],
+                sl_wick_result['bullish_body'],
+            ]
+            fakeout_count = sum(fakeout_signals)
+            sl_wick_result['fakeout_count'] = fakeout_count
+
+            if fakeout_count >= 3:
+                sl_wick_result['verdict']        = 'FAKEOUT TINGGI'
+                sl_wick_result['confidence_pct'] = 85
+                sl_wick_result['action']         = '⚡ TAHAN — Kemungkinan besar mantul. Pantau body candle berikutnya.'
+            elif fakeout_count == 2:
+                sl_wick_result['verdict']        = 'FAKEOUT SEDANG'
+                sl_wick_result['confidence_pct'] = 60
+                sl_wick_result['action']         = '⚠️ WASPADA — Ada sinyal fakeout. Tunggu konfirmasi candle berikutnya.'
+            elif fakeout_count == 1:
+                sl_wick_result['verdict']        = 'SINYAL LEMAH'
+                sl_wick_result['confidence_pct'] = 35
+                sl_wick_result['action']         = '🔶 SIAP EXIT — Momentum lemah. Pertimbangkan cut jika next candle red.'
+            else:
+                sl_wick_result['verdict']        = 'BREAKDOWN NYATA'
+                sl_wick_result['confidence_pct'] = 10
+                sl_wick_result['action']         = '❌ EXIT SEKARANG — Tidak ada sinyal fakeout. Breakdown konfirmasi.'
+
+        elif sl_wick_result['sl_touched_wick'] and not sl_wick_result['body_above_sl']:
+            # Body candle sudah di bawah SL → breakdown nyata
+            sl_wick_result['verdict']        = 'BREAKDOWN NYATA'
+            sl_wick_result['confidence_pct'] = 5
+            sl_wick_result['action']         = '❌ EXIT SEGERA — Candle close di bawah SL. Ini bukan wick.'
+            sl_wick_result['fakeout_count']  = 0
+
+        else:
+            # SL tidak disentuh sama sekali → aman
+            sl_wick_result['verdict']        = 'SL AMAN'
+            sl_wick_result['confidence_pct'] = 100
+            sl_wick_result['action']         = '✅ Posisi aman. SL belum disentuh.'
+
+    # ═══════════════════════════════════════════════════════════
     # RETURN
     # ═══════════════════════════════════════════════════════════
     pnl_pct = round((close_price / entry_val - 1) * 100, 4) if is_active and entry_val else None
@@ -676,13 +808,13 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'signals': exit_signals, 'recommendation': exit_reco,
             'hard_count': exit_hard, 'warn_count': exit_warn,
         },
+        'momentum_hold': momentum_hold,
+        'sl_wick':       sl_wick_result,
         'validation': {'ok': valid_ok, 'issues': validations},
         'market_context': ctx,
         'variables': {
-            # New dual-baseline names
             'C_oi_short': round(C, 2), 'C_oi_long': round(C2, 2), 'C_final': round(C_final, 2),
             'F_vol_short': round(F, 2), 'F_vol_long': round(F2, 2), 'F_final': round(F_final, 2),
-            # Old names kept for dashboard.js backward compatibility
             'C_oi_norm': round(C_final, 2), 'F_vol_norm': round(F_final, 2),
             'G_taker_buy': round(G, 2), 'H_atr_pct': round(H, 2),
             'K_cvd_norm': round(K, 2), 'cvd_div_bull': cvd_div_bull, 'cvd_div_bear': cvd_div_bear,
@@ -693,9 +825,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'ema21': round(ema21, 8), 'ema50': round(ema50, 8), 'ema200': round(ema200, 8),
             'atr': round(atr, 8), 'ATR_MULT': ATR_MULT, 'atr_mult_reason': atr_mult_reason,
             'SESSION_MULT': SESSION_MULT, 'session': session_label,
-            'is_altcoin': not is_major,  # backward compat
+            'is_altcoin': not is_major,
             'is_active_pos': is_active, 'entry_price': entry_val if is_active else None,
             'aging_status': aging_status, 'candles_since_entry': candles_since_entry,
             'pnl_pct': pnl_pct,
         },
     }
+
+
