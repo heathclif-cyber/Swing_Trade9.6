@@ -303,7 +303,8 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
 
     s1 = score_oi(C_final)
     s2 = score_vol(F_final)
-    s3 = 2 if G < 49 else (1 if G <= 51 else 0)
+    # Spec: G<49→2, 49≤G≤51→1, G>52→0. Gap 51<G≤52 → diberi skor 1 (masih balanced)
+    s3 = 2 if G < 49 else (1 if G <= 52 else 0)
     s4 = score_atr(H)
     s5 = 3 if cvd_div_bull else (2 if K > 1 else (1 if K >= 0 else 0))
     s6 = 3 if L < -3 else (2 if L < -1.5 else (1 if L < -0.5 else 0))
@@ -618,8 +619,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             exit_signals.append(("⚠️", "Posisi aging", candles_since_entry, "43-84 candles"))
         if aging_status == "STALE":
             exit_signals.append(("❌", "Posisi stale", candles_since_entry, "> 84 candles"))
-        if close_price >= tp1_L[0]:
-            exit_signals.append(("⚠️", "Harga ≥ TP1", round(close_price, 4), f"≥ {tp1_L[0]:.4f}"))
+        # Signal 10: mendekati TP1 (≥ 99% dari TP1) → siap partial exit
+        if close_price >= tp1_L[0] * 0.99:
+            exit_signals.append(("⚠️", "Mendekati TP1", round(close_price, 4), f"≥ {tp1_L[0]*0.99:.4f} (99% TP1)"))
 
     exit_hard = sum(1 for e in exit_signals if e[0] == "❌")
     exit_warn = sum(1 for e in exit_signals if e[0] == "⚠️")
@@ -696,56 +698,91 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             ctx[col] = v
 
     # ═══════════════════════════════════════════════════════════
-    # BAGIAN 10 — NARRATIVE
+    # BAGIAN 10 — NARRATIVE (Bagian 12 spec)
     # ═══════════════════════════════════════════════════════════
-    vol_desc = f"di atas MA20 (+{F:.1f}%) dan MA100 (+{F2:.1f}%)" if F > 0 else f"di bawah MA20 ({F:.1f}%) / MA100 ({F2:.1f}%)"
-    cvd_desc = "bullish divergence" if cvd_div_bull else ("bearish divergence" if cvd_div_bear else f"perubahan {K:+.1f}%")
 
-    def top_feats(sd):
-        return [f"{k} ({v[0]}/{v[1]})" for k, v in sorted(sd.items(), key=lambda x: x[1][0], reverse=True)[:2]]
+    # Gate summary helpers
+    def _gate_summary(gate: dict) -> str:
+        parts = []
+        for gk, (status, msg) in gate['gates'].items():
+            if status == 'FAIL':  parts.append(f"{gk}:GAGAL")
+            elif status == 'WARN': parts.append(f"{gk}:WARN")
+        return ', '.join(parts) if parts else 'semua lolos'
 
-    top_L = top_feats(scores_L)
-    top_S = top_feats(scores_S)
+    def _stoch_desc() -> str:
+        if not has_stoch: return "StochRSI tidak tersedia"
+        sk_r, sd_r = round(stoch_k, 1), round(stoch_d, 1)
+        cross = " [CROSS UP ✅]" if stoch_cross_up else (" [CROSS DOWN ❌]" if stoch_cross_down else "")
+        return f"StochRSI K={sk_r} D={sd_r}{cross}"
+
+    def _top_blocker(scores: dict, is_long: bool) -> str:
+        worst = sorted(scores.items(), key=lambda x: x[1][0])
+        return ', '.join(f"{k}({v[0]}/{v[1]})" for k, v in worst[:2])
+
+    def _top_driver(scores: dict) -> str:
+        best = sorted(scores.items(), key=lambda x: x[1][0], reverse=True)
+        return ', '.join(f"{k}({v[0]}/{v[1]})" for k, v in best[:2])
+
+    vol_dir = "spike" if F_final > 20 else ("normal" if F_final >= -10 else "turun")
+    vol_desc = f"{vol_dir} (MA20:{F:+.1f}% · MA100:{F2:+.1f}% · avg:{F_final:+.1f}%)"
+    cvd_desc = "bullish divergence ✅" if cvd_div_bull else ("bearish divergence ❌" if cvd_div_bear else f"norm={K:+.1f}%")
 
     narrative_L = {
         'kondisi': (
-            f"Sesi {session_label} (×{SESSION_MULT}). Volume {vol_desc}. "
-            f"Ref ({('Close' if is_active else 'Low')}) vs EMA21 {L:+.2f}%, EMA50 {M:+.2f}%, EMA200 {N:+.2f}%. "
-            f"CVD: {cvd_desc}. RSI_6={O_rsi:.1f}. ATR={H:.2f}%. ATR_MULT={ATR_MULT} ({atr_mult_reason})."
+            f"[GATE LONG: {gate_L['status']}] {_gate_summary(gate_L)}. "
+            f"Sesi {session_label} (×{SESSION_MULT}). Vol {vol_desc}. "
+            f"Ref={'Close' if is_active else 'Low'} ${(close_price if is_active else low_price):.4f} vs "
+            f"EMA21 {L:+.2f}% (${ema21:.4f}), EMA50 {M:+.2f}% (${ema50:.4f}), EMA200 {N:+.2f}% (${ema200:.4f}). "
+            f"CVD: {cvd_desc} (I={I_cvd:.0f}, J={J_cvd:.0f}). "
+            f"RSI_6={O_rsi:.1f}. {_stoch_desc()}. "
+            f"ATR={H:.2f}% | ATR_MULT={ATR_MULT} ({atr_mult_reason}) | sweet spot {sweet_lo:.1f}%–{sweet_hi:.1f}%."
         ),
         'keputusan': (
-            f"RAW={RAW_L} → ADJ={ADJ_L} (×{SESSION_MULT}) → {dec_L}. "
-            f"Fitur terkuat: {', '.join(top_L)}. "
-            f"SL berbasis [{sl_label_L}] di ${sl_struct_L:.4f} ({dist_pct(sl_struct_L):+.2f}%). "
-            f"TP1 [{tp1_L[1]}] ${tp1_L[0]:.4f} R:R {rr1_L}×, "
-            f"TP2 [{tp2_L[1]}] ${tp2_L[0]:.4f} R:R {rr2_L}×, "
+            f"RAW={RAW_L} → ADJ={ADJ_L} (×{SESSION_MULT}) → {dec_L}"
+            + (f" [GATE BLOCKED: {_gate_summary(gate_L)}]" if gate_L['status'] == 'BLOCKED' else "")
+            + (f" [AGING: {aging_status}]" if aging_status in ('AGING', 'STALE') else "")
+            + f". Driver: {_top_driver(scores_L)}. Hambatan: {_top_blocker(scores_L, True)}. "
+            f"SL [{sl_label_L}] ${sl_struct_L:.4f} ({dist_pct(sl_struct_L):+.2f}%). "
+            f"TP1 [{tp1_L[1]}] ${tp1_L[0]:.4f} R:R {rr1_L}×. "
+            f"TP2 [{tp2_L[1]}] ${tp2_L[0]:.4f} R:R {rr2_L}×. "
             f"TP3 [{tp3_L[1]}] ${tp3_L[0]:.4f} R:R {rr3_L}×."
         ),
         'skenario': (
-            f"Untuk naik tier: OI perlu >{'+30' if s1<3 else 'OK'}%, Vol >{'+70' if s2<3 else 'OK'}%. "
-            f"Level kunci: EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
-            f"Monitor sesi London/NY untuk konfirmasi volume."
+            f"Tier 1 butuh: BOS→+1 (saat ini {bos_val}), CVD div bull (+RSI<25+funding≤0), Funding≤0. "
+            f"Tier 2 butuh: {'sweep Buy_Liq $' + str(round(buy_liq_val,4)) if has_buy_liq else 'Buy_Liq N/A'}, "
+            f"RSI<{'25 (saat ini '+str(round(O_rsi,1))+')' if s9<3 else 'OK'}, StochRSI cross up dari <20. "
+            f"Level kunci: Close ${close_price:.4f}, EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
+            f"Sesi optimal: London ({session_label} saat ini). "
+            + (f"Posisi {aging_status}: pertimbangkan exit dan re-entry setelah kondisi Tier 1 kembali positif." if aging_status in ('AGING','STALE') else "")
         ),
     }
 
     narrative_S = {
         'kondisi': (
-            f"Sesi {session_label} (×{SESSION_MULT}). Volume {vol_desc}. "
-            f"High vs EMA21 {Lp:+.2f}%, EMA50 {Mp:+.2f}%, EMA200 {Np:+.2f}%. "
-            f"CVD: {cvd_desc}. RSI_6={O_rsi:.1f}. ATR={H:.2f}%. ATR_MULT={ATR_MULT} ({atr_mult_reason})."
+            f"[GATE SHORT: {gate_S['status']}] {_gate_summary(gate_S)}. "
+            f"Sesi {session_label} (×{SESSION_MULT}). Vol {vol_desc}. "
+            f"High ${high_price:.4f} vs "
+            f"EMA21 {Lp:+.2f}% (${ema21:.4f}), EMA50 {Mp:+.2f}% (${ema50:.4f}), EMA200 {Np:+.2f}% (${ema200:.4f}). "
+            f"CVD: {cvd_desc} (I={I_cvd:.0f}, J={J_cvd:.0f}). "
+            f"RSI_6={O_rsi:.1f}. {_stoch_desc()}. "
+            f"ATR={H:.2f}% | ATR_MULT={ATR_MULT} ({atr_mult_reason}) | sweet spot {sweet_lo:.1f}%–{sweet_hi:.1f}%."
         ),
         'keputusan': (
-            f"RAW={RAW_S} → ADJ={ADJ_S} (×{SESSION_MULT}) → {dec_S}. "
-            f"Fitur terkuat: {', '.join(top_S)}. "
-            f"SL berbasis [{sl_label_S}] di ${sl_struct_S:.4f} ({dist_pct(sl_struct_S):+.2f}%). "
-            f"TP1 [{tp1_S[1]}] ${tp1_S[0]:.4f} R:R {rr1_S}×, "
-            f"TP2 [{tp2_S[1]}] ${tp2_S[0]:.4f} R:R {rr2_S}×, "
+            f"RAW={RAW_S} → ADJ={ADJ_S} (×{SESSION_MULT}) → {dec_S}"
+            + (f" [GATE BLOCKED: {_gate_summary(gate_S)}]" if gate_S['status'] == 'BLOCKED' else "")
+            + (f" [AGING: {aging_status}]" if aging_status in ('AGING', 'STALE') else "")
+            + f". Driver: {_top_driver(scores_S)}. Hambatan: {_top_blocker(scores_S, False)}. "
+            f"SL [{sl_label_S}] ${sl_struct_S:.4f} ({dist_pct(sl_struct_S):+.2f}%). "
+            f"TP1 [{tp1_S[1]}] ${tp1_S[0]:.4f} R:R {rr1_S}×. "
+            f"TP2 [{tp2_S[1]}] ${tp2_S[0]:.4f} R:R {rr2_S}×. "
             f"TP3 [{tp3_S[1]}] ${tp3_S[0]:.4f} R:R {rr3_S}×."
         ),
         'skenario': (
-            f"Untuk naik tier: RSI perlu >{75 if s9s<3 else 'OK'}, EMA21 dist >{'+5%' if s6s<3 else 'OK'}. "
-            f"Level kunci: EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
-            f"Monitor sesi London/NY untuk konfirmasi."
+            f"Tier 1 butuh: BOS→-1 (saat ini {bos_val}), CVD div bear (+RSI>75+funding≥0), Funding≥0. "
+            f"Tier 2 butuh: {'sweep Sell_Liq $' + str(round(sell_liq_val,4)) if has_sell_liq else 'Sell_Liq N/A'}, "
+            f"RSI>{'75 (saat ini '+str(round(O_rsi,1))+')' if s9s<3 else 'OK'}, StochRSI cross down dari >80. "
+            f"Level kunci: Close ${close_price:.4f}, EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
+            f"Sesi optimal: London/NY ({session_label} saat ini)."
         ),
     }
 
