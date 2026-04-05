@@ -634,14 +634,14 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # 4. OI naik  (uang baru masuk ke pasar = bullish)
     # 5. Harga belum terlalu jauh dari EMA21  (belum extended)
 
-    cvd_rising     = K > 1.0                  # CVD naik >1%
-    buy_dominant   = G > 55.0                 # Taker Buy >55%
-    rsi_not_ob     = O_rsi < 68.0             # RSI belum mendekati OB
-    oi_net_rising  = C_final > 3.0            # OI di atas MA >3%
-    not_extended   = L < 3.0                  # Jarak dari EMA21 < 3%
+    cvd_rising     = bool(K > 1.0)                  # CVD naik >1%
+    buy_dominant   = bool(G > 55.0)                 # Taker Buy >55%
+    rsi_not_ob     = bool(O_rsi < 68.0)             # RSI belum mendekati OB
+    oi_net_rising  = bool(C_final > 3.0)            # OI di atas MA >3%
+    not_extended   = bool(L < 3.0)                  # Jarak dari EMA21 < 3%
 
     momentum_factors = [cvd_rising, buy_dominant, rsi_not_ob, oi_net_rising, not_extended]
-    momentum_score   = sum(momentum_factors)
+    momentum_score   = int(sum(momentum_factors))
 
     hold_tp_signal   = False
     hold_tp_strength = ""
@@ -662,7 +662,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         if not_extended:  hold_tp_reasons.append(f"Jarak EMA21 aman ({L:.1f}%)")
 
     momentum_hold = {
-        'signal':    hold_tp_signal,
+        'signal':    bool(hold_tp_signal),
         'strength':  hold_tp_strength,
         'score':     momentum_score,
         'max_score': 5,
@@ -709,11 +709,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         sl_wick_result['applicable'] = True
         _sl_val = sl_struct_L
 
-        sl_wick_result['sl_touched_wick'] = low_price <= _sl_val
-        sl_wick_result['body_above_sl']   = close_price > _sl_val
-        sl_wick_result['cvd_defending']   = K >= 0.0           # CVD tidak memburuk
-        sl_wick_result['low_volume_drop'] = D < E20             # Volume saat ini < MA20 Vol
-        sl_wick_result['bullish_body']    = close_price > safe_float(last.get('Open', close_price))
+        sl_wick_result['sl_touched_wick'] = bool(low_price <= _sl_val)
+        sl_wick_result['body_above_sl']   = bool(close_price > _sl_val)
+        sl_wick_result['cvd_defending']   = bool(K >= 0.0)
+        sl_wick_result['low_volume_drop'] = bool(D < E20)
+        sl_wick_result['bullish_body']    = bool(close_price > safe_float(last.get('Open', close_price)))
 
         if sl_wick_result['sl_touched_wick'] and sl_wick_result['body_above_sl']:
             # Wick menyentuh SL tapi body selamat → evaluasi fakeout
