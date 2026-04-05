@@ -53,6 +53,17 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Protocol_9.6_UI")
 
+# ── Auto-start Signal Monitor on first request ──────────────
+# Teknik ini lebih andal daripada Gunicorn post_fork hook karena
+# berjalan di dalam worker process setelah fork selesai.
+@app.before_request
+def _auto_start_signal_monitor():
+    """Pastikan Signal Monitor thread berjalan setelah worker Gunicorn siap."""
+    if not signal_monitor._started_flag.is_set():
+        logger.info("🚀 Starting Signal Monitor via before_request hook...")
+        signal_monitor.start_background_monitor()
+
+
 # Binance Client — resilient initialization (non-blocking)
 binance_client = None
 try:
