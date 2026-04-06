@@ -658,6 +658,9 @@ def test_send_pendle_notification() -> dict:
         reasons = " · ".join(mom_hold.get("reasons", [])[:2])
         hold_str = f"\n💡 <b>MOMENTUM {mom_hold['strength']}</b>: {reasons}"
 
+    dyn_liq_str  = f"${dyn_buy_liq:.4f}" if dyn_buy_liq is not None else "N/A"
+    swing_20_str = f"${swing_low20:.4f}" if swing_low20 is not None else "N/A"
+
     msg = (
         f"🧪 <b>[TEST] ANALISIS PENDLE — {symbol}</b>\n"
         f"{'─'*30}\n"
@@ -675,8 +678,8 @@ def test_send_pendle_notification() -> dict:
         f"━━ 🚦 GATE STATUS ━━━━━━━━━━━━━━━━━━━━━\n"
         f"  LONG  Gate: {_gate_short_label(gate_L)}\n"
         f"  SHORT Gate: {_gate_short_label(gate_S)}\n"
-        f"  [P1] Dyn Buy_Liq: ${dyn_buy_liq:.4f if dyn_buy_liq else 'N/A'} | SwingLow: ${swing_low20:.4f if swing_low20 else 'N/A'}\n"
-        f"  [P1] L2 Zone: {l2_label} (dist={dist_to_liq:.2f}%{'' if dist_to_liq is None else ''})\n"
+        f"  [P1] Dyn Buy_Liq: {dyn_liq_str} | SwingLow: {swing_20_str}\n"
+        f"  [P1] L2 Zone: {l2_label}" + (f" (dist={dist_to_liq:.2f}%)" if dist_to_liq is not None else "") + "\n"
         f"\n"
         f"━━ ⏱️ SESI & FILTER ━━━━━━━━━━━━━━━━━━━\n"
         f"  Sesi: {session} (×{sess_mult:.2f}) | Tipe: {sess_block_type}\n"
