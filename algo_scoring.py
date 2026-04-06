@@ -202,17 +202,33 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         atr_mult_reason = "default (no AI data)"
 
     # --- Scoring ATR thresholds (berbasis persentil historis, BUKAN ATR_MULT flat) ---
-    # Untuk altcoin (SOL, DOGE, dll): sweet spot volatilitas ~2.0%–4.0% dari harga
-    # Untuk major (BTC/ETH): sweet spot ~1.0%–2.5%
-    if is_major:
-        atr_score_sweet_lo, atr_score_sweet_hi = 1.0, 2.5
-        atr_score_t2_lo, atr_score_t2_hi     = 0.5, 4.0
-        atr_score_t1_lo, atr_score_t1_hi     = 0.3, 6.0
+    import numpy as np
+    
+    _has_atr = 'ATR_14' in df.columns
+    _has_close = 'Close' in df.columns
+    if _has_atr and _has_close and len(df) >= 101:
+        # Gunakan distribusi historis aset itu sendiri (100 candle)
+        _atr_hist = df['ATR_14'].iloc[-101:-1]
+        _close_hist = df['Close'].iloc[-101:-1]
+        _atr_pct_hist = (_atr_hist / _close_hist * 100).dropna()
+        
+        if len(_atr_pct_hist) >= 10:
+            atr_score_sweet_lo = float(np.percentile(_atr_pct_hist, 25))
+            atr_score_sweet_hi = float(np.percentile(_atr_pct_hist, 75))
+            atr_score_t2_lo = atr_score_sweet_lo * 0.70
+            atr_score_t2_hi = atr_score_sweet_hi * 1.40
+            atr_score_t1_lo = atr_score_sweet_lo * 0.55
+            atr_score_t1_hi = atr_score_sweet_hi * 1.80
+        else:
+            # Fallback jika data dropna tidak cukup
+            atr_score_sweet_lo, atr_score_sweet_hi = 1.5 * ATR_MULT, 2.5 * ATR_MULT
+            atr_score_t2_lo, atr_score_t2_hi     = 1.0 * ATR_MULT, 3.5 * ATR_MULT
+            atr_score_t1_lo, atr_score_t1_hi     = 0.9 * ATR_MULT, 5.0 * ATR_MULT
     else:
-        # Altcoin: sweet spot 2.0%–4.0% (SOL, DOGE, BNB, dll)
-        atr_score_sweet_lo, atr_score_sweet_hi = 2.0, 4.0
-        atr_score_t2_lo, atr_score_t2_hi     = 1.0, 6.0
-        atr_score_t1_lo, atr_score_t1_hi     = 0.5, 9.0
+        # Fallback jika data historis < 101 candle
+        atr_score_sweet_lo, atr_score_sweet_hi = 1.5 * ATR_MULT, 2.5 * ATR_MULT
+        atr_score_t2_lo, atr_score_t2_hi     = 1.0 * ATR_MULT, 3.5 * ATR_MULT
+        atr_score_t1_lo, atr_score_t1_hi     = 0.9 * ATR_MULT, 5.0 * ATR_MULT
 
     # Alias backward-compat (untuk SL/TP sizing pakai ATR_MULT)
     sweet_lo, sweet_hi = 3.0 * ATR_MULT, 5.0 * ATR_MULT
@@ -252,23 +268,26 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         session_block_reason = ""
         session_block_type = "NONE"
     elif _is_ny_only:
-        # Conditional: hanya valid jika score >= 50 (dievaluasi post-scoring)
-        SESSION_MULT = 0.95
-        session_block = False           # Tidak di-block sekarang, dievaluasi setelah skor
-        session_block_reason = "NEW YORK (tanpa London): WAJIB score ≥ 50"
+        SESSION_MULT = 1.00
+        session_block = False
+        session_block_reason = "NEW YORK (tanpa London): WAJIB score ≥ 40"
         session_block_type = "CONDITIONAL_NY"
     elif _is_asian:
-        # Block kecuali FULL SIZE (score ≥ 60 dievaluasi post-scoring)
-        SESSION_MULT = 0.80
-        session_block = False           # Dievaluasi post-scoring
-        session_block_reason = "ASIAN: Hanya valid jika FULL SIZE (score ≥ 60)"
+        SESSION_MULT = 0.85
+        session_block = False
+        session_block_reason = "ASIAN: Hanya valid jika score ≥ 55 (FULL SIZE)"
         session_block_type = "CONDITIONAL_ASIAN"
-    else:
-        # OFF-MARKET atau tidak dikenal → Block total
-        SESSION_MULT = 0.70
+    elif _is_off_market:
+        SESSION_MULT = 0.90
         session_block = True
-        session_block_reason = f"❌ Sesi OFF-MARKET / tidak dikenal ({session_label}). Entry diblokir total."
+        session_block_reason = f"❌ Sesi OFF-MARKET. Entry diblokir total."
         session_block_type = "HARD_BLOCK"
+    else:
+        # Lainnya
+        SESSION_MULT = 0.90
+        session_block = False
+        session_block_reason = f"Sesi Lainnya ({session_label}): WAJIB score ≥ 45"
+        session_block_type = "CONDITIONAL_OTHER"
 
     # ── AGING ──────────────────────────────────────────────────
     aging_status = "N/A"
@@ -939,13 +958,23 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # V12: Session mult diterapkan
     if round(ADJ_L, 1) != round(RAW_L * SESSION_MULT, 1):
         validations.append("⚠️ V12: Session mult tidak diterapkan (L)")
-    # V13: ATR scoring pakai ATR_MULT
-    if ATR_MULT == 1.0 and not is_major:
-        validations.append("⚠️ V13: ATR_MULT=1.0 tapi bukan BTC/ETH")
-    # V14: CVD scoring pakai CVD_norm% bukan absolut
-    # K adalah CVD_norm% — validasi range masuk akal
+    # V13: *** BUG FIX CHECK *** ATR scoring pakai threshold empiris (sw_min_scoring)
+    # Jika menggunakan fallback flat multiplier, beri peringatan
+    if (atr_score_sweet_lo == 1.5 * ATR_MULT or atr_score_sweet_lo == 2.0 * ATR_MULT or atr_score_sweet_lo == 1.0):
+        validations.append(f"⚠️ V13: ATR pakai threshold flat — cek ATR_MULT scoring (dipakai: {atr_score_sweet_lo:.2f}%–{atr_score_sweet_hi:.2f}%)")
+        
+    # V14: *** BUG FIX CHECK *** CVD scoring pakai K (%) bukan I atau J langsung
     if abs(I_cvd) > 0 and abs(K) == abs(I_cvd):
-        validations.append("⚠️ V14: CVD scoring mungkin pakai nilai absolut")
+        validations.append(f"⚠️ V14: CVD scoring salah formula (CVD_norm K={K:.2f}%)")
+        
+    # V15: *** BUG FIX CHECK *** vs EMA50 skor 3 jika M < -4%
+    if M < -4.0 and scores_L['EMA50'][3] != 3:
+        validations.append("⚠️ V15: EMA50 scoring salah tier")
+        
+    # V16: dyn_buy_liq berbeda dari Buy_Liq CSV
+    if has_buy_liq and has_dyn_liq and buy_liq_val == df['Buy_Liq'].iloc[-101:-1].mean():
+        validations.append("⚠️ V16: Buy_Liq CSV kemungkinan statis — pakai dynamic version")
+
     valid_ok = len(validations) == 0
 
     # ═══════════════════════════════════════════════════════════
@@ -1420,25 +1449,26 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         code_S = 'SKIP'
         session_override_reason = session_block_reason
     elif session_block_type == 'CONDITIONAL_NY':
-        # NEW YORK (tanpa London): wajib score >= 50
-        if ADJ_L < 50:
-            dec_L = 'SKIP'
-            code_L = 'SKIP'
-            session_override_reason += f"LONG skip: Sesi NY skor {ADJ_L:.1f} < 50. "
-        if ADJ_S < 50:
-            dec_S = 'SKIP'
-            code_S = 'SKIP'
-            session_override_reason += f"SHORT skip: Sesi NY skor {ADJ_S:.1f} < 50."
+        if ADJ_L < 40:
+            dec_L, code_L = 'SKIP', 'SKIP'
+            session_override_reason += f"LONG skip: Sesi NY skor {ADJ_L:.1f} < 40. "
+        if ADJ_S < 40:
+            dec_S, code_S = 'SKIP', 'SKIP'
+            session_override_reason += f"SHORT skip: Sesi NY skor {ADJ_S:.1f} < 40. "
     elif session_block_type == 'CONDITIONAL_ASIAN':
-        # ASIAN: hanya valid jika FULL SIZE (score >= thr_full)
-        if ADJ_L < _thr_full:
-            dec_L = 'SKIP'
-            code_L = 'SKIP'
-            session_override_reason += f"LONG skip: Sesi ASIAN skor {ADJ_L:.1f} < {_thr_full} (FULL SIZE). "
-        if ADJ_S < _thr_full:
-            dec_S = 'SKIP'
-            code_S = 'SKIP'
-            session_override_reason += f"SHORT skip: Sesi ASIAN skor {ADJ_S:.1f} < {_thr_full} (FULL SIZE)."
+        if ADJ_L < 55:
+            dec_L, code_L = 'SKIP', 'SKIP'
+            session_override_reason += f"LONG skip: Sesi ASIAN skor {ADJ_L:.1f} < 55. "
+        if ADJ_S < 55:
+            dec_S, code_S = 'SKIP', 'SKIP'
+            session_override_reason += f"SHORT skip: Sesi ASIAN skor {ADJ_S:.1f} < 55. "
+    elif session_block_type == 'CONDITIONAL_OTHER':
+        if ADJ_L < 45:
+            dec_L, code_L = 'SKIP', 'SKIP'
+            session_override_reason += f"LONG skip: Sesi Lainnya skor {ADJ_L:.1f} < 45. "
+        if ADJ_S < 45:
+            dec_S, code_S = 'SKIP', 'SKIP'
+            session_override_reason += f"SHORT skip: Sesi Lainnya skor {ADJ_S:.1f} < 45. "
 
     # ── [P4] StochRSI Gatekeeper override ────────────────────
     stoch_gate_override = ""
@@ -1446,6 +1476,35 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         dec_L = 'SKIP'
         code_L = 'SKIP'
         stoch_gate_override = f"LONG skip: {stoch_gatekeeper_reason}"
+
+    # ── [P6] Gate L4 & S4 Tren Dominan Override ────────────────
+    _req_score_L = _thr_full + 5
+    _req_score_S = _thr_full + 5
+    _m_slope = macro_slope if macro_slope is not None else 0.0
+    if macro_trend == 'UPTREND':
+        gate_L['gates']['L4'] = ('PASS', f'Tren dominan UPTREND (slope={_m_slope:.2f}%) — mendukung long')
+        if ADJ_S < _req_score_S:
+            gate_S['gates']['S4'] = ('FAIL', f'❌ GATE S4: Tren dominan bullish (slope={_m_slope:.2f}%). Butuh skor ≥ {_req_score_S} untuk short melawan tren.')
+            gate_S['status'] = 'BLOCKED'
+            dec_S, code_S = 'SKIP', 'SKIP'
+        else:
+            gate_S['gates']['S4'] = ('PASS', f'Tren dominan UPTREND tapi memenuhi skor minimum melawan tren ({ADJ_S:.1f} ≥ {_req_score_S})')
+    elif macro_trend == 'SIDEWAYS':
+        gate_L['gates']['L4'] = ('WARN', f'⚠️ Tren dominan SIDEWAYS (slope={_m_slope:.2f}%)')
+        gate_S['gates']['S4'] = ('WARN', f'⚠️ Tren dominan SIDEWAYS (slope={_m_slope:.2f}%)')
+        if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
+        if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+    elif macro_trend == 'DOWNTREND':
+        gate_S['gates']['S4'] = ('PASS', f'Tren dominan DOWNTREND (slope={_m_slope:.2f}%) — mendukung short')
+        if ADJ_L < _req_score_L:
+            gate_L['gates']['L4'] = ('FAIL', f'❌ GATE L4: Tren dominan bearish (slope={_m_slope:.2f}%). Butuh skor ≥ {_req_score_L} untuk long melawan tren.')
+            gate_L['status'] = 'BLOCKED'
+            dec_L, code_L = 'SKIP', 'SKIP'
+        else:
+            gate_L['gates']['L4'] = ('PASS', f'Tren dominan DOWNTREND tapi memenuhi skor minimum melawan tren ({ADJ_L:.1f} ≥ {_req_score_L})')
+    else:
+        gate_L['gates']['L4'] = ('PASS', 'Tren dominan tidak diketahui — skip L4')
+        gate_S['gates']['S4'] = ('PASS', 'Tren dominan tidak diketahui — skip S4')
 
     # ═══════════════════════════════════════════════════════════
     # RETURN — json_safe() memastikan semua numpy type dikonversi
