@@ -423,6 +423,42 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             if not hard_exits:
                 state["exit_alerted"] = False
 
+            # ── TRAILING SL ALERT ─────────────────────────
+            trailing_L = trailing.get("long", {})
+            trailing_S = trailing.get("short", {})
+            active_tsl = None
+            tsl_side   = ""
+            if trailing_L.get("applicable"):
+                active_tsl = trailing_L
+                tsl_side = "LONG"
+            elif trailing_S.get("applicable"):
+                active_tsl = trailing_S
+                tsl_side = "SHORT"
+
+            # Alert if trailing SL is recommended and not already alerted for this specific action
+            if is_active and active_tsl:
+                action_text = active_tsl.get("action", "")
+                if state.get("last_trailing_action") != action_text:
+                    pnl_str = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
+                    # For short, reverse PnL
+                    if tsl_side == "SHORT" and avg_entry:
+                        pnl_str = f"{((avg_entry/close_price)-1)*100:+.2f}%"
+
+                    _send_telegram(
+                        f"🛡️ <b>TRAILING SL AKTIF — {symbol}</b>\n"
+                        f"{'─'*28}\n"
+                        f"Arah Trade: <b>{tsl_side}</b> | PnL: <b>{pnl_str}</b>\n"
+                        f"Harga: <b>${close_price:.6f}</b>\n\n"
+                        f"✅ <b>Instruksi Sistem:</b>\n"
+                        f"<b>{action_text}</b>\n\n"
+                        f"💡 <i>{active_tsl.get('note', '')}</i>"
+                    )
+                    state["last_trailing_action"] = action_text
+                    state["last_alert_ts"] = now_ts
+                    return
+            elif not active_tsl:
+                state["last_trailing_action"] = None
+
             # ── LONG SIGNAL ────────────────────────────────
             new_signal_L = None
             if code_L == "FULL" and adj_L >= thr_full:
