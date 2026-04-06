@@ -17,6 +17,7 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException  # t
 import protocol_96_enrichment as enrichment  # type: ignore
 import algo_scoring  # type: ignore
 import signal_monitor  # type: ignore
+import data_engine
 from requests.packages import urllib3  # type: ignore
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -759,20 +760,24 @@ def api_data():
         btc_cache: dict[str, pd.DataFrame] = {}
         
         for label, interval in INTERVAL_MAP.items():
-            # For H1/H4 we need 250 candles to compute EMA 200 properly.
-            # For others, 20 is enough since we only display the last 10.
             req_limit = 250 if label in ['1h', '4h'] else 20
             
-            # Fetch base pair
             logger.info(f"  Fetching {coin_pair} {label} ({req_limit} candles)...")
-            df = get_klines_df(coin_pair, interval, limit=req_limit)
+            if label in ['1d', '1w']:
+                df = data_engine.get_macro_data(coin_pair, interval)
+            else:
+                df = get_klines_df(coin_pair, interval, limit=req_limit)
+            
+            # Apply base indicators for UI display consistency
             if label in ['1h', '4h'] and not df.empty:
-                df = apply_full_indicators(df)
+                df = data_engine.apply_base_indicators(df)
             df_cache[label] = df
             
-            # Fetch BTC pair for SMT & visualization
             logger.info(f"  Fetching BTCUSDT {label} (20 candles)...")
-            btc_df = get_klines_df("BTCUSDT", interval, limit=20)
+            if label in ['1d', '1w']:
+                btc_df = data_engine.get_macro_data("BTCUSDT", interval)
+            else:
+                btc_df = get_klines_df("BTCUSDT", interval, limit=20)
             btc_cache[label] = btc_df
 
         # ── Section 1: Raw API Data ──
@@ -1052,49 +1057,10 @@ def api_data():
         # ── [APEX] MODULE 5: 71-Point Quantitative Analyst ──
         logger.info("  [APEX] Executing 71-Point Quantitative Algorithm...")
         try:
-            df_quant = df_cache.get('4h', pd.DataFrame()).copy()
-            if not df_quant.empty and len(df_quant) >= 22:
-                # ── Enrich 4H data with OI for scoring ──
-                try:
-                    oi_raw = fetch_oi_data(symbol=coin_pair, limit=500)
-                    if oi_raw:
-                        oi_df = pd.DataFrame(oi_raw)
-                        oi_df['Open_Time'] = pd.to_datetime(oi_df['timestamp'], unit='ms')
-                        oi_df['Open_Interest'] = oi_df['sumOpenInterest'].astype(float)
-                        oi_df = oi_df[['Open_Time', 'Open_Interest']]
-                        df_quant = pd.merge_asof(
-                            df_quant.sort_values('Open_Time'),
-                            oi_df.sort_values('Open_Time'),
-                            on='Open_Time', direction='backward'
-                        )
-                    else:
-                        df_quant['Open_Interest'] = 0.0
-                except Exception as oi_err:
-                    logger.warning(f"OI merge for quant: {oi_err}")
-                    df_quant['Open_Interest'] = 0.0
-
-                # ── Enrich with Funding Rate ──
-                try:
-                    fr_raw = fetch_funding_rate(symbol=coin_pair, limit=200)
-                    if fr_raw:
-                        fr_df = pd.DataFrame(fr_raw)
-                        fr_df['Open_Time'] = pd.to_datetime(fr_df['fundingTime'], unit='ms')
-                        fr_df['Funding_Rate'] = fr_df['fundingRate'].astype(float)
-                        fr_df = fr_df[['Open_Time', 'Funding_Rate']]
-                        df_quant = pd.merge_asof(
-                            df_quant.sort_values('Open_Time'),
-                            fr_df.sort_values('Open_Time'),
-                            on='Open_Time', direction='backward'
-                        )
-                    else:
-                        df_quant['Funding_Rate'] = 0.0
-                except Exception as fr_err:
-                    logger.warning(f"FR merge for quant: {fr_err}")
-                    df_quant['Funding_Rate'] = 0.0
-
-                # ── Apply CVD if missing ──
-                if 'CVD' not in df_quant.columns:
-                    df_quant = apply_cvd(df_quant)
+            # Menggunakan Data Engine sebagai Single Source of Truth
+            df_quant = data_engine.get_data_engine_enriched(coin_pair, interval="4h", limit=250)
+            
+            if df_quant is not None and not df_quant.empty and len(df_quant) >= 22:
 
                 meta = {
                     'Symbol': coin_pair,

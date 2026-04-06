@@ -12,6 +12,7 @@ import logging
 import os
 import json
 import requests
+import data_engine
 import pandas as pd  # type: ignore
 import pandas_ta as ta  # type: ignore
 from datetime import datetime, timezone, timedelta
@@ -125,153 +126,42 @@ def _load_trade_entries() -> dict:
             pass
     return {}
 
+def _load_alert_state() -> dict:
+    conn = _get_pg_conn()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM kv_store WHERE key = 'alert_state'")
+                row = cur.fetchone()
+            conn.close()
+            return json.loads(row[0]) if row else {}
+        except Exception as e:
+            try: conn.close()
+            except: pass
+    return {}
+
+def _save_alert_state(state: dict) -> None:
+    conn = _get_pg_conn()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO kv_store (key, value, updated_at)
+                    VALUES ('alert_state', %s, NOW())
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """, (json.dumps(state),))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            try: conn.close()
+            except: pass
+
 
 # ============================================================
 # DATA FETCHING
 # ============================================================
-BINANCE_KLINE_URLS = [
-    "https://fapi.binance.com/fapi/v1/klines",
-    "https://data-api.binance.vision/api/v3/klines",
-    "https://api1.binance.com/api/v3/klines",
-    "https://api2.binance.com/api/v3/klines",
-    "https://api.binance.com/api/v3/klines",
-]
-_last_working_url: str | None = None
-
-
-def _fetch_klines(symbol: str, interval: str = "4h", limit: int = 250) -> pd.DataFrame:
-    global _last_working_url
-    urls = list(BINANCE_KLINE_URLS)
-    if _last_working_url and _last_working_url in urls:
-        urls.remove(_last_working_url)
-        urls.insert(0, _last_working_url)
-
-    for url in urls:
-        try:
-            params = {"symbol": symbol, "interval": interval, "limit": limit}
-            resp = requests.get(url, params=params, timeout=12, verify=False)
-            if resp.status_code == 200:
-                data = resp.json()
-                if not data or not isinstance(data, list):
-                    continue
-                _last_working_url = url
-                df = pd.DataFrame(data, columns=[
-                    "Open_Time", "Open", "High", "Low", "Close", "Total_Volume",
-                    "Close_Time", "Quote_Asset_Volume", "Trades",
-                    "Taker_Buy_Base", "Taker_Buy_Quote", "Ignore"
-                ])
-                df["Open_Time"] = pd.to_datetime(df["Open_Time"], unit="ms")
-                for col in ["Open", "High", "Low", "Close", "Total_Volume", "Taker_Buy_Base"]:
-                    df[col] = df[col].astype(float)
-                df["Buy_Volume"]   = df["Taker_Buy_Base"]
-                df["Sell_Volume"]  = df["Total_Volume"] - df["Buy_Volume"]
-                df["Volume_Delta"] = df["Buy_Volume"] - df["Sell_Volume"]
-                return df
-        except Exception as e:
-            logger.debug(f"Kline fetch failed {url}: {e}")
-    logger.warning(f"All kline endpoints failed for {symbol} {interval}")
-    return pd.DataFrame()
-
-
-def _apply_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    df = df.copy()
-    df["EMA_7"]   = ta.ema(df["Close"], length=7)
-    df["EMA_21"]  = ta.ema(df["Close"], length=21)
-    df["EMA_50"]  = ta.ema(df["Close"], length=50)
-    df["EMA_200"] = ta.ema(df["Close"], length=200)
-    df["RSI_6"]   = ta.rsi(df["Close"], length=6)
-    df["ATR_14"]  = ta.atr(df["High"], df["Low"], df["Close"], length=14)
-    try:
-        stoch = ta.stochrsi(df["Close"], length=14, rsi_length=14, k=3, d=3)
-        if stoch is not None and not stoch.empty:
-            df["StochRSI_K"] = stoch.iloc[:, 0]
-            df["StochRSI_D"] = stoch.iloc[:, 1]
-        else:
-            df["StochRSI_K"] = None
-            df["StochRSI_D"] = None
-    except Exception:
-        df["StochRSI_K"] = None
-        df["StochRSI_D"] = None
-    # CVD
-    if "Buy_Volume" in df.columns and "Sell_Volume" in df.columns:
-        df["Volume_Delta"] = df["Buy_Volume"] - df["Sell_Volume"]
-        df["CVD"]          = df["Volume_Delta"].cumsum()
-    return df
-
-
-def _fetch_oi(symbol: str, limit: int = 500) -> pd.DataFrame:
-    """Fetch Open Interest history dari Binance Futures."""
-    try:
-        url = "https://fapi.binance.com/futures/data/openInterestHist"
-        params = {"symbol": symbol, "period": "15m", "limit": limit}
-        resp = requests.get(url, params=params, timeout=10, verify=False)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data:
-                oi_df = pd.DataFrame(data)
-                oi_df["Open_Time"]     = pd.to_datetime(oi_df["timestamp"], unit="ms")
-                oi_df["Open_Interest"] = oi_df["sumOpenInterest"].astype(float)
-                return oi_df[["Open_Time", "Open_Interest"]]
-    except Exception as e:
-        logger.debug(f"OI fetch failed for {symbol}: {e}")
-    return pd.DataFrame()
-
-
-def _fetch_funding_rate(symbol: str, limit: int = 200) -> pd.DataFrame:
-    """Fetch Funding Rate dari Binance Futures."""
-    try:
-        url = "https://fapi.binance.com/fapi/v1/fundingRate"
-        resp = requests.get(url, params={"symbol": symbol, "limit": limit}, timeout=10, verify=False)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data:
-                fr_df = pd.DataFrame(data)
-                fr_df["Open_Time"]    = pd.to_datetime(fr_df["fundingTime"], unit="ms")
-                fr_df["Funding_Rate"] = fr_df["fundingRate"].astype(float)
-                return fr_df[["Open_Time", "Funding_Rate"]]
-    except Exception as e:
-        logger.debug(f"Funding Rate fetch failed for {symbol}: {e}")
-    return pd.DataFrame()
-
-
-def _enrich_df(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """Enrichment pipeline lengkap — OI + Funding Rate + CVD + Indicators.
-    Identik dengan yang digunakan web dashboard agar skor konsisten."""
-    df = _apply_indicators(df)
-
-    # Merge Open Interest
-    oi_df = _fetch_oi(symbol)
-    if not oi_df.empty:
-        try:
-            df = pd.merge_asof(
-                df.sort_values("Open_Time"),
-                oi_df.sort_values("Open_Time"),
-                on="Open_Time", direction="backward"
-            )
-        except Exception as e:
-            logger.debug(f"OI merge failed: {e}")
-            df["Open_Interest"] = 0.0
-    else:
-        df["Open_Interest"] = 0.0
-
-    # Merge Funding Rate
-    fr_df = _fetch_funding_rate(symbol)
-    if not fr_df.empty:
-        try:
-            df = pd.merge_asof(
-                df.sort_values("Open_Time"),
-                fr_df.sort_values("Open_Time"),
-                on="Open_Time", direction="backward"
-            )
-        except Exception as e:
-            logger.debug(f"FR merge failed: {e}")
-            df["Funding_Rate"] = 0.0
-    else:
-        df["Funding_Rate"] = 0.0
-
-    return df
+# Fetching and enrichment logic has been migrated back to data_engine
+# according to the new single source of truth rule.
 
 
 # ============================================================
@@ -281,12 +171,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
     try:
         import algo_scoring  # lazy import
 
-        df = _fetch_klines(symbol, interval="4h", limit=250)
-        if df is None or len(df) < 22:
+        df = data_engine.get_data_engine_enriched(symbol, interval="4h", limit=250)
+        if df is None or df.empty or len(df) < 22:
             logger.warning(f"[{symbol}] Insufficient data")
             return
-
-        df = _enrich_df(df, symbol)
 
         coin_data     = trade_entries.get(symbol, {})
         entry_list    = coin_data.get("entries", [])
@@ -363,11 +251,13 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["wick_alerted"] = (verdict != "BREAKDOWN NYATA")
                 if verdict == "BREAKDOWN NYATA":
                     state["last_alert_ts"] = now_ts
+                    _save_alert_state(_alert_state)
                     return
 
             # Reset wick alert jika harga kembali aman
-            if not sl_wick.get("sl_touched_wick"):
+            if not sl_wick.get("sl_touched_wick") and state.get("wick_alerted", False):
                 state["wick_alerted"] = False
+                _save_alert_state(_alert_state)
 
             if is_active and kill_switch and not state["kill_alerted"]:
                 ema21_val = float(df.iloc[-2].get("EMA_21", 0))
@@ -381,10 +271,12 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 state["kill_alerted"] = True
                 state["last_alert_ts"] = now_ts
+                _save_alert_state(_alert_state)
                 return
 
-            if not kill_switch:
+            if not kill_switch and state.get("kill_alerted", False):
                 state["kill_alerted"] = False
+                _save_alert_state(_alert_state)
 
             # ── EXIT SIGNALS ───────────────────────────────
             exit_signals = exit_r.get("signals", [])
@@ -405,10 +297,12 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 state["exit_alerted"] = True
                 state["last_alert_ts"] = now_ts
+                _save_alert_state(_alert_state)
                 return
 
-            if not hard_exits:
+            if not hard_exits and state.get("exit_alerted", False):
                 state["exit_alerted"] = False
+                _save_alert_state(_alert_state)
 
             # ── LONG SIGNAL ────────────────────────────────
             new_signal_L = None
@@ -449,6 +343,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 state["last_signal"]   = new_signal_L
                 state["last_alert_ts"] = now_ts
+                _save_alert_state(_alert_state)
                 return
 
             # ── SHORT SIGNAL ───────────────────────────────
@@ -481,6 +376,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 state["last_signal"]   = new_signal_S
                 state["last_alert_ts"] = now_ts
+                _save_alert_state(_alert_state)
                 return
 
             logger.info(
@@ -497,6 +393,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 # ============================================================
 def _monitor_loop() -> None:
     logger.info("🔍 Signal Monitor loop started")
+    
+    global _alert_state
+    _alert_state = _load_alert_state()
 
     # Startup notification
     wib = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")

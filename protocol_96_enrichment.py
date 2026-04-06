@@ -47,8 +47,7 @@ def calculate_smc_markers(df_m15: pd.DataFrame, df_h4: pd.DataFrame) -> pd.DataF
     # ── FVG (Fair Value Gap) ──
     # Bullish FVG: Low[i] > High[i-2]
     # Bearish FVG: High[i] < Low[i-2]
-    df['FVG_Up'] = 0.0
-    df['FVG_Down'] = 0.0
+
     
     for i in range(2, len(df)):
         # Bullish FVG
