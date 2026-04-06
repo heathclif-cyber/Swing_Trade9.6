@@ -444,6 +444,16 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     if tsl_side == "SHORT" and avg_entry:
                         pnl_str = f"{((avg_entry/close_price)-1)*100:+.2f}%"
 
+                    # Tambahkan saran Momentum Hold jika harga masih kuat naik
+                    hold_str = ""
+                    if mom_hold.get("signal"):
+                        reasons = " · ".join(mom_hold.get("reasons", [])[:3])
+                        hold_str = (
+                            f"\n\n🔥 <b>MOMENTUM MASIH BESAR ({mom_hold['strength']})</b>\n"
+                            f"<i>Disarankan tahan posisi (partial TP).</i>\n"
+                            f"Detail: {reasons}"
+                        )
+
                     _send_telegram(
                         f"🛡️ <b>TRAILING SL AKTIF — {symbol}</b>\n"
                         f"{'─'*28}\n"
@@ -451,7 +461,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"Harga: <b>${close_price:.6f}</b>\n\n"
                         f"✅ <b>Instruksi Sistem:</b>\n"
                         f"<b>{action_text}</b>\n\n"
-                        f"💡 <i>{active_tsl.get('note', '')}</i>"
+                        f"💡 <i>{active_tsl.get('note', '')}</i>{hold_str}"
                     )
                     state["last_trailing_action"] = action_text
                     state["last_alert_ts"] = now_ts
