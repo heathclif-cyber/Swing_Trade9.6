@@ -366,7 +366,9 @@ function renderQuantAnalysis(quant, state) {
     // Add live context items
     for (const [k, v] of Object.entries(mctx)) {
         if (!['StochRSI_K','StochRSI_D','Funding_Rate','Open_Interest','PDH','PDL','PWH','PWL'].includes(k)) continue;
-        ctxItems.push([k.replace(/_/g, ' '), typeof v === 'number' ? v.toFixed(4) : v]);
+        // Exception for Funding Rate to show 6 decimal places instead of truncating to 4
+        const fmtVal = (typeof v === 'number') ? (k === 'Funding_Rate' ? v.toFixed(6) : v.toFixed(4)) : v;
+        ctxItems.push([k.replace(/_/g, ' '), fmtVal]);
     }
     
     // Extras for V13 requirements
@@ -512,7 +514,10 @@ function renderCSVResult(json) {
     if (ctxKeys.length) {
         html += `<div class="glass quant-card" style="grid-column:1/-1"><div class="panel-title">🔍 Market Context (from CSV)</div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
-            ${ctxKeys.map(k => `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${typeof ctx[k]==='number'?ctx[k].toFixed(4):ctx[k]}</span></div>`).join('')}</div></div>`;
+            ${ctxKeys.map(k => {
+                const fVal = typeof ctx[k]==='number' ? (k === 'Funding_Rate' ? ctx[k].toFixed(6) : ctx[k].toFixed(4)) : ctx[k];
+                return `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${fVal}</span></div>`;
+            }).join('')}</div></div>`;
     }
     html += '</div>';
     el.innerHTML = html;

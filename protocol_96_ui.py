@@ -1106,6 +1106,9 @@ def api_data():
                 if 'CVD' not in df_quant.columns:
                     df_quant = apply_cvd(df_quant)
 
+                # ── Apply Market Session and temporal alignment ──
+                df_quant = enrichment.apply_temporal_alignment(df_quant)
+
                 meta = {
                     'Symbol': coin_pair,
                     'AVG_ENTRY_PRICE': entry_summary.get('rolling_avg_cost') if entry_summary.get('remaining_qty', 0) > 0 else None,
