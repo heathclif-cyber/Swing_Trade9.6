@@ -742,6 +742,16 @@ def api_ping_telegram():
         return jsonify({"ok": False, "error": str(e), "token_masked": token_masked}), 500
 
 
+@app.route("/api/test-pendle")
+def api_test_pendle():
+    """Trigger manual test khusus PENDLE untuk validasi 7 Prioritas (termasuk P7 adaptive dan P6)."""
+    try:
+        res = signal_monitor.test_send_pendle_notification()
+        return jsonify(res), 200 if res.get("ok") else 400
+    except Exception as e:
+        logger.exception(f"test-pendle error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 @app.route("/api/data")
 def api_data():
     """Master endpoint: returns ALL data categories for the dashboard."""

@@ -93,6 +93,23 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     candle_21_ago = df.iloc[-21] if len(df) >= 21 else df.iloc[0]
 
     # ═══════════════════════════════════════════════════════════
+    # [P1] DYNAMIC BUY_LIQ — Rolling Swing Low (Mengganti Statis CSV)
+    # Hitung swing low dari 20 candle terakhir (termasuk candle saat ini)
+    # lalu tambahkan buffer −0.5% sebagai zona likuiditas dinamis.
+    # ═══════════════════════════════════════════════════════════
+    _low_window = df['Low'].iloc[-20:] if 'Low' in df.columns and len(df) >= 20 else None
+    if _low_window is not None and len(_low_window) >= 5:
+        swing_low_20 = float(_low_window.min())
+        dyn_buy_liq  = swing_low_20 * 0.995          # buffer −0.5%
+        dist_to_liq  = (close_price - dyn_buy_liq) / dyn_buy_liq * 100  # %, positif = di atas liq
+        has_dyn_liq  = True
+    else:
+        swing_low_20 = None
+        dyn_buy_liq  = None
+        dist_to_liq  = None
+        has_dyn_liq  = False
+
+    # ═══════════════════════════════════════════════════════════
     # BAGIAN 1 — KALKULASI UTAMA
     # ═══════════════════════════════════════════════════════════
 
@@ -158,9 +175,17 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     Mp = (high_price - ema50) / ema50 * 100 if ema50 else 0.0
     Np = (high_price - ema200) / ema200 * 100 if ema200 else 0.0
 
-    # ── ATR_MULT ───────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════
+    # [P3] DECOUPLED ATR — Sizing vs Scoring
+    # ATR_MULT untuk SIZING: tetap ikuti Altcoin_Index (risiko riil).
+    # ATR untuk SCORING: gunakan threshold berbasis persentil historis
+    # aset tersebut (flat 2%–4% sweet spot untuk altcoin seperti SOL),
+    # bukan skala dari multiplier — mencegah skor ATR selalu 0.
+    # ═══════════════════════════════════════════════════════════
     is_major = ('BTC' in symbol or 'ETH' in symbol)
     ai_val = _last_val(last, 'Altcoin_Index')
+
+    # --- Sizing ATR_MULT (untuk SL/TP risk sizing) ---
     if is_major:
         ATR_MULT = 1.0
         atr_mult_reason = "BTC/ETH"
@@ -176,24 +201,74 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         ATR_MULT = 2.0
         atr_mult_reason = "default (no AI data)"
 
+    # --- Scoring ATR thresholds (berbasis persentil historis, BUKAN ATR_MULT flat) ---
+    # Untuk altcoin (SOL, DOGE, dll): sweet spot volatilitas ~2.0%–4.0% dari harga
+    # Untuk major (BTC/ETH): sweet spot ~1.0%–2.5%
+    if is_major:
+        atr_score_sweet_lo, atr_score_sweet_hi = 1.0, 2.5
+        atr_score_t2_lo, atr_score_t2_hi     = 0.5, 4.0
+        atr_score_t1_lo, atr_score_t1_hi     = 0.3, 6.0
+    else:
+        # Altcoin: sweet spot 2.0%–4.0% (SOL, DOGE, BNB, dll)
+        atr_score_sweet_lo, atr_score_sweet_hi = 2.0, 4.0
+        atr_score_t2_lo, atr_score_t2_hi     = 1.0, 6.0
+        atr_score_t1_lo, atr_score_t1_hi     = 0.5, 9.0
+
+    # Alias backward-compat (untuk SL/TP sizing pakai ATR_MULT)
     sweet_lo, sweet_hi = 3.0 * ATR_MULT, 5.0 * ATR_MULT
     t2_lo, t2_hi = 2.0 * ATR_MULT, 7.0 * ATR_MULT
     t1_lo, t1_hi = 1.8 * ATR_MULT, 10.0 * ATR_MULT
 
-    # ── SESSION_MULT ───────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════
+    # [P2] HARD SESSION FILTER — Mengganti penalty multiplier
+    # Logika:
+    #   LONDON (15–23 WIB)                → Izin penuh (×1.00)
+    #   LONDON / NEW YORK (20–23 WIB)     → Izin bonus  (×1.05)
+    #   NEW YORK (tanpa London, 00–04)    → Izin HANYA jika score >= 50
+    #   ASIAN (07–15 WIB)                 → Block KECUALI FULL SIZE score ≥ 60
+    #   OFF-MARKET                        → Block total
+    # session_block: True = diblokir (harus lanjut skip setelah skor)
+    # session_block_reason: penjelasan teks
+    # ═══════════════════════════════════════════════════════════
     sess_raw = str(last.get('Market_Session', '')) if 'Market_Session' in last.index else ''
     sess_upper = sess_raw.strip().upper()
-    if sess_upper == 'ASIAN':
-        SESSION_MULT = 0.85
-    elif sess_upper == 'LONDON':
-        SESSION_MULT = 1.00
-    elif sess_upper == 'NEW YORK':
-        SESSION_MULT = 1.00
-    elif 'LONDON' in sess_upper and 'NEW YORK' in sess_upper:
-        SESSION_MULT = 1.05
-    else:
-        SESSION_MULT = 0.90
     session_label = sess_raw.strip() if sess_raw.strip() else 'UNKNOWN'
+
+    # Tentukan jenis sesi
+    _is_london_ny = ('LONDON' in sess_upper and 'NEW YORK' in sess_upper)
+    _is_london_only = (sess_upper == 'LONDON')
+    _is_ny_only = (sess_upper == 'NEW YORK')
+    _is_asian = (sess_upper == 'ASIAN')
+    _is_off_market = (sess_upper == 'OFF-MARKET' or sess_upper == '')
+
+    if _is_london_ny:
+        SESSION_MULT = 1.05
+        session_block = False
+        session_block_reason = ""
+        session_block_type = "NONE"
+    elif _is_london_only:
+        SESSION_MULT = 1.00
+        session_block = False
+        session_block_reason = ""
+        session_block_type = "NONE"
+    elif _is_ny_only:
+        # Conditional: hanya valid jika score >= 50 (dievaluasi post-scoring)
+        SESSION_MULT = 0.95
+        session_block = False           # Tidak di-block sekarang, dievaluasi setelah skor
+        session_block_reason = "NEW YORK (tanpa London): WAJIB score ≥ 50"
+        session_block_type = "CONDITIONAL_NY"
+    elif _is_asian:
+        # Block kecuali FULL SIZE (score ≥ 60 dievaluasi post-scoring)
+        SESSION_MULT = 0.80
+        session_block = False           # Dievaluasi post-scoring
+        session_block_reason = "ASIAN: Hanya valid jika FULL SIZE (score ≥ 60)"
+        session_block_type = "CONDITIONAL_ASIAN"
+    else:
+        # OFF-MARKET atau tidak dikenal → Block total
+        SESSION_MULT = 0.70
+        session_block = True
+        session_block_reason = f"❌ Sesi OFF-MARKET / tidak dikenal ({session_label}). Entry diblokir total."
+        session_block_type = "HARD_BLOCK"
 
     # ── AGING ──────────────────────────────────────────────────
     aging_status = "N/A"
@@ -243,18 +318,66 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         gate_L['gates']['L1'] = ('FAIL', '❌ GATE L1: Struktur bearish aktif (BOS=−1). Tunggu BOS flip atau konfirmasi reversal.')
         gate_L['status'] = 'BLOCKED'
 
-    # L2: Likuiditas sudah/hampir diambil
-    if not has_buy_liq:
-        gate_L['gates']['L2'] = ('PASS', 'Buy_Liq tidak tersedia — skip')
-    elif close_price <= buy_liq_val * 1.005:
-        gate_L['gates']['L2'] = ('PASS', f'Harga ≤ Buy_Liq×1.005 — sweep sudah terjadi')
-    elif close_price <= buy_liq_val * 1.020:
-        gate_L['gates']['L2'] = ('WARN', f'⚠️ Harga dalam 2% di atas Buy_Liq ${buy_liq_val:.4f} — mendekati sweep')
-        if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
+    # ─────────────────────────────────────────────────────────
+    # [P1] L2 GATE — REVISI: Menggunakan Dynamic Buy_Liq (4-Zona)
+    # Zona yang digunakan adalah dist_to_liq = (Close − dyn_buy_liq) / dyn_buy_liq × 100
+    #
+    #  dist < 1.0%   → SKIP    (Tersapu / terlalu dekat, risiko teraktivasi)
+    #  1.0% – 5.0%  → LOLOS   (Sweet Spot — likuiditas hampir/sudah diambil)
+    #  5.0% – 10.0% → WARNING (Mendekati, tapi belum di zona optimal)
+    #  dist > 10.0% → GAGAL   (Likuiditas terlalu jauh belum diambil)
+    # ─────────────────────────────────────────────────────────
+    if not has_dyn_liq:
+        # Fallback ke Buy_Liq statis jika data Low tidak tersedia
+        if not has_buy_liq:
+            gate_L['gates']['L2'] = ('PASS', 'Dynamic Buy_Liq tidak dapat dihitung (data Low kurang) — skip')
+        elif close_price <= buy_liq_val * 1.005:
+            gate_L['gates']['L2'] = ('PASS', f'[Statis] Harga ≤ Buy_Liq×1.005 — sweep sudah terjadi')
+        elif close_price <= buy_liq_val * 1.020:
+            gate_L['gates']['L2'] = ('WARN', f'⚠️ [Statis] Harga +{(close_price/buy_liq_val-1)*100:.2f}% di atas Buy_Liq ${buy_liq_val:.4f}')
+            if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
+        else:
+            jarak_pct = (close_price / buy_liq_val - 1) * 100
+            gate_L['gates']['L2'] = ('FAIL', f'❌ GATE L2 [Statis]: Harga +{jarak_pct:.2f}% di atas Buy_Liq ${buy_liq_val:.4f}.')
+            gate_L['status'] = 'BLOCKED'
     else:
-        jarak_pct = (close_price / buy_liq_val - 1) * 100
-        gate_L['gates']['L2'] = ('FAIL', f'❌ GATE L2: Likuiditas belum diambil. Harga +{jarak_pct:.2f}% di atas Buy_Liq ${buy_liq_val:.4f}.')
-        gate_L['status'] = 'BLOCKED'
+        # Dynamic ruleset (hasil utama P1)
+        _d = dist_to_liq  # alias pendek
+        if _d < 1.0:
+            # Harga sudah di dalam / sangat dekat zona liq → SKIP (terlalu panas)
+            gate_L['gates']['L2'] = (
+                'SKIP',
+                f'⚡ GATE L2: Harga terlalu dekat dyn_Buy_Liq (dist={_d:.2f}%). '
+                f'Level: ${dyn_buy_liq:.4f} | SwingLow(20): ${swing_low_20:.4f}. '
+                f'Kemungkinan sedang tersapu — TUNGGU konfirmasi reversal.'
+            )
+            if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
+        elif _d <= 5.0:
+            # Sweet Spot: harga 1–5% di atas dyn_buy_liq → LOLOS
+            gate_L['gates']['L2'] = (
+                'PASS',
+                f'✅ GATE L2: Sweet Spot (dist={_d:.2f}%). '
+                f'Harga cukup dekat dengan dyn_Buy_Liq ${dyn_buy_liq:.4f} — '
+                f'likuiditas hampir/sudah diambil. SwingLow(20): ${swing_low_20:.4f}.'
+            )
+        elif _d <= 10.0:
+            # Warning Zone: 5–10% di atas
+            gate_L['gates']['L2'] = (
+                'WARN',
+                f'⚠️ GATE L2: Warning Zone (dist={_d:.2f}%). '
+                f'Harga cukup jauh dari dyn_Buy_Liq ${dyn_buy_liq:.4f}. '
+                f'Tunggu harga lebih dekat ke SwingLow(20) ${swing_low_20:.4f}.'
+            )
+            if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
+        else:
+            # GAGAL: lebih dari 10% di atas zona liq
+            gate_L['gates']['L2'] = (
+                'FAIL',
+                f'❌ GATE L2: Likuiditas belum diambil (dist={_d:.2f}%). '
+                f'Harga +{_d:.2f}% di atas dyn_Buy_Liq ${dyn_buy_liq:.4f} '
+                f'(SwingLow(20): ${swing_low_20:.4f}). Tunggu price action menuju zona liq.'
+            )
+            gate_L['status'] = 'BLOCKED'
 
     # L3: Funding tidak positif berlebihan
     if not has_funding:
@@ -301,6 +424,47 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         gate_S['status'] = 'BLOCKED'
 
     # ═══════════════════════════════════════════════════════════
+    # [P6] FILTER TREN MACRO — EMA_200 Slope dari EMA_200_H4
+    # Hitung slope EMA_200 pada 4H timeframe (lookback 30 candle).
+    # Mencegah algoritma melawan tren major.
+    # ═══════════════════════════════════════════════════════════
+    ema200_macro_col = 'EMA_200_H4'  # Kolom dari enrichment H4
+    macro_slope = None
+    macro_trend = 'UNKNOWN'
+    macro_trend_reason = 'Data EMA_200_H4 tidak tersedia'
+
+    if ema200_macro_col in df.columns and df[ema200_macro_col].notna().sum() >= 31:
+        _ema200_series = df[ema200_macro_col].dropna()
+        if len(_ema200_series) >= 30:
+            _ema200_now  = float(_ema200_series.iloc[-1])
+            _ema200_ago  = float(_ema200_series.iloc[-30])
+            macro_slope  = (_ema200_now - _ema200_ago) / _ema200_ago * 100 if _ema200_ago else 0.0
+            if macro_slope > 0.5:
+                macro_trend = 'UPTREND'
+                macro_trend_reason = f"Slope EMA200_H4 = +{macro_slope:.2f}% (> +0.5%)"
+            elif macro_slope >= -0.5:
+                macro_trend = 'SIDEWAYS'
+                macro_trend_reason = f"Slope EMA200_H4 = {macro_slope:.2f}% (-0.5% s/d +0.5%)"
+            else:
+                macro_trend = 'DOWNTREND'
+                macro_trend_reason = f"Slope EMA200_H4 = {macro_slope:.2f}% (< -0.5%)"
+    else:
+        # Fallback: gunakan EMA_200 base timeframe jika H4 tidak ada
+        if 'EMA_200' in df.columns and len(df) >= 30:
+            _ema200_now = float(df['EMA_200'].iloc[-1]) if not pd.isna(df['EMA_200'].iloc[-1]) else ema200
+            _ema200_ago = float(df['EMA_200'].iloc[-30]) if not pd.isna(df['EMA_200'].iloc[-30]) else ema200
+            macro_slope = (_ema200_now - _ema200_ago) / _ema200_ago * 100 if _ema200_ago else 0.0
+            if macro_slope > 0.5:
+                macro_trend = 'UPTREND'
+                macro_trend_reason = f"Slope EMA200_base = +{macro_slope:.2f}% [fallback]"
+            elif macro_slope >= -0.5:
+                macro_trend = 'SIDEWAYS'
+                macro_trend_reason = f"Slope EMA200_base = {macro_slope:.2f}% [fallback]"
+            else:
+                macro_trend = 'DOWNTREND'
+                macro_trend_reason = f"Slope EMA200_base = {macro_slope:.2f}% [fallback]"
+
+    # ═══════════════════════════════════════════════════════════
     # BAGIAN 3 — SCORING LONG
     # ═══════════════════════════════════════════════════════════
     def score_oi(v):
@@ -315,17 +479,20 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         if v >= -10: return 1
         return 0
 
-    def score_atr(h):
-        if sweet_lo <= h <= sweet_hi: return 3
-        if (t2_lo <= h < sweet_lo) or (sweet_hi < h <= t2_hi): return 2
-        if (t1_lo <= h < t2_lo) or (t2_hi < h <= t1_hi): return 1
+    # [P3] score_atr menggunakan threshold persentil historis aset (BUKAN ATR_MULT flat)
+    def score_atr_scoring(h):
+        """ATR scoring berbasis persentil historis (decoupled dari sizing ATR_MULT)."""
+        if atr_score_sweet_lo <= h <= atr_score_sweet_hi: return 3
+        if (atr_score_t2_lo <= h < atr_score_sweet_lo) or (atr_score_sweet_hi < h <= atr_score_t2_hi): return 2
+        if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
         return 0
 
     s1 = score_oi(C_final)
     s2 = score_vol(F_final)
     # Spec: G<49→2, 49≤G≤51→1, G>52→0. Gap 51<G≤52 → diberi skor 1 (masih balanced)
     s3 = 2 if G < 49 else (1 if G <= 52 else 0)
-    s4 = score_atr(H)
+    # [P3] Gunakan score_atr_scoring (persentil historis), bukan score_atr (ATR_MULT flat)
+    s4 = score_atr_scoring(H)
     s5 = 3 if cvd_div_bull else (2 if K > 1 else (1 if K >= 0 else 0))
     s6 = 3 if L < -3 else (2 if L < -1.5 else (1 if L < -0.5 else 0))
     s7 = 3 if M < -4 else (2 if M < -2 else (1 if M < 0 else 0))
@@ -371,12 +538,90 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     ADJ_S = round(RAW_S * SESSION_MULT, 1)
 
     # ═══════════════════════════════════════════════════════════
-    # BAGIAN 4 — KEPUTUSAN
+    # [P4] STOCHRSI GATEKEEPER — Syarat wajib jika tidak ada CVD div
+    # Jika CVD_div_bull TIDAK terdeteksi, StochRSI menjadi syarat masuk.
+    # Kondisi PASS: K<20 DAN K sedang naik DAN K masih di bawah D.
+    # Bonus +2 jika terjadi Cross Up di bawah area 20.
+    # ═══════════════════════════════════════════════════════════
+    stoch_gatekeeper_ok   = False
+    stoch_gatekeeper_skip = False
+    stoch_gatekeeper_reason = ""
+    stoch_bonus_points    = 0
+
+    if not cvd_div_bull and has_stoch:
+        # Syarat wajib StochRSI (3 kondisi simultan)
+        _stoch_rising = (stoch_k_prev is not None and stoch_k > stoch_k_prev)
+        _stoch_ok = bool(
+            (stoch_k < 20) and _stoch_rising and (stoch_k < stoch_d)
+        )
+        if _stoch_ok:
+            stoch_gatekeeper_ok = True
+            stoch_gatekeeper_reason = (
+                f"StochRSI OK: K={stoch_k:.1f}<20, naik dari {stoch_k_prev:.1f}, K<D({stoch_d:.1f})"
+            )
+            # Bonus +2 jika Cross Up di bawah 20
+            if stoch_cross_up and stoch_k < 20:
+                stoch_bonus_points = 2
+                stoch_gatekeeper_reason += " ✅ CROSS UP di <20 (+2 bonus)"
+        else:
+            stoch_gatekeeper_skip = True
+            _reasons = []
+            if stoch_k >= 20:    _reasons.append(f"K={stoch_k:.1f}≥20")
+            if not _stoch_rising: _reasons.append(f"K tidak naik ({stoch_k:.1f}≤prev {stoch_k_prev:.1f if stoch_k_prev else 'N/A'})")
+            if stoch_k >= stoch_d: _reasons.append(f"K({stoch_k:.1f})≥D({stoch_d:.1f})")
+            stoch_gatekeeper_reason = f"❌ StochRSI GAGAL (tanpa CVD div): {', '.join(_reasons)}"
+    elif cvd_div_bull:
+        stoch_gatekeeper_ok = True
+        stoch_gatekeeper_reason = "StochRSI bypass: CVD divergence bull terdeteksi"
+        # Tetap berikan bonus jika ada cross up di <20
+        if has_stoch and stoch_cross_up and stoch_k < 20:
+            stoch_bonus_points = 2
+            stoch_gatekeeper_reason += " ✅ CROSS UP di <20 (+2 bonus)"
+    else:
+        # Tidak ada CVD div DAN tidak ada StochRSI data → warning
+        stoch_gatekeeper_ok = True   # Tidak di-block jika data tidak ada
+        stoch_gatekeeper_reason = "StochRSI data tidak tersedia — gatekeeper di-skip"
+
+    # Terapkan bonus poin ke skor LONG sebelum threshold
+    ADJ_L = round(ADJ_L + stoch_bonus_points, 1)
+
+    # ═══════════════════════════════════════════════════════════
+    # [P7] THRESHOLD SKOR ADAPTIF — Berdasarkan Macro Trend & Volatilitas
+    # Kondisi Bull:          FULL >= 48 | HALF >= 33 | WAIT >= 20
+    # Kondisi Bear/Sideways: FULL >= 58 | HALF >= 42 | WAIT >= 28
+    # Volatilitas Ekstrem (ATR% > 2× rata-rata 20c): semua threshold +5
+    # ═══════════════════════════════════════════════════════════
+    # Hitung volatilitas ekstrem
+    _atr_avg_20 = None
+    _atr_extreme = False
+    if 'ATR_14' in df.columns and len(df) >= 20:
+        _atr_series = df['ATR_14'].iloc[-20:]
+        _atr_close  = df['Close'].iloc[-20:]
+        _atr_pct_series = (_atr_series / _atr_close * 100).dropna()
+        if len(_atr_pct_series) >= 5:
+            _atr_avg_20 = float(_atr_pct_series.mean())
+            _atr_extreme = bool(H > _atr_avg_20 * 2.0)
+
+    if macro_trend == 'UPTREND':
+        _thr_full, _thr_half, _thr_wait = 48, 33, 20
+        threshold_regime = "BULL"
+    else:  # DOWNTREND atau SIDEWAYS atau UNKNOWN
+        _thr_full, _thr_half, _thr_wait = 58, 42, 28
+        threshold_regime = "BEAR/SIDEWAYS"
+
+    if _atr_extreme:
+        _thr_full += 5
+        _thr_half += 5
+        _thr_wait += 5
+        threshold_regime += " + VOLATILITAS EKSTREM (+5)"
+
+    # ═══════════════════════════════════════════════════════════
+    # BAGIAN 4 — KEPUTUSAN (Threshold Adaptif)
     # ═══════════════════════════════════════════════════════════
     def get_tier(adj):
-        if adj >= 53: return "FULL SIZE ENTRY", "FULL"
-        if adj >= 36: return "HALF SIZE ENTRY", "HALF"
-        if adj >= 21: return "WAIT & MONITOR", "WAIT"
+        if adj >= _thr_full: return "FULL SIZE ENTRY", "FULL"
+        if adj >= _thr_half: return "HALF SIZE ENTRY", "HALF"
+        if adj >= _thr_wait: return "WAIT & MONITOR", "WAIT"
         return "SKIP", "SKIP"
 
     dec_L, code_L = get_tier(ADJ_L)
@@ -939,6 +1184,107 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             sl_wick_result['action']         = '✅ Posisi aman. SL belum disentuh.'
 
     # ═══════════════════════════════════════════════════════════
+    # [P5] TRAILING SL — Dynamic Profit Protection
+    # TP1 tersentuh → SL ke Breakeven (Entry price)
+    # TP2 tersentuh → SL ke TP1
+    # Gunakan high_price candle saat ini sebagai proxy harga tertinggi yang dicapai.
+    # Ini adalah REKOMENDASI level SL baru berdasarkan kondisi saat ini,
+    # bukan pengganti SL struktural yang sudah ada.
+    # ═══════════════════════════════════════════════════════════
+    trailing_sl_long: dict = {
+        'applicable': False,
+        'tp1_hit': False,
+        'tp2_hit': False,
+        'recommended_sl': None,
+        'recommended_sl_label': 'N/A',
+        'action': 'N/A',
+        'note': 'Tidak aktif (tidak ada posisi terbuka atau TP belum tersentuh)',
+    }
+    trailing_sl_short: dict = {
+        'applicable': False,
+        'tp1_hit': False,
+        'tp2_hit': False,
+        'recommended_sl': None,
+        'recommended_sl_label': 'N/A',
+        'action': 'N/A',
+        'note': 'Tidak aktif (tidak ada posisi terbuka atau TP belum tersentuh)',
+    }
+
+    if is_active:
+        tp1_L_val, tp2_L_val = tp1_L[0], tp2_L[0]
+        tp1_S_val, tp2_S_val = tp1_S[0], tp2_S[0]
+
+        # --- LONG Trailing SL ---
+        trailing_sl_long['applicable'] = True
+        # TP1 hit: high candle saat ini >= TP1 LONG
+        _tp1_L_hit = bool(high_price >= tp1_L_val)
+        # TP2 hit: high candle saat ini >= TP2 LONG
+        _tp2_L_hit = bool(high_price >= tp2_L_val)
+
+        trailing_sl_long['tp1_hit'] = _tp1_L_hit
+        trailing_sl_long['tp2_hit'] = _tp2_L_hit
+
+        if _tp2_L_hit:
+            # TP2 sudah tercapai → geser SL ke TP1
+            trailing_sl_long['recommended_sl']       = round(tp1_L_val, 8)
+            trailing_sl_long['recommended_sl_label'] = f'Trailing SL @ TP1 [{tp1_L[1]}]'
+            trailing_sl_long['action'] = (
+                f'⭐ TP2 tercapai → GESER SL ke TP1 = ${tp1_L_val:.4f} '
+                f'(+{(tp1_L_val/entry_val-1)*100:.2f}% dari entry). Lock profit partial.'
+            )
+            trailing_sl_long['note'] = 'Trailing aktif: SL di TP1 — risiko closed di profit TP1 level'
+        elif _tp1_L_hit:
+            # TP1 sudah tercapai → geser SL ke Breakeven (Entry)
+            trailing_sl_long['recommended_sl']       = round(entry_val, 8)
+            trailing_sl_long['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry ${entry_val:.4f})'
+            trailing_sl_long['action'] = (
+                f'✅ TP1 tercapai → GESER SL ke Breakeven = ${entry_val:.4f}. '
+                f'Trade sudah risk-free.'
+            )
+            trailing_sl_long['note'] = 'Trailing aktif: SL di entry — trade risk-free, tunggu TP2'
+        else:
+            trailing_sl_long['recommended_sl']       = round(sl_struct_L, 8)
+            trailing_sl_long['recommended_sl_label'] = f'SL Struktural [{sl_label_L}]'
+            trailing_sl_long['action'] = (
+                f'⏳ TP1 belum tercapai. Pertahankan SL struktural ${sl_struct_L:.4f}. '
+                f'TP1 target: ${tp1_L_val:.4f} ({(tp1_L_val/close_price-1)*100:+.2f}% dari close).'
+            )
+            trailing_sl_long['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
+
+        # --- SHORT Trailing SL ---
+        trailing_sl_short['applicable'] = True
+        _tp1_S_hit = bool(low_price <= tp1_S_val)
+        _tp2_S_hit = bool(low_price <= tp2_S_val)
+
+        trailing_sl_short['tp1_hit'] = _tp1_S_hit
+        trailing_sl_short['tp2_hit'] = _tp2_S_hit
+
+        if _tp2_S_hit:
+            trailing_sl_short['recommended_sl']       = round(tp1_S_val, 8)
+            trailing_sl_short['recommended_sl_label'] = f'Trailing SL @ TP1 [{tp1_S[1]}]'
+            trailing_sl_short['action'] = (
+                f'⭐ TP2 tercapai → GESER SL ke TP1 = ${tp1_S_val:.4f} '
+                f'(-{(1-tp1_S_val/entry_val)*100:.2f}% dari entry). Lock profit partial.'
+            )
+            trailing_sl_short['note'] = 'Trailing aktif: SL di TP1 — risiko closed di profit TP1 level'
+        elif _tp1_S_hit:
+            trailing_sl_short['recommended_sl']       = round(entry_val, 8)
+            trailing_sl_short['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry ${entry_val:.4f})'
+            trailing_sl_short['action'] = (
+                f'✅ TP1 tercapai → GESER SL ke Breakeven = ${entry_val:.4f}. '
+                f'Trade sudah risk-free.'
+            )
+            trailing_sl_short['note'] = 'Trailing aktif: SL di entry — trade risk-free, tunggu TP2'
+        else:
+            trailing_sl_short['recommended_sl']       = round(sl_struct_S, 8)
+            trailing_sl_short['recommended_sl_label'] = f'SL Struktural [{sl_label_S}]'
+            trailing_sl_short['action'] = (
+                f'⏳ TP1 belum tercapai. Pertahankan SL struktural ${sl_struct_S:.4f}. '
+                f'TP1 target: ${tp1_S_val:.4f} ({(tp1_S_val/close_price-1)*100:+.2f}% dari close).'
+            )
+            trailing_sl_short['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
+
+    # ═══════════════════════════════════════════════════════════
     # BAGIAN 9 — PARAMETER PRIORITY INDICATOR (Tier 1/2/3)
     # ═══════════════════════════════════════════════════════════
 
@@ -1064,6 +1410,43 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         dec_S = 'SKIP'
         code_S = 'SKIP'
 
+    # ── [P2] Session hard filter post-scoring override ────────
+    session_override_reason = ""
+    if session_block:
+        # OFF-MARKET: block total
+        dec_L = 'SKIP'
+        code_L = 'SKIP'
+        dec_S = 'SKIP'
+        code_S = 'SKIP'
+        session_override_reason = session_block_reason
+    elif session_block_type == 'CONDITIONAL_NY':
+        # NEW YORK (tanpa London): wajib score >= 50
+        if ADJ_L < 50:
+            dec_L = 'SKIP'
+            code_L = 'SKIP'
+            session_override_reason += f"LONG skip: Sesi NY skor {ADJ_L:.1f} < 50. "
+        if ADJ_S < 50:
+            dec_S = 'SKIP'
+            code_S = 'SKIP'
+            session_override_reason += f"SHORT skip: Sesi NY skor {ADJ_S:.1f} < 50."
+    elif session_block_type == 'CONDITIONAL_ASIAN':
+        # ASIAN: hanya valid jika FULL SIZE (score >= thr_full)
+        if ADJ_L < _thr_full:
+            dec_L = 'SKIP'
+            code_L = 'SKIP'
+            session_override_reason += f"LONG skip: Sesi ASIAN skor {ADJ_L:.1f} < {_thr_full} (FULL SIZE). "
+        if ADJ_S < _thr_full:
+            dec_S = 'SKIP'
+            code_S = 'SKIP'
+            session_override_reason += f"SHORT skip: Sesi ASIAN skor {ADJ_S:.1f} < {_thr_full} (FULL SIZE)."
+
+    # ── [P4] StochRSI Gatekeeper override ────────────────────
+    stoch_gate_override = ""
+    if stoch_gatekeeper_skip and code_L not in ('SKIP',):
+        dec_L = 'SKIP'
+        code_L = 'SKIP'
+        stoch_gate_override = f"LONG skip: {stoch_gatekeeper_reason}"
+
     # ═══════════════════════════════════════════════════════════
     # RETURN — json_safe() memastikan semua numpy type dikonversi
     # ═══════════════════════════════════════════════════════════
@@ -1123,6 +1506,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         },
         'momentum_hold': momentum_hold,
         'sl_wick':       sl_wick_result,
+        # [P5] Trailing SL rekomendasi
+        'trailing_sl': {
+            'long':  trailing_sl_long,
+            'short': trailing_sl_short,
+        },
         'validation': {
             'ok': bool(valid_ok),
             'issues': validations,
@@ -1146,18 +1534,55 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'close_price': round(close_price, 8), 'low_price': round(low_price, 8), 'high_price': round(high_price, 8),
             'ema21': round(ema21, 8), 'ema50': round(ema50, 8), 'ema200': round(ema200, 8),
             'atr': round(atr, 8), 'ATR_MULT': ATR_MULT, 'atr_mult_reason': atr_mult_reason,
+            # [P3] Decoupled ATR thresholds
             'atr_thresholds': {
+                # Sizing thresholds (dari ATR_MULT Altcoin_Index — untuk SL/TP)
                 'sweet_lo': round(sweet_lo, 2), 'sweet_hi': round(sweet_hi, 2),
                 't2_lo': round(t2_lo, 2), 't2_hi': round(t2_hi, 2),
                 't1_lo': round(t1_lo, 2), 't1_hi': round(t1_hi, 2),
+                # Scoring thresholds (berbasis persentil historis aset — untuk skor s4)
+                'score_sweet_lo': round(atr_score_sweet_lo, 2), 'score_sweet_hi': round(atr_score_sweet_hi, 2),
+                'score_t2_lo': round(atr_score_t2_lo, 2), 'score_t2_hi': round(atr_score_t2_hi, 2),
+                'score_t1_lo': round(atr_score_t1_lo, 2), 'score_t1_hi': round(atr_score_t1_hi, 2),
             },
             'SESSION_MULT': SESSION_MULT, 'session': session_label,
+            # [P2] Session filter detail
+            'session_block': session_block,
+            'session_block_type': session_block_type,
+            'session_block_reason': session_block_reason,
+            'session_override_reason': session_override_reason,
             'is_altcoin': bool(not is_major),
             'is_active_pos': bool(is_active), 'entry_price': entry_val if is_active else None,
             'aging_status': aging_status, 'candles_since_entry': int(candles_since_entry),
             'pnl_pct': pnl_pct,
             'bos_val': bos_val, 'funding_val': funding_val,
             'buy_liq_val': buy_liq_val, 'sell_liq_val': sell_liq_val,
+            # [P1] Dynamic liquidity fields
+            'dyn_buy_liq': round(dyn_buy_liq, 8) if dyn_buy_liq is not None else None,
+            'swing_low_20': round(swing_low_20, 8) if swing_low_20 is not None else None,
+            'dist_to_liq': round(dist_to_liq, 4) if dist_to_liq is not None else None,
+            'l2_zone': (
+                'SKIP' if (dist_to_liq is not None and dist_to_liq < 1.0)
+                else 'SWEET_SPOT' if (dist_to_liq is not None and dist_to_liq <= 5.0)
+                else 'WARNING' if (dist_to_liq is not None and dist_to_liq <= 10.0)
+                else 'GAGAL' if (dist_to_liq is not None and dist_to_liq > 10.0)
+                else 'N/A'
+            ),
+            # [P4] StochRSI Gatekeeper
+            'stoch_gatekeeper_ok': stoch_gatekeeper_ok,
+            'stoch_gatekeeper_skip': stoch_gatekeeper_skip,
+            'stoch_gatekeeper_reason': stoch_gatekeeper_reason,
+            'stoch_bonus_points': stoch_bonus_points,
+            'stoch_gate_override': stoch_gate_override,
+            # [P6] Macro Trend Filter
+            'macro_slope': round(macro_slope, 4) if macro_slope is not None else None,
+            'macro_trend': macro_trend,
+            'macro_trend_reason': macro_trend_reason,
+            # [P7] Adaptive Score Thresholds
+            'threshold_regime': threshold_regime,
+            'thr_full': _thr_full, 'thr_half': _thr_half, 'thr_wait': _thr_wait,
+            'atr_extreme': _atr_extreme,
+            'atr_avg_20': round(_atr_avg_20, 4) if _atr_avg_20 is not None else None,
         },
     }
     # Sanitize ALL numpy types sebelum dikembalikan ke Flask jsonify

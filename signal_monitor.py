@@ -23,8 +23,10 @@ logger = logging.getLogger("SignalMonitor")
 # CONSTANTS — tidak bergantung env vars
 # ============================================================
 POLL_INTERVAL_SECONDS = 15 * 60   # 15 menit
-SIGNAL_THRESHOLD_FULL = 53        # ADJ score untuk FULL SIZE ENTRY
-SIGNAL_THRESHOLD_HALF = 36        # ADJ score untuk HALF SIZE ENTRY
+# CATATAN: Threshold FULL/HALF kini bersifat adaptif (dari P7 result['variables'])
+# Nilai di bawah hanya sebagai fallback jika variabel adaptif tidak tersedia.
+SIGNAL_THRESHOLD_FULL = 48        # ADJ score default FULL SIZE ENTRY (bull mode)
+SIGNAL_THRESHOLD_HALF = 33        # ADJ score default HALF SIZE ENTRY (bull mode)
 
 MONITOR_PAIRS = [
     "SUIUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
@@ -318,6 +320,17 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         exit_r    = result.get("exit", {})
         mom_hold  = result.get("momentum_hold", {})
         sl_wick   = result.get("sl_wick", {})
+        trailing  = result.get("trailing_sl", {})
+        variables = result.get("variables", {})
+
+        # [P7] Adaptive thresholds dari scoring engine
+        thr_full = variables.get("thr_full", SIGNAL_THRESHOLD_FULL)
+        thr_half = variables.get("thr_half", SIGNAL_THRESHOLD_HALF)
+        macro_trend      = variables.get("macro_trend", "UNKNOWN")
+        threshold_regime = variables.get("threshold_regime", "UNKNOWN")
+        session_block_type = variables.get("session_block_type", "NONE")
+        stoch_gk_reason  = variables.get("stoch_gatekeeper_reason", "")
+        stoch_gk_ok      = variables.get("stoch_gatekeeper_ok", True)
 
         now_ts = time.time()
 
@@ -412,9 +425,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
             # ── LONG SIGNAL ────────────────────────────────
             new_signal_L = None
-            if code_L == "FULL" and adj_L >= SIGNAL_THRESHOLD_FULL:
+            if code_L == "FULL" and adj_L >= thr_full:
                 new_signal_L = "LONG_FULL"
-            elif code_L == "HALF" and adj_L >= SIGNAL_THRESHOLD_HALF:
+            elif code_L == "HALF" and adj_L >= thr_half:
                 new_signal_L = "LONG_HALF"
 
             if new_signal_L and (new_signal_L != state["last_signal"] or time_since_last > cooldown):
@@ -430,11 +443,20 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"\n💡 <b>MOMENTUM {mom_hold['strength']}</b> — Pertimbangkan TAHAN TP1\n"
                         f"   {reasons}\n"
                     )
+                # [P6] Macro trend label
+                macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
+                # [P4] StochRSI gatekeeper label
+                stoch_str = f"✅ {stoch_gk_reason[:60]}" if stoch_gk_ok else f"⚠️ {stoch_gk_reason[:60]}"
+                # [P5] Trailing SL hint
+                trailing_long  = trailing.get("long", {})
+                trailing_str   = trailing_long.get("action", "") if trailing_long.get("applicable") else ""
                 _send_telegram(
                     f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                     f"{'─'*28}\n"
                     f"📊 Skor: <b>{adj_L:.0f}/71 pts</b> ({result['long']['pct']:.1f}%)\n"
                     f"🎯 Posisi: <b>{size_label}</b>\n"
+                    f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
+                    f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
                     f"{'─'*28}\n"
                     f"💰 <b>ENTRY</b>: ${close_price:.6f}\n"
                     f"🛡️ <b>Stop Loss</b>: ${lvl_L['sl_structure']:.6f} "
@@ -445,6 +467,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
                     f"{hold_str}"
                     f"R:R Quality: {rr_q}\n"
+                    + (f"📊 Trailing SL: {trailing_str}\n" if trailing_str else "")
+                    + f"🔬 StochRSI: {stoch_str}\n"
                     f"🕐 {wib} WIB"
                 )
                 state["last_signal"]   = new_signal_L
@@ -453,9 +477,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
             # ── SHORT SIGNAL ───────────────────────────────
             new_signal_S = None
-            if code_S == "FULL" and adj_S >= SIGNAL_THRESHOLD_FULL:
+            if code_S == "FULL" and adj_S >= thr_full:
                 new_signal_S = "SHORT_FULL"
-            elif code_S == "HALF" and adj_S >= SIGNAL_THRESHOLD_HALF:
+            elif code_S == "HALF" and adj_S >= thr_half:
                 new_signal_S = "SHORT_HALF"
 
             if new_signal_S and (new_signal_S != state["last_signal"] or time_since_last > cooldown):
@@ -547,3 +571,143 @@ def start_background_monitor() -> threading.Thread | None:
     t.start()
     logger.info(f"✅ SignalMonitor thread started (id={t.ident})")
     return t
+
+
+# ============================================================
+# TEST FUNCTION — Kirim notifikasi test PENDLE ke Telegram
+# ============================================================
+def test_send_pendle_notification() -> dict:
+    """
+    One-shot test: fetch PENDLE data, score, dan kirim notifikasi
+    ke Telegram tanpa menjalankan full monitoring loop.
+    Return dict dengan status dan detail.
+    """
+    import algo_scoring
+
+    symbol = "PENDLEUSDT"
+    logger.info(f"[TEST] Fetching data for {symbol}...")
+
+    df = _fetch_klines(symbol, interval="4h", limit=250)
+    if df is None or len(df) < 22:
+        return {"ok": False, "error": "Insufficient kline data", "symbol": symbol}
+
+    df = _enrich_df(df, symbol)
+    close_price = float(df.iloc[-1]["Close"])
+
+    meta   = {"Symbol": symbol, "AVG_ENTRY_PRICE": None, "ENTRY_DATE": None}
+    result = algo_scoring.calculate_71point_score(df, meta)
+    if result is None:
+        return {"ok": False, "error": "Scoring returned None", "symbol": symbol}
+
+    adj_L     = result["long"]["total"]
+    adj_S     = result["short"]["total"]
+    code_L    = result["long"]["code"]
+    code_S    = result["short"]["code"]
+    lvl_L     = result["long"]["levels"]
+    lvl_S     = result["short"]["levels"]
+    variables = result.get("variables", {})
+    mom_hold  = result.get("momentum_hold", {})
+    trailing  = result.get("trailing_sl", {})
+    gate_L    = result["long"]["gate"]
+    gate_S    = result["short"]["gate"]
+
+    macro_trend      = variables.get("macro_trend", "UNKNOWN")
+    macro_trend_rsn  = variables.get("macro_trend_reason", "")
+    threshold_regime = variables.get("threshold_regime", "UNKNOWN")
+    thr_full         = variables.get("thr_full", SIGNAL_THRESHOLD_FULL)
+    thr_half         = variables.get("thr_half", SIGNAL_THRESHOLD_HALF)
+    session          = variables.get("session", "N/A")
+    sess_mult        = variables.get("SESSION_MULT", 1.0)
+    sess_block_type  = variables.get("session_block_type", "NONE")
+    dist_to_liq      = variables.get("dist_to_liq")
+    l2_zone          = variables.get("l2_zone", "N/A")
+    stoch_gk_ok      = variables.get("stoch_gatekeeper_ok", True)
+    stoch_gk_reason  = variables.get("stoch_gatekeeper_reason", "N/A")
+    stoch_bonus      = variables.get("stoch_bonus_points", 0)
+    atr_pct          = variables.get("H_atr_pct", 0.0)
+    atr_extreme      = variables.get("atr_extreme", False)
+    atr_avg20        = variables.get("atr_avg_20")
+    dyn_buy_liq      = variables.get("dyn_buy_liq")
+    swing_low20      = variables.get("swing_low_20")
+
+    wib = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
+
+    # Gate summary
+    def _gate_short_label(gate: dict) -> str:
+        status = gate.get("status", "CLEAR")
+        if status == "CLEAR":   return "✅ CLEAR"
+        if status == "WARNING": return "⚠️ WARNING"
+        return "❌ BLOCKED"
+
+    # L2 zone label
+    _l2_labels = {
+        "SWEET_SPOT": "✅ Sweet Spot (1-5%)",
+        "SKIP": "⚡ Terlalu Dekat (<1%)",
+        "WARNING": "⚠️ Warning Zone (5-10%)",
+        "GAGAL": "❌ Gagal (>10%)",
+    }
+    l2_label = _l2_labels.get(l2_zone, f"N/A")
+
+    # Trailing SL hint (tidak aktif karena tidak ada posisi open)
+    trailing_note = "Tidak ada posisi aktif — trailing SL belum relevan"
+
+    # Momentum
+    hold_str = ""
+    if mom_hold.get("signal"):
+        reasons = " · ".join(mom_hold.get("reasons", [])[:2])
+        hold_str = f"\n💡 <b>MOMENTUM {mom_hold['strength']}</b>: {reasons}"
+
+    msg = (
+        f"🧪 <b>[TEST] ANALISIS PENDLE — {symbol}</b>\n"
+        f"{'─'*30}\n"
+        f"🕐 {wib} WIB\n"
+        f"💰 Harga: <b>${close_price:.6f}</b>\n"
+        f"\n"
+        f"━━ 📊 SKOR ━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  LONG : <b>{adj_L:.0f}/71 pts</b> ({result['long']['pct']:.1f}%) → <b>{code_L}</b>\n"
+        f"  SHORT: <b>{adj_S:.0f}/71 pts</b> ({result['short']['pct']:.1f}%) → <b>{code_S}</b>\n"
+        f"  Threshold: FULL≥{thr_full} | HALF≥{thr_half} | Regime: {threshold_regime}\n"
+        f"\n"
+        f"━━ {macro_icon} TREN MACRO ━━━━━━━━━━━━━━━━━━━\n"
+        f"  {macro_trend_rsn}\n"
+        f"\n"
+        f"━━ 🚦 GATE STATUS ━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  LONG  Gate: {_gate_short_label(gate_L)}\n"
+        f"  SHORT Gate: {_gate_short_label(gate_S)}\n"
+        f"  [P1] Dyn Buy_Liq: ${dyn_buy_liq:.4f if dyn_buy_liq else 'N/A'} | SwingLow: ${swing_low20:.4f if swing_low20 else 'N/A'}\n"
+        f"  [P1] L2 Zone: {l2_label} (dist={dist_to_liq:.2f}%{'' if dist_to_liq is None else ''})\n"
+        f"\n"
+        f"━━ ⏱️ SESI & FILTER ━━━━━━━━━━━━━━━━━━━\n"
+        f"  Sesi: {session} (×{sess_mult:.2f}) | Tipe: {sess_block_type}\n"
+        f"  [P4] StochRSI GK: {'✅ OK' if stoch_gk_ok else '❌ FAIL'}"
+        + (f" (+{stoch_bonus}pts bonus)" if stoch_bonus else "") + "\n"
+        f"  {stoch_gk_reason[:80]}\n"
+        f"\n"
+        f"━━ 📐 ATR VOLATILITAS ━━━━━━━━━━━━━━━━━━\n"
+        f"  ATR%: {atr_pct:.2f}% | Avg-20c: {atr_avg20:.2f}%{' | ⚠️ EKSTREM' if atr_extreme else ''}{'N/A' if atr_avg20 is None else ''}\n"
+        f"\n"
+        f"━━ 🛡️ LEVEL LONG ━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"  SL: ${lvl_L['sl_structure']:.6f} ({lvl_L['dist_sl']:+.2f}%) [{lvl_L['sl_label']}]\n"
+        f"  TP1: ${lvl_L['tp1']:.6f} (+{lvl_L['dist_tp1']:.2f}%) | R:R {lvl_L['rr1']}× [{lvl_L['tp1_label']}]\n"
+        f"  TP2: ${lvl_L['tp2']:.6f} (+{lvl_L['dist_tp2']:.2f}%) | R:R {lvl_L['rr2']}×\n"
+        f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
+        f"{hold_str}\n"
+        f"\n"
+        f"[P5] Trailing SL: {trailing_note}"
+    )
+
+    ok = _send_telegram(msg)
+    return {
+        "ok": ok,
+        "symbol": symbol,
+        "close": close_price,
+        "adj_L": adj_L, "code_L": code_L,
+        "adj_S": adj_S, "code_S": code_S,
+        "macro_trend": macro_trend,
+        "threshold_regime": threshold_regime,
+        "thr_full": thr_full, "thr_half": thr_half,
+        "l2_zone": l2_zone,
+        "stoch_gk_ok": stoch_gk_ok,
+        "telegram_sent": ok,
+    }
