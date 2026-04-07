@@ -195,7 +195,23 @@ const FEATURE_LABELS = { OI:'Open Interest Change', Vol:'Relative Volume (MA20)'
 const FEATURE_UNIT = { TakerBuy:'%',RSI:'',OI:'%',Vol:'%',ATR:'%',CVD:'%',EMA21:'%',EMA50:'%',EMA200:'%' };
 
 function renderQuantAnalysis(quant, state) {
-    if (!quant) { document.getElementById('quantDecisionName').textContent = 'DATA INSUFFICIENT'; document.getElementById('quantScoreSummary').textContent = 'Need ≥22 candles of 4H data'; return; }
+    if (!quant) { 
+        document.getElementById('quantDecisionName').textContent = 'DATA INSUFFICIENT'; 
+        document.getElementById('quantScoreSummary').textContent = 'Need ≥22 candles of 4H data'; 
+        document.getElementById('quantDecisionName').className = 'decision-name color-SKIP';
+        if (document.getElementById('decisionBanner')) document.getElementById('decisionBanner').className = 'quant-decision-banner decision-SKIP';
+        if (document.getElementById('quantTotalBar')) document.getElementById('quantTotalBar').style.width = '0%';
+        if (document.getElementById('quantTotalPts')) document.getElementById('quantTotalPts').textContent = '—/71';
+        if (document.getElementById('activePosBanner')) document.getElementById('activePosBanner').innerHTML = '';
+        if (document.getElementById('featureGrid')) document.getElementById('featureGrid').innerHTML = '<div style="color:var(--text-3);padding:20px;text-align:center;grid-column:1/-1">Belum ada data cukup untuk analisis.</div>';
+        if (document.getElementById('slLevels')) document.getElementById('slLevels').innerHTML = '';
+        if (document.getElementById('tpLevels')) document.getElementById('tpLevels').innerHTML = '';
+        if (document.getElementById('rrMatrix')) document.getElementById('rrMatrix').innerHTML = '';
+        if (document.getElementById('exitSignalBox')) document.getElementById('exitSignalBox').innerHTML = '';
+        if (document.getElementById('quantNarrative')) document.getElementById('quantNarrative').innerHTML = '';
+        if (document.getElementById('marketContext')) document.getElementById('marketContext').innerHTML = '<span style="color:var(--text-3);font-size:12px">—</span>';
+        return; 
+    }
     const data = quant[activeQuantTab];
     if (!data) return;
     const ep = state?.user_input?.entry_price || 0;
@@ -204,8 +220,19 @@ function renderQuantAnalysis(quant, state) {
     const banner = document.getElementById('decisionBanner');
     banner.className = `quant-decision-banner decision-${data.code}`;
     document.getElementById('quantDecisionName').className = `decision-name color-${data.code}`;
+    let blockMsg = '';
+    if (data.code === 'SKIP') {
+        const sBlock = state.quant_analysis?.variables?.session_override_reason || '';
+        const stGate = state.quant_analysis?.variables?.stoch_gate_override || '';
+        let gateMsg = '';
+        for (const [gk, [status, msg]] of Object.entries(data.gate.gates)) {
+            if (status === 'FAIL') gateMsg += `${gk}: ${msg} `;
+        }
+        blockMsg = [gateMsg, sBlock, stGate].filter(x => x).join(' | ');
+    }
+
     document.getElementById('quantDecisionName').textContent = data.decision;
-    document.getElementById('quantScoreSummary').textContent = `Score: ${data.total}/71 (${data.pct.toFixed(1)}%)`;
+    document.getElementById('quantScoreSummary').innerHTML = `Score: ${data.total}/71 (${data.pct.toFixed(1)}%)${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}`;
     // Total bar
     const pct = data.total / 71 * 100;
     document.getElementById('quantTotalPts').textContent = `${data.total}/71`;
@@ -232,10 +259,31 @@ function renderQuantAnalysis(quant, state) {
         const fillColor = stars === 3 ? 'var(--accent-green)' : stars === 2 ? 'var(--accent-yellow)' : stars === 1 ? 'var(--accent-orange)' : 'var(--accent-red)';
         const unit = FEATURE_UNIT[key] || '';
         const rawFmt = typeof raw === 'number' ? (raw >= 0 ? '+' : '') + raw.toFixed(2) + unit : raw;
+        
+        let customName = FEATURE_LABELS[key] || key;
+        let customVal = rawFmt;
+        let pctx = quant.variables || {};
+        
+        if (key === 'ATR') {
+            const lo = pctx.atr_thresholds?.score_sweet_lo?.toFixed(1) || '?';
+            const hi = pctx.atr_thresholds?.score_sweet_hi?.toFixed(1) || '?';
+            const h = pctx.H_atr_pct?.toFixed(2) || '?';
+            customName = `ATR sweet spot EMPIRIS: ${lo}%–${hi}%`;
+            customVal = `H=${h}% → skor ${stars}`;
+        } else if (key === 'CVD') {
+            const kval = pctx.K_cvd_norm?.toFixed(2) || '?';
+            customName = `CVD_norm K=${kval}% = (CVD[-1] − CVD[-21]) / |CVD[-21]| × 100`;
+            customVal = rawFmt;
+        } else if (key === 'EMA50') {
+            const m = pctx.M_ema50?.toFixed(2) || '?';
+            customName = `vs EMA50 M=${m}%`;
+            customVal = `skor ${stars} → poin ${pts}/${max}`;
+        }
+        
         html += `<div class="feature-row">
             <div class="feature-dot ${dotCls}"></div>
-            <div class="feature-name">${FEATURE_LABELS[key] || key}</div>
-            <div class="feature-val">${rawFmt}</div>
+            <div class="feature-name">${customName}</div>
+            <div class="feature-val">${customVal}</div>
             <div class="feature-bar-bg"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
             <div class="pts-label">${pts}/${max}</div></div>`;
     }
@@ -256,10 +304,25 @@ function renderQuantAnalysis(quant, state) {
     const tp2Lbl = lv.tp2_label || (isLong?'+':'-')+'4.6%';
     const tp3Lbl = lv.tp3_label || (isLong?'+':'-')+'7.0%';
     const rrBadge = (rr) => `<span class="rr-badge ${rr>=2?'rr-good':'rr-bad'}">${rr.toFixed(1)}x</span>`;
+    
+    // Check if TP hits and Trailing SL active
+    const tsl = quant.trailing_sl?.[activeQuantTab] || {};
+    const slBadge = `<span style="font-size:10px;color:var(--accent-red);background:rgba(248,113,113,.12);padding:2px 6px;border-radius:6px;margin-left:8px;border:1px solid rgba(248,113,113,.3)">● SL</span>`;
+    const bp1 = (lv.sl_structure === lv.tp1 && tsl.applicable) ? slBadge : '';
+    
     document.getElementById('tpLevels').innerHTML = `
-        <div class="level-pill"><span>TP1 <span style="font-size:10px;color:var(--text-3)">${tp1Lbl}</span></span><span class="val-pos">$${lv.tp1.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp1>=0?'+':''}${lv.dist_tp1.toFixed(2)}%</span>${lv.rr1!=null?rrBadge(lv.rr1):''}</div>
+        <div class="level-pill"><span>TP1 <span style="font-size:10px;color:var(--text-3)">${tp1Lbl}</span></span><span class="val-pos">$${lv.tp1.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp1>=0?'+':''}${lv.dist_tp1.toFixed(2)}%</span>${lv.rr1!=null?rrBadge(lv.rr1):''}${bp1}</div>
         <div class="level-pill"><span>TP2 <span style="font-size:10px;color:var(--text-3)">${tp2Lbl}</span></span><span class="val-pos">$${lv.tp2.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp2>=0?'+':''}${lv.dist_tp2.toFixed(2)}%</span>${lv.rr2!=null?rrBadge(lv.rr2):''}</div>
         <div class="level-pill"><span>TP3 <span style="font-size:10px;color:var(--text-3)">${tp3Lbl}</span></span><span class="val-pos">$${lv.tp3.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp3>=0?'+':''}${lv.dist_tp3.toFixed(2)}%</span>${lv.rr3!=null?rrBadge(lv.rr3):''}</div>`;
+        
+    if (tsl.applicable) {
+        document.getElementById('tpLevels').innerHTML += `
+        <div style="margin-top:10px;padding:10px 14px;background:rgba(52,211,153,.08);border:1px dashed rgba(52,211,153,.3);border-radius:8px">
+            <div style="font-size:10px;color:var(--accent-green);font-weight:700;text-transform:uppercase;margin-bottom:4px">Trailing SL Aktif</div>
+            <div style="font-size:12px;color:var(--text-1)">${tsl.action}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:4px">${tsl.note}</div>
+        </div>`;
+    }
     // R:R Matrix
     const rrm = lv.rr_matrix;
     if (rrm && rrm.length >= 3) {
@@ -319,8 +382,21 @@ function renderQuantAnalysis(quant, state) {
     // Add live context items
     for (const [k, v] of Object.entries(mctx)) {
         if (!['StochRSI_K','StochRSI_D','Funding_Rate','Open_Interest','PDH','PDL','PWH','PWL'].includes(k)) continue;
-        ctxItems.push([k.replace(/_/g, ' '), typeof v === 'number' ? v.toFixed(4) : v]);
+        // Exception for Funding Rate to show 6 decimal places instead of truncating to 4
+        const fmtVal = (typeof v === 'number') ? (k === 'Funding_Rate' ? v.toFixed(6) : v.toFixed(4)) : v;
+        ctxItems.push([k.replace(/_/g, ' '), fmtVal]);
     }
+    
+    // Extras for V13 requirements
+    if (ctx.buy_liq_val) ctxItems.push(['Buy_Liq [CSV]', ctx.buy_liq_val?.toFixed(5)]);
+    if (ctx.dyn_buy_liq) ctxItems.push(['Dyn_Buy_Liq 20', ctx.dyn_buy_liq?.toFixed(5)]);
+    if (ctx.macro_slope !== null) ctxItems.push(['EMA200 Slope H4', ctx.macro_slope?.toFixed(2) + '%']);
+    
+    if (ctx.stoch_k != null) {
+        let bns = ctx.stoch_bonus_points || 0;
+        ctxItems.push(['StochGate', `K=${ctx.stoch_k} D=${ctx.stoch_d} | bonus=+${bns}`]);
+    }
+
     const ctxHtml = ctxItems.filter(([,v]) => v != null && v !== '—').map(([k, v]) =>
         `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${v}</span></div>`
     ).join('');
@@ -374,13 +450,44 @@ function renderCSVResult(json) {
     modes.forEach(tab => {
         const d = json[tab]; if (!d) return;
         const lv = d.levels; const narCls = tab === 'long' ? 'narrative-long' : 'narrative-short';
+        let blockMsg = '';
+        if (d.code === 'SKIP') {
+            const sBlock = json.variables?.session_override_reason || '';
+            const stGate = json.variables?.stoch_gate_override || '';
+            let gateMsg = '';
+            for (const [gk, [status, msg]] of Object.entries(d.gate.gates)) {
+                if (status === 'FAIL') gateMsg += `${gk}: ${msg} `;
+            }
+            blockMsg = [gateMsg, sBlock, stGate].filter(x => x).join(' | ');
+        }
+        
         let featureRows = '';
         for (const [key, val] of Object.entries(d.scores)) {
             const [pts, max, raw, stars] = val;
             const fillPct = max > 0 ? pts / max * 100 : 0;
             const fillColor = stars === 3 ? 'var(--accent-green)' : stars === 2 ? 'var(--accent-yellow)' : stars === 1 ? 'var(--accent-orange)' : 'var(--accent-red)';
             const unit = FEATURE_UNIT[key] || ''; const rawFmt = (raw >= 0 ? '+' : '') + raw.toFixed(2) + unit;
-            featureRows += `<div class="feature-row"><div class="feature-dot dot-${stars}"></div><div class="feature-name">${FEATURE_LABELS[key]||key}</div><div class="feature-val">${rawFmt}</div><div class="feature-bar-bg"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div><div class="pts-label">${pts}/${max}</div></div>`;
+            
+            let customName = FEATURE_LABELS[key] || key;
+            let customVal = rawFmt;
+            let pctx = json.variables || {};
+            
+            if (key === 'ATR') {
+                const lo = pctx.atr_thresholds?.score_sweet_lo?.toFixed(1) || '?';
+                const hi = pctx.atr_thresholds?.score_sweet_hi?.toFixed(1) || '?';
+                const h = pctx.H_atr_pct?.toFixed(2) || '?';
+                customName = `ATR sweet spot EMPIRIS: ${lo}%–${hi}%`;
+                customVal = `H=${h}% → skor ${stars}`;
+            } else if (key === 'CVD') {
+                const kval = pctx.K_cvd_norm?.toFixed(2) || '?';
+                customName = `CVD_norm K=${kval}% = (CVD[-1] − CVD[-21]) / |CVD[-21]| × 100`;
+                customVal = rawFmt;
+            } else if (key === 'EMA50') {
+                const m = pctx.M_ema50?.toFixed(2) || '?';
+                customName = `vs EMA50 M=${m}%`;
+                customVal = `skor ${stars} → poin ${pts}/${max}`;
+            }
+            featureRows += `<div class="feature-row"><div class="feature-dot dot-${stars}"></div><div class="feature-name">${customName}</div><div class="feature-val">${customVal}</div><div class="feature-bar-bg"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div><div class="pts-label">${pts}/${max}</div></div>`;
         }
         // R:R Matrix for CSV
         let rrHtml = '';
@@ -399,7 +506,7 @@ function renderCSVResult(json) {
             <div class="quant-decision-banner decision-${d.code}" style="margin-bottom:14px;padding:16px">
                 <div class="decision-label">${tab === 'long' ? '🐂' : '🐻'} ${tab.toUpperCase()} Setup</div>
                 <div class="decision-name color-${d.code}" style="font-size:22px">${d.decision}</div>
-                <div class="decision-score">${d.total}/71 · ${d.pct.toFixed(1)}%</div></div>
+                <div class="decision-score">${d.total}/71 · ${d.pct.toFixed(1)}%${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}</div></div>
             <div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-bottom:4px"><span>Score</span><span>${d.total}/71</span></div>
                 <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${d.total/71*100}%;background:${d.code==='FULL'?'var(--accent-green)':d.code==='HALF'?'var(--accent-blue)':d.code==='WAIT'?'var(--accent-yellow)':'var(--accent-red)'}"></div></div></div>
             <div style="margin-bottom:14px">${featureRows}</div>
@@ -423,7 +530,10 @@ function renderCSVResult(json) {
     if (ctxKeys.length) {
         html += `<div class="glass quant-card" style="grid-column:1/-1"><div class="panel-title">🔍 Market Context (from CSV)</div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
-            ${ctxKeys.map(k => `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${typeof ctx[k]==='number'?ctx[k].toFixed(4):ctx[k]}</span></div>`).join('')}</div></div>`;
+            ${ctxKeys.map(k => {
+                const fVal = typeof ctx[k]==='number' ? (k === 'Funding_Rate' ? ctx[k].toFixed(6) : ctx[k].toFixed(4)) : ctx[k];
+                return `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${fVal}</span></div>`;
+            }).join('')}</div></div>`;
     }
     html += '</div>';
     el.innerHTML = html;
