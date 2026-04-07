@@ -128,6 +128,19 @@ def _load_trade_entries() -> dict:
     return {}
 
 
+def _save_alert_state(state: dict) -> None:
+    """Simpan _alert_state ke file JSON agar TP tracking persist antar restart."""
+    path = os.environ.get(
+        "ALERT_STATE_PATH",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_state.json")
+    )
+    try:
+        with open(path, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.warning(f"_save_alert_state failed: {e}")
+
+
 # ============================================================
 # DATA FETCHING
 # ============================================================
@@ -340,6 +353,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "last_alert_ts": 0,
                 "exit_alerted": False,
                 "kill_alerted": False,
+                "tp1_alerted": False,
+                "tp2_alerted": False,
+                "tp3_alerted": False,
             })
             cooldown        = 4 * 3600
             time_since_last = now_ts - state["last_alert_ts"]
@@ -398,6 +414,66 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
             if not kill_switch:
                 state["kill_alerted"] = False
+
+            # ── TRACKING TAKE PROFIT 1, 2, 3 (BARU) ─────────────────
+            if is_active:
+                high_price = float(df.iloc[-1]["High"])
+                tp1 = lvl_L['tp1']
+                tp2 = lvl_L['tp2']
+                tp3 = lvl_L['tp3']
+
+                # Cek Hold Recommendation berdasarkan analisis momentum
+                mom_signal  = mom_hold.get("signal", False)
+                mom_reasons = " · ".join(mom_hold.get("reasons", [])[:2])
+                hold_reco = (
+                    f"✅ <b>REKOMENDASI HOLD</b> (Momentum masih kuat naik: {mom_reasons})"
+                    if mom_signal
+                    else "⚠️ <b>REKOMENDASI EXIT</b> (Momentum melemah, segera Take Profit)"
+                )
+
+                # TP 1 Hit
+                if high_price >= tp1 and not state.get("tp1_alerted"):
+                    _send_telegram(
+                        f"🎯 <b>TP1 TERCAPAI — {symbol}</b>\n"
+                        f"{'\u2500'*28}\n"
+                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
+                        f"Level TP1: ${tp1:.6f}\n\n"
+                        f"Tindakan: <b>EXIT 30%</b> & GESER SL KE ENTRY (Breakeven)\n\n"
+                        f"{hold_reco}"
+                    )
+                    state["tp1_alerted"] = True
+                    _save_alert_state(_alert_state)
+
+                # TP 2 Hit
+                if high_price >= tp2 and not state.get("tp2_alerted"):
+                    _send_telegram(
+                        f"🎯🎯 <b>TP2 TERCAPAI — {symbol}</b>\n"
+                        f"{'\u2500'*28}\n"
+                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
+                        f"Level TP2: ${tp2:.6f}\n\n"
+                        f"Tindakan: <b>EXIT 40%</b> & GESER SL KE TP1\n\n"
+                        f"{hold_reco}"
+                    )
+                    state["tp2_alerted"] = True
+                    _save_alert_state(_alert_state)
+
+                # TP 3 Hit
+                if high_price >= tp3 and not state.get("tp3_alerted"):
+                    _send_telegram(
+                        f"🚀 <b>TP3 TERCAPAI (FINAL) — {symbol}</b>\n"
+                        f"{'\u2500'*28}\n"
+                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
+                        f"Tindakan: <b>EXIT SISA 30%</b>. Trade Selesai."
+                    )
+                    state["tp3_alerted"] = True
+                    _save_alert_state(_alert_state)
+
+            # Reset alert TP jika tidak ada posisi (sudah terjual/clear)
+            if not is_active and state.get("tp1_alerted"):
+                state["tp1_alerted"] = False
+                state["tp2_alerted"] = False
+                state["tp3_alerted"] = False
+                _save_alert_state(_alert_state)
 
             # ── EXIT SIGNALS ───────────────────────────────
             exit_signals = exit_r.get("signals", [])
@@ -505,6 +581,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
                     f"{'─'*28}\n"
                     f"💰 <b>ENTRY</b>: ${close_price:.6f}\n"
+                    f"✅ <b>Status Entry: BOLEH ENTRY SEKARANG</b>\n"
                     f"🛡️ <b>Stop Loss</b>: ${lvl_L['sl_structure']:.6f} "
                     f"({lvl_L['dist_sl']:+.2f}%) [{lvl_L['sl_label']}]\n\n"
                     f"🎯 <b>Take Profit:</b>\n"
@@ -540,6 +617,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{'─'*28}\n"
                     f"💰 <b>ENTRY</b>: ${close_price:.6f}\n"
+                    f"✅ <b>Status Entry: BOLEH ENTRY SEKARANG</b>\n"
                     f"🛡️ <b>Stop Loss</b>: ${lvl_S['sl_structure']:.6f} "
                     f"({lvl_S['dist_sl']:+.2f}%) [{lvl_S['sl_label']}]\n\n"
                     f"🎯 <b>Take Profit:</b>\n"

@@ -274,9 +274,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         session_block_type = "CONDITIONAL_NY"
     elif _is_asian:
         SESSION_MULT = 0.85
-        session_block = False
-        session_block_reason = "ASIAN: Hanya valid jika score ≥ 55 (FULL SIZE)"
-        session_block_type = "CONDITIONAL_ASIAN"
+        session_block = True
+        session_block_reason = "❌ Sesi ASIAN. Entry diblokir total (Hard Block v13)."
+        session_block_type = "HARD_BLOCK_ASIAN"
     elif _is_off_market:
         SESSION_MULT = 0.90
         session_block = True
@@ -421,17 +421,70 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         gate_S['gates']['S1'] = ('FAIL', '❌ GATE S1: Struktur bullish aktif (BOS=+1). Tunggu BOS flip ke 0/−1.')
         gate_S['status'] = 'BLOCKED'
 
-    # S2: Sell liquidity sudah/hampir diambil
-    if not has_sell_liq:
-        gate_S['gates']['S2'] = ('PASS', 'Sell_Liq tidak tersedia — skip')
-    elif close_price >= sell_liq_val * 0.995:
-        gate_S['gates']['S2'] = ('PASS', f'Harga ≥ Sell_Liq×0.995 — sweep sudah terjadi')
-    elif close_price >= sell_liq_val * 0.980:
-        gate_S['gates']['S2'] = ('WARN', f'⚠️ Harga dalam 2% di bawah Sell_Liq ${sell_liq_val:.4f} — mendekati sweep')
-        if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+    # S2: Sell liquidity sudah/hampir diambil — Dynamic version (v13)
+    # dyn_sell_liq = max(High[-21:-1]) * 1.005  (sweep +0.5% di atas swing high)
+    _high_window = df['High'].iloc[-20:] if 'High' in df.columns and len(df) >= 20 else None
+    if _high_window is not None and len(_high_window) >= 5:
+        swing_high_20 = float(_high_window.max())
+        dyn_sell_liq  = swing_high_20 * 1.005
+        dist_to_sell_liq = (dyn_sell_liq - close_price) / close_price * 100 if close_price else 0.0
+        has_dyn_sell_liq = True
     else:
-        gate_S['gates']['S2'] = ('FAIL', f'❌ GATE S2: Sell liquidity belum diambil (${sell_liq_val:.4f}).')
-        gate_S['status'] = 'BLOCKED'
+        swing_high_20    = None
+        dyn_sell_liq     = None
+        dist_to_sell_liq = None
+        has_dyn_sell_liq = False
+
+    if not has_dyn_sell_liq:
+        # Fallback ke Sell_Liq statis
+        if not has_sell_liq:
+            gate_S['gates']['S2'] = ('PASS', 'Dynamic Sell_Liq tidak dapat dihitung (data High kurang) — skip')
+        elif close_price >= sell_liq_val * 0.995:
+            gate_S['gates']['S2'] = ('PASS', f'[Statis] Harga ≥ Sell_Liq×0.995 — sweep sudah terjadi')
+        elif close_price >= sell_liq_val * 0.980:
+            gate_S['gates']['S2'] = ('WARN', f'⚠️ [Statis] Harga dalam 2% di bawah Sell_Liq ${sell_liq_val:.4f} — mendekati sweep')
+            if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+        else:
+            gate_S['gates']['S2'] = ('FAIL', f'❌ GATE S2 [Statis]: Sell liquidity belum diambil (${sell_liq_val:.4f}).')
+            gate_S['status'] = 'BLOCKED'
+    else:
+        # Dynamic ruleset — cermin logika L2 untuk sisi SHORT
+        _ds = dist_to_sell_liq  # alias
+        if _ds < 1.0:
+            # Harga sudah sangat dekat / di atas dyn_sell_liq → SKIP
+            gate_S['gates']['S2'] = (
+                'SKIP',
+                f'⚡ GATE S2: Harga terlalu dekat dyn_Sell_Liq (dist={_ds:.2f}%). '
+                f'Level: ${dyn_sell_liq:.4f} | SwingHigh(20): ${swing_high_20:.4f}. '
+                f'Kemungkinan sedang tersapu — TUNGGU konfirmasi reversal.'
+            )
+            if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+        elif _ds <= 5.0:
+            # Sweet Spot: harga 1–5% di bawah dyn_sell_liq → PASS
+            gate_S['gates']['S2'] = (
+                'PASS',
+                f'✅ GATE S2: Sweet Spot (dist={_ds:.2f}%). '
+                f'Harga cukup dekat dengan dyn_Sell_Liq ${dyn_sell_liq:.4f} — '
+                f'likuiditas hampir/sudah diambil. SwingHigh(20): ${swing_high_20:.4f}.'
+            )
+        elif _ds <= 10.0:
+            # Warning Zone: 5–10% di bawah
+            gate_S['gates']['S2'] = (
+                'WARN',
+                f'⚠️ GATE S2: Warning Zone (dist={_ds:.2f}%). '
+                f'Harga cukup jauh dari dyn_Sell_Liq ${dyn_sell_liq:.4f}. '
+                f'Tunggu harga lebih dekat ke SwingHigh(20) ${swing_high_20:.4f}.'
+            )
+            if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+        else:
+            # GAGAL: lebih dari 10% di bawah zona sell liq
+            gate_S['gates']['S2'] = (
+                'FAIL',
+                f'❌ GATE S2: Likuiditas jual belum diambil (dist={_ds:.2f}%). '
+                f'Harga {_ds:.2f}% di bawah dyn_Sell_Liq ${dyn_sell_liq:.4f} '
+                f'(SwingHigh(20): ${swing_high_20:.4f}). Tunggu price action menuju zona liq.'
+            )
+            gate_S['status'] = 'BLOCKED'
 
     # S3: Funding tidak negatif berlebihan
     if not has_funding:
@@ -586,7 +639,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             stoch_gatekeeper_skip = True
             _reasons = []
             if stoch_k >= 20:    _reasons.append(f"K={stoch_k:.1f}≥20")
-            if not _stoch_rising: _reasons.append(f"K tidak naik ({stoch_k:.1f}≤prev {stoch_k_prev:.1f if stoch_k_prev else 'N/A'})")
+            if not _stoch_rising: _reasons.append(f"K tidak naik ({stoch_k:.1f}≤prev {f'{stoch_k_prev:.1f}' if stoch_k_prev is not None else 'N/A'})")
             if stoch_k >= stoch_d: _reasons.append(f"K({stoch_k:.1f})≥D({stoch_d:.1f})")
             stoch_gatekeeper_reason = f"❌ StochRSI GAGAL (tanpa CVD div): {', '.join(_reasons)}"
     elif cvd_div_bull:
@@ -749,6 +802,11 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # ═══════════════════════════════════════════════════════════
     # BAGIAN 6 — STRUCTURE-BASED TP
     # ═══════════════════════════════════════════════════════════
+    # Filter jarak minimum TP = 1.0 × ATR × ATR_MULT
+    # Mencegah level struktural terlalu dekat (< 1 ATR) menjadi TP,
+    # yang akan merusak Risk:Reward karena jarak TP terlalu tipis.
+    min_tp_dist = atr * (1.0 * ATR_MULT)
+
     # TP LONG pool — spec 6A: semua level struktural, tanpa flat di pool
     tp_pool_L = []
     for col, lbl in [('Sell_Liq',       'Likuiditas Jual'),
@@ -764,14 +822,15 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
                       ('PDH',            'Prev Day High'),
                       ('PWH',            'Prev Week High')]:
         v = _last_val(last, col)
-        if v and v > 0 and v > close_price:
+        # WAJIB di atas close + jarak minimum 1 ATR (disesuaikan ATR_MULT)
+        if v and v > 0 and v > (close_price + min_tp_dist):
             tp_pool_L.append((v, lbl))
     for e_val, e_lbl in [(ema21, 'EMA 21'), (ema50, 'EMA 50'), (ema200, 'EMA 200')]:
-        if e_val and e_val > close_price:
+        if e_val and e_val > (close_price + min_tp_dist):
             tp_pool_L.append((e_val, e_lbl))
 
     # Sort terendah → tertinggi (resistance terdekat di atas Close = TP1 LONG)
-    tp_pool_L = [(v, l) for v, l in tp_pool_L if v > close_price]
+    tp_pool_L = [(v, l) for v, l in tp_pool_L if v > (close_price + min_tp_dist)]
     tp_pool_L.sort(key=lambda x: x[0])
     seen = set()
     tp_dedup_L = []
@@ -791,7 +850,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     tp2_L = tp_pool_L[1] if len(tp_pool_L) >= 2 else _flat_L[1]
     tp3_L = tp_pool_L[2] if len(tp_pool_L) >= 3 else _flat_L[2]
 
-    # TP SHORT pool — spec 6B: 15 level struktural, bukan flat
+    # TP SHORT pool — spec 6B: level struktural dengan filter jarak minimum 1 ATR
     tp_pool_S = []
     for col, lbl in [('Buy_Liq',         'Likuiditas Beli'),
                       ('FVG_Up_Top',      'FVG Bullish Top'),
@@ -806,14 +865,15 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
                       ('PDL',             'Prev Day Low'),
                       ('PWL',             'Prev Week Low')]:
         v = _last_val(last, col)
-        if v and v > 0 and v < close_price:
+        # WAJIB di bawah close - jarak minimum 1 ATR (disesuaikan ATR_MULT)
+        if v and v > 0 and v < (close_price - min_tp_dist):
             tp_pool_S.append((v, lbl))
     for e_val, e_lbl in [(ema21, 'EMA 21'), (ema50, 'EMA 50'), (ema200, 'EMA 200')]:
-        if e_val and e_val < close_price:
+        if e_val and e_val < (close_price - min_tp_dist):
             tp_pool_S.append((e_val, e_lbl))
 
     # Sort tertinggi → terendah (support terdekat di bawah Close = TP1 SHORT)
-    tp_pool_S = [(v, l) for v, l in tp_pool_S if v < close_price]
+    tp_pool_S = [(v, l) for v, l in tp_pool_S if v < (close_price - min_tp_dist)]
     tp_pool_S.sort(key=lambda x: x[0], reverse=True)
     seen = set()
     tp_dedup_S = []
@@ -1442,7 +1502,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     # ── [P2] Session hard filter post-scoring override ────────
     session_override_reason = ""
     if session_block:
-        # OFF-MARKET: block total
+        # OFF-MARKET & ASIAN (HARD_BLOCK): block total tanpa pengecualian skor
         dec_L = 'SKIP'
         code_L = 'SKIP'
         dec_S = 'SKIP'
@@ -1455,13 +1515,6 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         if ADJ_S < 40:
             dec_S, code_S = 'SKIP', 'SKIP'
             session_override_reason += f"SHORT skip: Sesi NY skor {ADJ_S:.1f} < 40. "
-    elif session_block_type == 'CONDITIONAL_ASIAN':
-        if ADJ_L < 55:
-            dec_L, code_L = 'SKIP', 'SKIP'
-            session_override_reason += f"LONG skip: Sesi ASIAN skor {ADJ_L:.1f} < 55. "
-        if ADJ_S < 55:
-            dec_S, code_S = 'SKIP', 'SKIP'
-            session_override_reason += f"SHORT skip: Sesi ASIAN skor {ADJ_S:.1f} < 55. "
     elif session_block_type == 'CONDITIONAL_OTHER':
         if ADJ_L < 45:
             dec_L, code_L = 'SKIP', 'SKIP'
@@ -1616,7 +1669,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             'pnl_pct': pnl_pct,
             'bos_val': bos_val, 'funding_val': funding_val,
             'buy_liq_val': buy_liq_val, 'sell_liq_val': sell_liq_val,
-            # [P1] Dynamic liquidity fields
+            # [P1] Dynamic liquidity fields — LONG side
             'dyn_buy_liq': round(dyn_buy_liq, 8) if dyn_buy_liq is not None else None,
             'swing_low_20': round(swing_low_20, 8) if swing_low_20 is not None else None,
             'dist_to_liq': round(dist_to_liq, 4) if dist_to_liq is not None else None,
@@ -1625,6 +1678,17 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
                 else 'SWEET_SPOT' if (dist_to_liq is not None and dist_to_liq <= 5.0)
                 else 'WARNING' if (dist_to_liq is not None and dist_to_liq <= 10.0)
                 else 'GAGAL' if (dist_to_liq is not None and dist_to_liq > 10.0)
+                else 'N/A'
+            ),
+            # [P1] Dynamic liquidity fields — SHORT side
+            'dyn_sell_liq': round(dyn_sell_liq, 8) if dyn_sell_liq is not None else None,
+            'swing_high_20': round(swing_high_20, 8) if swing_high_20 is not None else None,
+            'dist_to_sell_liq': round(dist_to_sell_liq, 4) if dist_to_sell_liq is not None else None,
+            's2_zone': (
+                'SKIP' if (dist_to_sell_liq is not None and dist_to_sell_liq < 1.0)
+                else 'SWEET_SPOT' if (dist_to_sell_liq is not None and dist_to_sell_liq <= 5.0)
+                else 'WARNING' if (dist_to_sell_liq is not None and dist_to_sell_liq <= 10.0)
+                else 'GAGAL' if (dist_to_sell_liq is not None and dist_to_sell_liq > 10.0)
                 else 'N/A'
             ),
             # [P4] StochRSI Gatekeeper
