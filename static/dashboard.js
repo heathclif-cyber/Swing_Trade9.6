@@ -195,7 +195,23 @@ const FEATURE_LABELS = { OI:'Open Interest Change', Vol:'Relative Volume (MA20)'
 const FEATURE_UNIT = { TakerBuy:'%',RSI:'',OI:'%',Vol:'%',ATR:'%',CVD:'%',EMA21:'%',EMA50:'%',EMA200:'%' };
 
 function renderQuantAnalysis(quant, state) {
-    if (!quant) { document.getElementById('quantDecisionName').textContent = 'DATA INSUFFICIENT'; document.getElementById('quantScoreSummary').textContent = 'Need ≥22 candles of 4H data'; return; }
+    if (!quant) { 
+        document.getElementById('quantDecisionName').textContent = 'DATA INSUFFICIENT'; 
+        document.getElementById('quantScoreSummary').textContent = 'Need ≥22 candles of 4H data'; 
+        document.getElementById('quantDecisionName').className = 'decision-name color-SKIP';
+        if (document.getElementById('decisionBanner')) document.getElementById('decisionBanner').className = 'quant-decision-banner decision-SKIP';
+        if (document.getElementById('quantTotalBar')) document.getElementById('quantTotalBar').style.width = '0%';
+        if (document.getElementById('quantTotalPts')) document.getElementById('quantTotalPts').textContent = '—/71';
+        if (document.getElementById('activePosBanner')) document.getElementById('activePosBanner').innerHTML = '';
+        if (document.getElementById('featureGrid')) document.getElementById('featureGrid').innerHTML = '<div style="color:var(--text-3);padding:20px;text-align:center;grid-column:1/-1">Belum ada data cukup untuk analisis.</div>';
+        if (document.getElementById('slLevels')) document.getElementById('slLevels').innerHTML = '';
+        if (document.getElementById('tpLevels')) document.getElementById('tpLevels').innerHTML = '';
+        if (document.getElementById('rrMatrix')) document.getElementById('rrMatrix').innerHTML = '';
+        if (document.getElementById('exitSignalBox')) document.getElementById('exitSignalBox').innerHTML = '';
+        if (document.getElementById('quantNarrative')) document.getElementById('quantNarrative').innerHTML = '';
+        if (document.getElementById('marketContext')) document.getElementById('marketContext').innerHTML = '<span style="color:var(--text-3);font-size:12px">—</span>';
+        return; 
+    }
     const data = quant[activeQuantTab];
     if (!data) return;
     const ep = state?.user_input?.entry_price || 0;
