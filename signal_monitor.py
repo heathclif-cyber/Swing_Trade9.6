@@ -356,6 +356,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "tp1_alerted": False,
                 "tp2_alerted": False,
                 "tp3_alerted": False,
+                # ── [EMA-50 SURFER] Runner Mode fields ──────────
+                "runner_active": False,   # True setelah TP3 tercapai
+                "runner_sl": None,        # Level SL dinamis runner (float)
+                "runner_side": None,      # 'LONG' atau 'SHORT'
+                "runner_closed_alerted": False,  # Sudah kirim notif close runner?
             })
             cooldown        = 4 * 3600
             time_since_last = now_ts - state["last_alert_ts"]
@@ -415,64 +420,193 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             if not kill_switch:
                 state["kill_alerted"] = False
 
-            # ── TRACKING TAKE PROFIT 1, 2, 3 (BARU) ─────────────────
+            # ── [EMA-50 SURFER] TRACKING TP + RUNNER MODE ────────────
+            # Strategi: TP1/TP2 partial exit → TP3 aktifkan Runner Mode.
+            # Runner Mode: posisi TIDAK di-close di TP3, SL dinamis ikuti EMA-50.
+            # Close hanya jika harga menembus SL Runner.
             if is_active:
                 high_price = float(df.iloc[-1]["High"])
+                low_price  = float(df.iloc[-1]["Low"])
+                ema50_abs  = float(df["EMA_50"].iloc[-1]) if "EMA_50" in df.columns else None
+
                 tp1 = lvl_L['tp1']
                 tp2 = lvl_L['tp2']
                 tp3 = lvl_L['tp3']
+                tp1_s = lvl_S['tp1']
+                tp2_s = lvl_S['tp2']
+                tp3_s = lvl_S['tp3']
 
-                # Cek Hold Recommendation berdasarkan analisis momentum
-                mom_signal  = mom_hold.get("signal", False)
-                mom_reasons = " · ".join(mom_hold.get("reasons", [])[:2])
-                hold_reco = (
-                    f"✅ <b>REKOMENDASI HOLD</b> (Momentum masih kuat naik: {mom_reasons})"
-                    if mom_signal
-                    else "⚠️ <b>REKOMENDASI EXIT</b> (Momentum melemah, segera Take Profit)"
-                )
+                # ── Deteksi sisi posisi aktif (LONG / SHORT) ──────────
+                is_long_trade  = (avg_entry is not None) and (tp1 > avg_entry)
+                is_short_trade = (avg_entry is not None) and (tp1 < avg_entry)
 
-                # TP 1 Hit
-                if high_price >= tp1 and not state.get("tp1_alerted"):
-                    _send_telegram(
-                        f"🎯 <b>TP1 TERCAPAI — {symbol}</b>\n"
-                        f"{'\u2500'*28}\n"
-                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
-                        f"Level TP1: ${tp1:.6f}\n\n"
-                        f"Tindakan: <b>EXIT 30%</b> & GESER SL KE ENTRY (Breakeven)\n\n"
-                        f"{hold_reco}"
-                    )
-                    state["tp1_alerted"] = True
-                    _save_alert_state(_alert_state)
+                # ── RUNNER MODE CHECK (prioritas utama jika sudah TP3) ───
+                if state.get("runner_active") and ema50_abs is not None:
+                    runner_sl   = state.get("runner_sl")
+                    runner_side = state.get("runner_side", "LONG")
+                    pnl_str     = ""
+                    if avg_entry:
+                        pnl_pct = ((close_price / avg_entry) - 1) * 100
+                        if runner_side == "SHORT":
+                            pnl_pct = ((avg_entry / close_price) - 1) * 100
+                        pnl_str = f"{pnl_pct:+.2f}%"
 
-                # TP 2 Hit
-                if high_price >= tp2 and not state.get("tp2_alerted"):
-                    _send_telegram(
-                        f"🎯🎯 <b>TP2 TERCAPAI — {symbol}</b>\n"
-                        f"{'\u2500'*28}\n"
-                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
-                        f"Level TP2: ${tp2:.6f}\n\n"
-                        f"Tindakan: <b>EXIT 40%</b> & GESER SL KE TP1\n\n"
-                        f"{hold_reco}"
-                    )
-                    state["tp2_alerted"] = True
-                    _save_alert_state(_alert_state)
+                    if runner_side == "LONG":
+                        # Update SL runner: selalu naik, tidak boleh turun
+                        new_runner_sl = max(runner_sl or 0.0, ema50_abs)
+                        if new_runner_sl != runner_sl:
+                            state["runner_sl"] = new_runner_sl
+                            _save_alert_state(_alert_state)
+                            _send_telegram(
+                                f"🏄 <b>RUNNER UPDATE — {symbol} (LONG)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${close_price:.6f}</b> | PnL: <b>{pnl_str}</b>\n"
+                                f"SL Runner baru: <b>${new_runner_sl:.6f}</b> (EMA-50)\n"
+                                f"📌 Posisi terus berjalan. Close hanya jika harga tembus SL."
+                            )
+                        # CLOSE jika harga <= SL runner
+                        if low_price <= (state["runner_sl"] or 0.0) and not state.get("runner_closed_alerted"):
+                            _send_telegram(
+                                f"🔔 <b>CLOSE RUNNER — {symbol} (LONG)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga Low: <b>${low_price:.6f}</b>\n"
+                                f"SL Runner: ${state['runner_sl']:.6f} (EMA-50)\n"
+                                f"PnL: <b>{pnl_str}</b>\n\n"
+                                f"✅ <b>Closed Runner at EMA-50.</b>\n"
+                                f"Sisa posisi (30%) dapat di-close sekarang."
+                            )
+                            state["runner_closed_alerted"] = True
+                            state["runner_active"] = False
+                            _save_alert_state(_alert_state)
 
-                # TP 3 Hit
-                if high_price >= tp3 and not state.get("tp3_alerted"):
-                    _send_telegram(
-                        f"🚀 <b>TP3 TERCAPAI (FINAL) — {symbol}</b>\n"
-                        f"{'\u2500'*28}\n"
-                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
-                        f"Tindakan: <b>EXIT SISA 30%</b>. Trade Selesai."
-                    )
-                    state["tp3_alerted"] = True
-                    _save_alert_state(_alert_state)
+                    elif runner_side == "SHORT":
+                        # Update SL runner: selalu turun, tidak boleh naik
+                        new_runner_sl = min(runner_sl or float("inf"), ema50_abs)
+                        if new_runner_sl != runner_sl:
+                            state["runner_sl"] = new_runner_sl
+                            _save_alert_state(_alert_state)
+                            _send_telegram(
+                                f"🏄 <b>RUNNER UPDATE — {symbol} (SHORT)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${close_price:.6f}</b> | PnL: <b>{pnl_str}</b>\n"
+                                f"SL Runner baru: <b>${new_runner_sl:.6f}</b> (EMA-50)\n"
+                                f"📌 Posisi terus berjalan. Close hanya jika harga tembus SL."
+                            )
+                        # CLOSE jika harga >= SL runner
+                        if high_price >= (state["runner_sl"] or float("inf")) and not state.get("runner_closed_alerted"):
+                            _send_telegram(
+                                f"🔔 <b>CLOSE RUNNER — {symbol} (SHORT)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga High: <b>${high_price:.6f}</b>\n"
+                                f"SL Runner: ${state['runner_sl']:.6f} (EMA-50)\n"
+                                f"PnL: <b>{pnl_str}</b>\n\n"
+                                f"✅ <b>Closed Runner at EMA-50.</b>\n"
+                                f"Sisa posisi (30%) dapat di-close sekarang."
+                            )
+                            state["runner_closed_alerted"] = True
+                            state["runner_active"] = False
+                            _save_alert_state(_alert_state)
 
-            # Reset alert TP jika tidak ada posisi (sudah terjual/clear)
-            if not is_active and state.get("tp1_alerted"):
-                state["tp1_alerted"] = False
-                state["tp2_alerted"] = False
-                state["tp3_alerted"] = False
+                # ── TP TRACKING (hanya jika belum runner mode) ────────
+                elif not state.get("runner_active"):
+
+                    if is_long_trade:
+                        # ── TP1 LONG ────────────────────────────────
+                        if high_price >= tp1 and not state.get("tp1_alerted"):
+                            _send_telegram(
+                                f"🎯 <b>TP1 TERCAPAI — {symbol} (LONG)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${high_price:.6f}</b> | TP1: ${tp1:.6f}\n\n"
+                                f"Tindakan: <b>EXIT 30%</b>\n"
+                                f"SL: Geser ke Entry ${avg_entry:.6f} (Breakeven)"
+                            )
+                            state["tp1_alerted"] = True
+                            _save_alert_state(_alert_state)
+
+                        # ── TP2 LONG ────────────────────────────────
+                        if high_price >= tp2 and not state.get("tp2_alerted"):
+                            _send_telegram(
+                                f"🎯🎯 <b>TP2 TERCAPAI — {symbol} (LONG)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${high_price:.6f}</b> | TP2: ${tp2:.6f}\n\n"
+                                f"Tindakan: <b>EXIT 40%</b>\n"
+                                f"SL: Geser ke TP1 ${tp1:.6f}"
+                            )
+                            state["tp2_alerted"] = True
+                            _save_alert_state(_alert_state)
+
+                        # ── TP3 LONG → AKTIFKAN RUNNER MODE ─────────
+                        if high_price >= tp3 and not state.get("tp3_alerted"):
+                            init_runner_sl = max(tp2, ema50_abs) if ema50_abs else tp2
+                            state["tp3_alerted"]          = True
+                            state["runner_active"]        = True
+                            state["runner_sl"]            = init_runner_sl
+                            state["runner_side"]          = "LONG"
+                            state["runner_closed_alerted"] = False
+                            _save_alert_state(_alert_state)
+                            _send_telegram(
+                                f"🚀 <b>TP3 + RUNNER MODE AKTIF — {symbol} (LONG)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${high_price:.6f}</b> | TP3: ${tp3:.6f}\n\n"
+                                f"Tindakan: <b>EXIT 40%</b> (sisa 30% jadi Runner)\n"
+                                f"SL Runner awal: <b>${init_runner_sl:.6f}</b> (max TP2, EMA-50)\n\n"
+                                f"🏄 <b>EMA-50 SURFER aktif.</b> Posisi terus berjalan.\n"
+                                f"Bot akan alert saat SL Runner tertembus."
+                            )
+
+                    elif is_short_trade:
+                        # ── TP1 SHORT ───────────────────────────────
+                        if low_price <= tp1_s and not state.get("tp1_alerted"):
+                            _send_telegram(
+                                f"🎯 <b>TP1 TERCAPAI — {symbol} (SHORT)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${low_price:.6f}</b> | TP1: ${tp1_s:.6f}\n\n"
+                                f"Tindakan: <b>EXIT 30%</b>\n"
+                                f"SL: Geser ke Entry ${avg_entry:.6f} (Breakeven)"
+                            )
+                            state["tp1_alerted"] = True
+                            _save_alert_state(_alert_state)
+
+                        # ── TP2 SHORT ───────────────────────────────
+                        if low_price <= tp2_s and not state.get("tp2_alerted"):
+                            _send_telegram(
+                                f"🎯🎯 <b>TP2 TERCAPAI — {symbol} (SHORT)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${low_price:.6f}</b> | TP2: ${tp2_s:.6f}\n\n"
+                                f"Tindakan: <b>EXIT 40%</b>\n"
+                                f"SL: Geser ke TP1 ${tp1_s:.6f}"
+                            )
+                            state["tp2_alerted"] = True
+                            _save_alert_state(_alert_state)
+
+                        # ── TP3 SHORT → AKTIFKAN RUNNER MODE ────────
+                        if low_price <= tp3_s and not state.get("tp3_alerted"):
+                            init_runner_sl = min(tp2_s, ema50_abs) if ema50_abs else tp2_s
+                            state["tp3_alerted"]          = True
+                            state["runner_active"]        = True
+                            state["runner_sl"]            = init_runner_sl
+                            state["runner_side"]          = "SHORT"
+                            state["runner_closed_alerted"] = False
+                            _save_alert_state(_alert_state)
+                            _send_telegram(
+                                f"🚀 <b>TP3 + RUNNER MODE AKTIF — {symbol} (SHORT)</b>\n"
+                                f"{'─'*28}\n"
+                                f"Harga: <b>${low_price:.6f}</b> | TP3: ${tp3_s:.6f}\n\n"
+                                f"Tindakan: <b>EXIT 40%</b> (sisa 30% jadi Runner)\n"
+                                f"SL Runner awal: <b>${init_runner_sl:.6f}</b> (min TP2, EMA-50)\n\n"
+                                f"🏄 <b>EMA-50 SURFER aktif.</b> Posisi terus berjalan.\n"
+                                f"Bot akan alert saat SL Runner tertembus."
+                            )
+
+            # Reset semua state TP & runner jika posisi sudah tidak aktif
+            if not is_active and (state.get("tp1_alerted") or state.get("runner_active")):
+                state["tp1_alerted"]           = False
+                state["tp2_alerted"]           = False
+                state["tp3_alerted"]           = False
+                state["runner_active"]         = False
+                state["runner_sl"]             = None
+                state["runner_side"]           = None
+                state["runner_closed_alerted"] = False
                 _save_alert_state(_alert_state)
 
             # ── EXIT SIGNALS ───────────────────────────────
