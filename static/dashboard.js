@@ -55,7 +55,19 @@ function renderStatusStrip(json) {
     const cp = at.current_price || 0;
     document.getElementById('statPrice').textContent = cp ? '$' + cp.toFixed(5) : '—';
     const ep = ui.entry_price || 0;
-    document.getElementById('statEntry').textContent = ep ? '$' + ep.toFixed(5) : 'No Entry';
+    // Build position badge: LONG/SHORT + Spot/Futures + Leverage
+    let posBadge = '';
+    if (pos.side) {
+        const sideColor = pos.side === 'SHORT' ? 'var(--accent-red)' : 'var(--accent-green)';
+        const sideIcon  = pos.side === 'SHORT' ? '🔴' : '🟢';
+        posBadge += `<span style="color:${sideColor};font-size:10px;margin-left:5px;font-weight:700">${sideIcon} ${pos.side}</span>`;
+    }
+    if (pos.market_type === 'FUTURES' && pos.leverage > 1) {
+        posBadge += `<span style="color:var(--accent-yellow);font-size:10px;margin-left:4px;font-weight:700">⚡${pos.leverage}x</span>`;
+    }
+    const entryEl = document.getElementById('statEntry');
+    if (ep) { entryEl.innerHTML = `$${ep.toFixed(5)}${posBadge}`; }
+    else { entryEl.textContent = 'No Entry'; }
     const pnl = at.current_pnl_pct || 0;
     const pnlEl = document.getElementById('statPnl');
     pnlEl.textContent = ep ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%' : '—';
@@ -608,22 +620,54 @@ function prefillEntryForm() {
 
 function closeEntryModal() { document.getElementById('entryModal').classList.remove('show'); }
 
+/* ── UI HELPERS ── Market Type / Side toggles ───────────────────────────── */
+function onMarketTypeChange() {
+    const mt = document.getElementById('entryMarketType').value;
+    const lg = document.getElementById('leverageGroup');
+    lg.style.display = mt === 'FUTURES' ? 'flex' : 'none';
+    // SHORT diperbolehkan hanya di FUTURES; jika pilih SPOT paksa LONG
+    const sideEl = document.getElementById('entrySide');
+    if (mt === 'SPOT') {
+        sideEl.value = 'LONG';
+        sideEl.disabled = true;   // SPOT selalu LONG
+    } else {
+        sideEl.disabled = false;
+    }
+    onEntrySideChange();
+}
+function onEntrySideChange() {
+    const side = document.getElementById('entrySide').value;
+    const btn  = document.getElementById('btnSaveEntry');
+    if (side === 'SHORT') {
+        btn.style.background = 'var(--accent-red)';
+        btn.textContent = '🔴 Open SHORT Position';
+    } else {
+        btn.style.background = 'var(--accent-blue)';
+        btn.textContent = '🟢 Open LONG Position';
+    }
+}
+
 async function saveEntry() {
-    const sym = document.getElementById('entrySymbol').value;
-    const ep  = parseFloat(document.getElementById('entryPrice').value);
-    const qty = parseFloat(document.getElementById('entryQty').value);
+    const sym        = document.getElementById('entrySymbol').value;
+    const side       = document.getElementById('entrySide').value;
+    const marketType = document.getElementById('entryMarketType').value;
+    const leverage   = parseInt(document.getElementById('entryLeverage').value) || 1;
+    const ep         = parseFloat(document.getElementById('entryPrice').value);
+    const qty        = parseFloat(document.getElementById('entryQty').value);
     if (!sym) { showAlert('danger','⚠️ Pilih coin dulu'); return; }
     if (!ep || ep <= 0) { showAlert('danger','⚠️ Entry price harus > 0'); return; }
     if (!qty || qty <= 0) { showAlert('danger','⚠️ Quantity harus > 0'); return; }
+    if (marketType === 'FUTURES' && leverage < 1) { showAlert('danger','⚠️ Leverage minimal 1x'); return; }
     try {
         const r = await fetch('/api/trade-entries', {
             method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ symbol:sym, entry_price:ep, qty:qty })
+            body: JSON.stringify({ symbol:sym, entry_price:ep, qty:qty, side:side,
+                                   market_type:marketType, leverage:leverage })
         });
         const j = await r.json();
         if (j.success) {
-            showAlert('success', `✅ Entry #${j.summary.num_entries} added @ $${ep}`);
-            setTimeout(hideAlert, 3000);
+            showAlert('success', `✅ ${side} Entry #${j.summary.num_entries} @ $${ep} [${marketType}${marketType==='FUTURES'?' x'+leverage:''}]`);
+            setTimeout(hideAlert, 4000);
             await loadTradeEntries(); renderEntryList();
             document.getElementById('entryPrice').value = '';
             document.getElementById('entryQty').value = '';
@@ -710,27 +754,55 @@ function switchModalTab(tab) {
 function renderEntryList() {
     const c = document.getElementById('entryListBody');
     const syms = Object.keys(tradeEntries);
-    if (!syms.length) { c.innerHTML = '<div class="entry-empty">Belum ada entry. Tambahkan via form Buy/Entry.</div>'; return; }
+    if (!syms.length) { c.innerHTML = '<div class="entry-empty">Belum ada posisi. Buka via tab Open Pos.</div>'; return; }
     let html = '';
     syms.forEach(sym => {
-        const cd = tradeEntries[sym]; const entries = cd.entries||[]; const sales = cd.sales||[];
-        const sm = tradeSummaries[sym]||{};
+        const cd = tradeEntries[sym];
+        const entries = cd.entries || [];
+        const sales   = cd.sales   || [];
+        const sm = tradeSummaries[sym] || {};
         if (!entries.length && !sales.length) return;
+
+        // Position meta badges
+        const side     = cd.position_side || 'LONG';
+        const mkt      = cd.market_type   || 'SPOT';
+        const lev      = cd.leverage      || 1;
+        const sideClr  = side === 'SHORT' ? 'badge-red' : 'badge-green';
+        const sideIcon  = side === 'SHORT' ? '🔴' : '🟢';
+        const mktBadge  = mkt === 'FUTURES'
+            ? `<span class="badge badge-yellow" style="font-size:9px;padding:2px 7px;margin-left:4px">⚡${lev}x</span>`
+            : `<span class="badge badge-blue" style="font-size:9px;padding:2px 7px;margin-left:4px">📈 SPOT</span>`;
+
         html += `<div style="background:rgba(99,125,255,.06);border:1px solid rgba(99,125,255,.18);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-            <div><strong>${sym}</strong> — Rem: <strong>${(sm.remaining_qty||0).toFixed(4)}</strong> | P&L: <strong class="${(sm.realized_pnl||0)>=0?'val-pos':'val-neg'}">$${(sm.realized_pnl||0).toFixed(2)}</strong></div>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <strong>${sym}</strong>
+                <span class="badge ${sideClr}" style="font-size:9px;padding:2px 7px">${sideIcon} ${side}</span>
+                ${mktBadge}
+                <span style="font-size:12px;color:var(--text-2)">Rem: <strong>${(sm.remaining_qty||0).toFixed(4)}</strong></span>
+                <span style="font-size:12px">P&L: <strong class="${(sm.realized_pnl||0)>=0?'val-pos':'val-neg'}">$${(sm.realized_pnl||0).toFixed(2)}</strong></span>
+            </div>
             <button class="btn-del-e" onclick="deleteAllEntries('${sym}')">✕ Clear</button></div>`;
-        entries.forEach((e,i) => {
+
+        entries.forEach((e, i) => {
             html += `<div class="entry-item" style="margin-left:12px;border-left:3px solid var(--accent-green)">
-                <div><div style="font-size:11px;color:var(--accent-green);font-weight:700">BUY #${i+1}</div><div style="font-size:11px;color:var(--text-3)">Qty: ${e.qty} · ${e.date||''}</div></div>
-                <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--mono);color:var(--accent-green);font-weight:600">$${e.price}</span><button class="btn-del-e" onclick="deleteSingleEntry('${sym}',${i})">✕</button></div></div>`;
+                <div><div style="font-size:11px;color:var(--accent-green);font-weight:700">OPEN #${i+1}</div>
+                <div style="font-size:11px;color:var(--text-3)">Qty: ${e.qty} · ${e.date||''}</div></div>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-family:var(--mono);color:var(--accent-green);font-weight:600">$${e.price}</span>
+                    <button class="btn-del-e" onclick="deleteSingleEntry('${sym}',${i})">✕</button>
+                </div></div>`;
         });
-        sales.forEach((s,i) => {
+        sales.forEach((s, i) => {
             html += `<div class="entry-item" style="margin-left:12px;border-left:3px solid var(--accent-red)">
-                <div><div style="font-size:11px;color:var(--accent-red);font-weight:700">SELL #${i+1}</div><div style="font-size:11px;color:var(--text-3)">Qty: ${s.qty} · ${s.date||''}</div></div>
-                <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--mono);color:var(--accent-red);font-weight:600">$${s.price}</span><button class="btn-del-e" onclick="deleteSaleEntry('${sym}',${i})">✕</button></div></div>`;
+                <div><div style="font-size:11px;color:var(--accent-red);font-weight:700">CLOSE #${i+1}</div>
+                <div style="font-size:11px;color:var(--text-3)">Qty: ${s.qty} · ${s.date||''}</div></div>
+                <div style="display:flex;align-items:center;gap:10px">
+                    <span style="font-family:var(--mono);color:var(--accent-red);font-weight:600">$${s.price}</span>
+                    <button class="btn-del-e" onclick="deleteSaleEntry('${sym}',${i})">✕</button>
+                </div></div>`;
         });
     });
-    c.innerHTML = html;
+    c.innerHTML = html || '<div class="entry-empty">Belum ada data posisi.</div>';
 }
 
 /* ── THEME ───────────────────────────────────────────────────────────────── */

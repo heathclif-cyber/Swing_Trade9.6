@@ -207,9 +207,18 @@ def _ensure_pg_table(conn) -> None:  # type: ignore
         logger.warning(f"Failed to create kv_store table: {e}")
 
 def _migrate_format(data: dict) -> dict:  # type: ignore
-    """Migrate format lama (single entry_price) ke multi-entry."""
+    """Migrate format lama (single entry_price) ke multi-entry.
+    Tambahkan field baru: position_side, market_type, leverage jika belum ada.
+    """
     for sym, val in data.items():
         if isinstance(val, dict):
+            # Defaults untuk field baru
+            if 'position_side' not in val:
+                val['position_side'] = 'LONG'       # LONG | SHORT
+            if 'market_type' not in val:
+                val['market_type'] = 'SPOT'          # SPOT | FUTURES
+            if 'leverage' not in val:
+                val['leverage'] = 1                  # 1x untuk SPOT, >1 untuk FUTURES
             if 'sales' not in val:
                 val['sales'] = []
             if 'entry_price' in val and 'entries' not in val:
@@ -250,7 +259,18 @@ def load_trade_entries() -> dict:  # type: ignore
     return {}
 
 def save_trade_entries(entries: dict) -> None:  # type: ignore
-    """Simpan trade entries — PostgreSQL jika DATABASE_URL ada, fallback ke file JSON."""
+    """Simpan trade entries — PostgreSQL jika DATABASE_URL ada, fallback ke file JSON.
+    
+    [DATA GUARD] Jika DATABASE_URL aktif dan data kosong {}, tolak penyimpanan
+    untuk mencegah penghapusan (wipe) data existing di database.
+    """
+    # ── DATA GUARD: blokir save dict kosong ke PostgreSQL ──
+    if DATABASE_URL and not entries:
+        logger.critical(
+            "[DATA GUARD] DITOLAK: Mencoba save data kosong {} ke PostgreSQL. "
+            "Save diabaikan untuk mencegah data loss."
+        )
+        return
     conn = _get_pg_conn()
     if conn:
         try:
@@ -278,62 +298,71 @@ def save_trade_entries(entries: dict) -> None:  # type: ignore
 
 
 def get_entry_summary(symbol: str) -> dict:  # type: ignore
-    """Return entry & sales summary: lists, avg entry, total remaining qty, cost, and realized pnl."""
+    """Return entry & sales summary dengan dukungan penuh LONG/SHORT, Spot/Futures, Leverage.
+    
+    - position_side: 'LONG' | 'SHORT' — membalik arah PnL untuk SHORT.
+    - market_type:   'SPOT' | 'FUTURES'
+    - leverage:      int, default 1 (SPOT). Digunakan untuk hitung leveraged PnL.
+    """
     data = load_trade_entries()
     coin_data = data.get(symbol, {})
-    entry_list = coin_data.get('entries', [])
-    sales_list = coin_data.get('sales', [])
+    entry_list    = coin_data.get('entries', [])
+    sales_list    = coin_data.get('sales', [])
+    position_side = coin_data.get('position_side', 'LONG')
+    market_type   = coin_data.get('market_type', 'SPOT')
+    leverage      = int(coin_data.get('leverage', 1))
 
     total_entry_cost = sum(e['price'] * e['qty'] for e in entry_list)
-    total_entry_qty = sum(e['qty'] for e in entry_list)
-    avg_entry_price = total_entry_cost / total_entry_qty if total_entry_qty > 0 else 0.0
+    total_entry_qty  = sum(e['qty'] for e in entry_list)
+    avg_entry_price  = total_entry_cost / total_entry_qty if total_entry_qty > 0 else 0.0
 
-    total_sold_qty = sum(s['qty'] for s in sales_list)
+    total_sold_qty     = sum(s['qty'] for s in sales_list)
     total_sold_revenue = sum(s['price'] * s['qty'] for s in sales_list)
-    
-    # Realized PnL based on chronological rolling average cost
+
+    # Realized PnL: chronological rolling-average, direction-aware
     events = []
     for e in entry_list:
-        events.append(('buy', e.get('date', ''), e.get('price', 0), e.get('qty', 0)))
+        events.append(('open', e.get('date', ''), e.get('price', 0), e.get('qty', 0)))
     for s in sales_list:
-        events.append(('sell', s.get('date', ''), s.get('price', 0), s.get('qty', 0)))
+        events.append(('close', s.get('date', ''), s.get('price', 0), s.get('qty', 0)))
     events.sort(key=lambda x: x[1])
 
     current_qty = 0.0
     current_cost = 0.0
     realized_pnl = 0.0
-    rolling_avg_cost = 0.0
     for type_, date_, price, qty in events:
-        if type_ == 'buy':
+        if type_ == 'open':
             current_cost += price * qty
-            current_qty += qty
-        elif type_ == 'sell':
-            rolling_avg = current_cost / current_qty if current_qty > 0 else 0.0
-            realized_pnl += (price - rolling_avg) * qty
-            current_cost -= rolling_avg * qty
-            current_qty -= qty
-            current_qty = max(0.0, current_qty)
-            current_cost = max(0.0, current_cost)
-    
-    rolling_avg_cost = current_cost / current_qty if current_qty > 0 else avg_entry_price
+            current_qty  += qty
+        elif type_ == 'close' and current_qty > 0:
+            rolling_avg   = current_cost / current_qty
+            raw_pnl_per_unit = (rolling_avg - price) if position_side == 'SHORT' else (price - rolling_avg)
+            realized_pnl  += raw_pnl_per_unit * qty * leverage
+            current_cost  -= rolling_avg * qty
+            current_qty   -= qty
+            current_qty    = max(0.0, current_qty)
+            current_cost   = max(0.0, current_cost)
 
-    remaining_qty = max(0.0, current_qty)
-    remaining_cost = max(0.0, current_cost)
+    rolling_avg_cost = current_cost / current_qty if current_qty > 0 else avg_entry_price
+    remaining_qty    = max(0.0, current_qty)
+    remaining_cost   = max(0.0, current_cost)
 
     return {
-        'entries': entry_list,
-        'sales': sales_list,
-        'avg_price': round(avg_entry_price, 8),
-        'rolling_avg_cost': round(rolling_avg_cost, 8),
-        'total_qty': round(total_entry_qty, 6),
-        'remaining_qty': round(remaining_qty, 6),
-        'remaining_cost': round(remaining_cost, 4),
-        'total_cost': round(total_entry_cost, 4),
-        'num_entries': len(entry_list),
-        'num_sales': len(sales_list),
-        'total_sold_qty': round(total_sold_qty, 6),
+        'entries': entry_list, 'sales': sales_list,
+        'position_side': position_side,
+        'market_type':   market_type,
+        'leverage':      leverage,
+        'avg_price':          round(avg_entry_price, 8),
+        'rolling_avg_cost':   round(rolling_avg_cost, 8),
+        'total_qty':          round(total_entry_qty, 6),
+        'remaining_qty':      round(remaining_qty, 6),
+        'remaining_cost':     round(remaining_cost, 4),
+        'total_cost':         round(total_entry_cost, 4),
+        'num_entries':        len(entry_list),
+        'num_sales':          len(sales_list),
+        'total_sold_qty':     round(total_sold_qty, 6),
         'total_sold_revenue': round(total_sold_revenue, 4),
-        'realized_pnl': round(realized_pnl, 4)
+        'realized_pnl':       round(realized_pnl, 4),
     }
 
 
@@ -1096,12 +1125,19 @@ def api_data():
         total_sold_qty = entry_summary['total_sold_qty']
         total_sold_revenue = entry_summary['total_sold_revenue']
 
-        # PnL calculation based on REMAINING position
+        # PnL calculation — direction-aware (LONG/SHORT) + leverage
+        position_side = entry_summary.get('position_side', 'LONG')
+        market_type   = entry_summary.get('market_type', 'SPOT')
+        leverage      = entry_summary.get('leverage', 1)
         pnl_pct = 0.0
         floating_pnl_usd = 0.0
         if entry_price > 0 and remaining_qty > 0:
-            pnl_pct = round(((current_price - entry_price) / entry_price) * 100, 4)  # type: ignore[call-overload]
-            floating_pnl_usd = round((current_price - entry_price) * remaining_qty, 4)
+            if position_side == 'SHORT':
+                pnl_pct = round(((entry_price - current_price) / entry_price) * 100 * leverage, 4)  # type: ignore[call-overload]
+                floating_pnl_usd = round((entry_price - current_price) * remaining_qty * leverage, 4)
+            else:  # LONG / SPOT
+                pnl_pct = round(((current_price - entry_price) / entry_price) * 100 * leverage, 4)  # type: ignore[call-overload]
+                floating_pnl_usd = round((current_price - entry_price) * remaining_qty * leverage, 4)
 
         state = {
             "user_input": {
@@ -1119,16 +1155,19 @@ def api_data():
                 "floating_pnl_usd": floating_pnl_usd,
             },
             "position": {
-                "remaining_qty": remaining_qty,
-                "remaining_cost": remaining_cost,
-                "realized_pnl": realized_pnl,
-                "total_sold_qty": total_sold_qty,
-                "total_sold_revenue": total_sold_revenue,
-                "avg_entry_price": entry_summary['avg_price'],
-                "rolling_avg_cost": entry_summary['rolling_avg_cost'],
-                "num_entries": entry_summary['num_entries'],
-                "num_sales": entry_summary['num_sales'],
-                "is_closed": remaining_qty <= 0 and entry_summary['num_entries'] > 0,
+                "remaining_qty":     remaining_qty,
+                "remaining_cost":    remaining_cost,
+                "realized_pnl":      realized_pnl,
+                "total_sold_qty":    total_sold_qty,
+                "total_sold_revenue":total_sold_revenue,
+                "avg_entry_price":   entry_summary['avg_price'],
+                "rolling_avg_cost":  entry_summary['rolling_avg_cost'],
+                "num_entries":       entry_summary['num_entries'],
+                "num_sales":         entry_summary['num_sales'],
+                "is_closed":         remaining_qty <= 0 and entry_summary['num_entries'] > 0,
+                "side":              position_side,
+                "market_type":       market_type,
+                "leverage":          leverage,
             },
             "alerts_sent": coin_state["alerts_sent"],
         }
@@ -1234,8 +1273,14 @@ def api_get_trade_entries():
 def set_trade_entry():
     """
     TAMBAH satu entry baru untuk koin (DCA / Scaling-In).
-    Body JSON: { "symbol": "SUIUSDT", "entry_price": 1.055, "qty": 190.47, "allocated_capital": 200 }
-    Jika qty tidak disediakan, dihitung otomatis dari allocated_capital / entry_price.
+    Body JSON: { "symbol": "SUIUSDT", "entry_price": 1.055, "qty": 190.47,
+                 "allocated_capital": 200, "side": "LONG",
+                 "market_type": "SPOT", "leverage": 1 }
+    - side:        LONG | SHORT  (default: LONG)
+    - market_type: SPOT | FUTURES (default: SPOT)
+    - leverage:    integer >= 1  (default: 1, wajib > 1 untuk FUTURES)
+    - qty optional: dihitung dari allocated_capital / entry_price jika tidak dikirim.
+    - DCA diperbolehkan jika arah (side) sama dengan posisi yang sudah ada.
     """
     try:
         data = flask_request.get_json()  # type: ignore
@@ -1250,30 +1295,74 @@ def set_trade_entry():
         if entry_price <= 0:
             return jsonify({"success": False, "error": "Entry price must be > 0"}), 400
 
+        # ── Validasi parameter baru ──
+        side = data.get("side", "LONG").upper()
+        if side not in ("LONG", "SHORT"):
+            return jsonify({"success": False, "error": "side harus LONG atau SHORT"}), 400
+
+        market_type = data.get("market_type", "SPOT").upper()
+        if market_type not in ("SPOT", "FUTURES"):
+            return jsonify({"success": False, "error": "market_type harus SPOT atau FUTURES"}), 400
+
+        leverage = int(data.get("leverage", 1))
+        if leverage < 1:
+            return jsonify({"success": False, "error": "leverage minimal 1"}), 400
+        if market_type == "SPOT" and leverage > 1:
+            leverage = 1  # SPOT tidak support leverage—reset ke 1
+
         allocated_capital = float(data.get("allocated_capital", ALLOCATED_CAPITAL))
         qty = float(data.get("qty", 0))
         if qty <= 0:
             qty = allocated_capital / entry_price  # auto-calc qty
 
         entries = load_trade_entries()
+
         if symbol not in entries:
-            entries[symbol] = {'entries': [], 'allocated_capital': allocated_capital}
+            # Posisi baru
+            entries[symbol] = {
+                'entries': [], 'sales': [],
+                'allocated_capital': allocated_capital,
+                'position_side': side,
+                'market_type':   market_type,
+                'leverage':      leverage,
+            }
+        else:
+            # Cegah DCA ke arah berlawanan tanpa clear dulu
+            existing_side = entries[symbol].get('position_side', 'LONG')
+            existing_entries = entries[symbol].get('entries', [])
+            if existing_entries and existing_side != side:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Posisi {existing_side} masih aktif. "
+                        f"Clear posisi lama dulu sebelum membuka {side}."
+                    )
+                }), 409
+            # Update metadata posisi (leverage, market_type bisa diperbarui)
+            entries[symbol]['position_side'] = side
+            entries[symbol]['market_type']   = market_type
+            entries[symbol]['leverage']       = leverage
 
         # Tambah entry baru ke list
+        if 'entries' not in entries[symbol]:
+            entries[symbol]['entries'] = []
         new_entry = {
             'price': entry_price,
-            'qty': round(qty, 6),
-            'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'qty':   round(qty, 6),
+            'date':  datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
         entries[symbol]['entries'].append(new_entry)
         entries[symbol]['allocated_capital'] = allocated_capital
         save_trade_entries(entries)
 
         summary = get_entry_summary(symbol)
-        logger.info(f"💰 Entry added: {symbol} @ ${entry_price} x {qty:.4f} (Avg: ${summary['avg_price']})")
+        logger.info(
+            f"💰 Entry: {symbol} {side} {market_type} x{leverage} "
+            f"@ ${entry_price} qty={qty:.4f} (Avg: ${summary['avg_price']})"
+        )
         return jsonify({
             "success": True,
-            "message": f"{symbol} entry #{summary['num_entries']} added",
+            "message": f"{symbol} {side} entry #{summary['num_entries']} added",
             "summary": summary,
         })
     except Exception as e:

@@ -658,31 +658,54 @@ tbody tr:last-child td { border-bottom: none; }
             <button class="modal-close" onclick="closeEntryModal()">✕</button>
         </div>
         <div class="tabs" style="margin-top:0;margin-bottom:20px">
-            <button class="tab-btn active" id="tabEntry" onclick="switchModalTab('entry')">📥 Buy/Entry</button>
-            <button class="tab-btn" id="tabSell" onclick="switchModalTab('sell')">📤 Sell/Profit</button>
+            <button class="tab-btn active" id="tabEntry" onclick="switchModalTab('entry')">📥 Open Pos</button>
+            <button class="tab-btn" id="tabSell" onclick="switchModalTab('sell')">📤 Close Pos</button>
             <button class="tab-btn" id="tabHistory" onclick="switchModalTab('history')">📜 History</button>
         </div>
-        <div id="modalEntryForm" style="display:grid;gap:16px">
-            <div class="form-group"><label class="form-label">Select Coin</label><select id="entrySymbol" class="form-select"></select></div>
+        <div id="modalEntryForm" style="display:grid;gap:14px">
+            <!-- Row 1: Coin + Position Side -->
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Select Coin</label><select id="entrySymbol" class="form-select"></select></div>
+                <div class="form-group"><label class="form-label">Position Side</label>
+                    <select id="entrySide" class="form-select" onchange="onEntrySideChange()">
+                        <option value="LONG">🟢 LONG</option>
+                        <option value="SHORT">🔴 SHORT</option>
+                    </select>
+                </div>
+            </div>
+            <!-- Row 2: Market Type + Leverage -->
+            <div class="form-row">
+                <div class="form-group"><label class="form-label">Market Type</label>
+                    <select id="entryMarketType" class="form-select" onchange="onMarketTypeChange()">
+                        <option value="SPOT">📈 SPOT</option>
+                        <option value="FUTURES">⚡ FUTURES</option>
+                    </select>
+                </div>
+                <div class="form-group" id="leverageGroup" style="display:none">
+                    <label class="form-label">Leverage</label>
+                    <input type="number" id="entryLeverage" class="form-input" value="10" min="1" max="125" placeholder="e.g. 10">
+                </div>
+            </div>
+            <!-- Row 3: Price + Qty -->
             <div class="form-row">
                 <div class="form-group"><label class="form-label">Entry Price ($)</label><input type="number" step="any" id="entryPrice" class="form-input" placeholder="0.000"></div>
                 <div class="form-group"><label class="form-label">Quantity</label><input type="number" step="any" id="entryQty" class="form-input" placeholder="0.00"></div>
             </div>
-            <button class="btn-save" onclick="saveEntry()">💾 Record Buy Entry</button>
+            <button class="btn-save" id="btnSaveEntry" onclick="saveEntry()">💾 Open Position</button>
         </div>
-        <div id="modalSellForm" style="display:none;gap:16px">
+        <div id="modalSellForm" style="display:none;gap:14px">
             <div class="form-group"><label class="form-label">Select Coin</label><select id="sellSymbol" class="form-select"></select></div>
             <div class="form-row">
-                <div class="form-group"><label class="form-label">Sell Price ($)</label><input type="number" step="any" id="sellPriceInput" class="form-input" placeholder="0.000"></div>
+                <div class="form-group"><label class="form-label">Close Price ($)</label><input type="number" step="any" id="sellPriceInput" class="form-input" placeholder="0.000"></div>
                 <div class="form-group">
                     <label class="form-label" style="display:flex; justify-content:space-between">
                         Quantity
-                        <span onclick="setMaxSellQty()" style="cursor:pointer; color:var(--accent-blue); font-weight:700" title="Sell All Remaining">MAX</span>
+                        <span onclick="setMaxSellQty()" style="cursor:pointer; color:var(--accent-blue); font-weight:700" title="Close All Remaining">MAX</span>
                     </label>
                     <input type="number" step="any" id="sellQtyInput" class="form-input" placeholder="0.00">
                 </div>
             </div>
-            <button class="btn-save" style="background:var(--accent-red)" onclick="saveSell()">📤 Record Sell</button>
+            <button class="btn-save" style="background:var(--accent-red)" onclick="saveSell()">📤 Close Position</button>
         </div>
         <div id="modalHistory" style="display:none"><div id="entryListBody"></div></div>
     </div>
