@@ -666,7 +666,7 @@ tbody tr:last-child td { border-bottom: none; }
             <div class="form-group"><label class="form-label">Select Coin</label><select id="entrySymbol" class="form-select"></select></div>
             <div class="form-row">
                 <div class="form-group"><label class="form-label">Entry Price ($)</label><input type="number" step="any" id="entryPrice" class="form-input" placeholder="0.000"></div>
-                <div class="form-group"><label class="form-label">Capital ($)</label><input type="number" step="any" id="entryCapital" class="form-input" placeholder="200" value="200"></div>
+                <div class="form-group"><label class="form-label">Quantity</label><input type="number" step="any" id="entryQty" class="form-input" placeholder="0.00"></div>
             </div>
             <button class="btn-save" onclick="saveEntry()">💾 Record Buy Entry</button>
         </div>
@@ -674,7 +674,13 @@ tbody tr:last-child td { border-bottom: none; }
             <div class="form-group"><label class="form-label">Select Coin</label><select id="sellSymbol" class="form-select"></select></div>
             <div class="form-row">
                 <div class="form-group"><label class="form-label">Sell Price ($)</label><input type="number" step="any" id="sellPriceInput" class="form-input" placeholder="0.000"></div>
-                <div class="form-group"><label class="form-label">Quantity</label><input type="number" step="any" id="sellQtyInput" class="form-input" placeholder="0.00"></div>
+                <div class="form-group">
+                    <label class="form-label" style="display:flex; justify-content:space-between">
+                        Quantity
+                        <span onclick="setMaxSellQty()" style="cursor:pointer; color:var(--accent-blue); font-weight:700" title="Sell All Remaining">MAX</span>
+                    </label>
+                    <input type="number" step="any" id="sellQtyInput" class="form-input" placeholder="0.00">
+                </div>
             </div>
             <button class="btn-save" style="background:var(--accent-red)" onclick="saveSell()">📤 Record Sell</button>
         </div>
