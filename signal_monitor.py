@@ -440,11 +440,24 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["last_trailing_action"] = None
 
             # ── LONG SIGNAL ────────────────────────────────
+            # [FIX] Cek session_block — jangan kirim entry alert saat sesi diblokir
+            _session_block     = variables.get("session_block", False)
+            _session_blk_type  = variables.get("session_block_type", "NONE")
+            _session_blk_rsn   = variables.get("session_block_reason", "")
+
             new_signal_L = None
             if code_L == "FULL" and adj_L >= thr_full:
                 new_signal_L = "LONG_FULL"
             elif code_L == "HALF" and adj_L >= thr_half:
                 new_signal_L = "LONG_HALF"
+
+            # Blokir entry baru jika sesi diblokir total (OFF-MARKET / ASIAN)
+            if new_signal_L and _session_block:
+                logger.info(
+                    f"[{symbol}] LONG signal {new_signal_L} DIBLOKIR — "
+                    f"{_session_blk_type}: {_session_blk_rsn}"
+                )
+                new_signal_L = None
 
             if new_signal_L and (new_signal_L != state["last_signal"] or time_since_last > cooldown):
                 size_label = "FULL SIZE 🟢🟢" if new_signal_L == "LONG_FULL" else "HALF SIZE 🟡"
@@ -500,16 +513,27 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif code_S == "HALF" and adj_S >= thr_half:
                 new_signal_S = "SHORT_HALF"
 
+            # Blokir entry baru jika sesi diblokir total (OFF-MARKET / ASIAN)
+            if new_signal_S and _session_block:
+                logger.info(
+                    f"[{symbol}] SHORT signal {new_signal_S} DIBLOKIR — "
+                    f"{_session_blk_type}: {_session_blk_rsn}"
+                )
+                new_signal_S = None
+
             if new_signal_S and (new_signal_S != state["last_signal"] or time_since_last > cooldown):
                 size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
                 rr1        = lvl_S.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
                 wib        = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+                macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
                 _send_telegram(
                     f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                     f"{'─'*28}\n"
                     f"📊 Skor: <b>{adj_S:.0f}/71 pts</b> ({result['short']['pct']:.1f}%)\n"
                     f"🎯 Posisi: <b>{size_label}</b>\n"
+                    f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
+                    f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
                     f"{'─'*28}\n"
                     f"💰 <b>ENTRY</b>: ${close_price:.6f}\n"
                     f"✅ <b>Status Entry: BOLEH ENTRY SEKARANG</b>\n"
