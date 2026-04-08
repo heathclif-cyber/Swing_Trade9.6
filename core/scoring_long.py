@@ -1,5 +1,6 @@
 import pandas as pd
 from core.helpers import _last_val, safe_float
+from core.levels import get_atr_projections_long
 
 def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     # Extracted variables
@@ -311,11 +312,7 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
             tp_dedup_L.append((v, l))
     tp_pool_L = tp_dedup_L
 
-    _flat_L = [
-        (entry_val * 1.025, "flat fallback — no structure (+2.5%)"),
-        (entry_val * 1.046, "flat fallback — no structure (+4.6%)"),
-        (entry_val * 1.070, "flat fallback — no structure (+7.0%)"),
-    ]
+    _flat_L = get_atr_projections_long(entry_val, atr, ATR_MULT)
     tp1_L = tp_pool_L[0] if len(tp_pool_L) >= 1 else _flat_L[0]
     tp2_L = tp_pool_L[1] if len(tp_pool_L) >= 2 else _flat_L[1]
     tp3_L = tp_pool_L[2] if len(tp_pool_L) >= 3 else _flat_L[2]

@@ -1,5 +1,6 @@
 import pandas as pd
 from core.helpers import _last_val, safe_float
+from core.levels import get_atr_projections_short
 
 def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     last           = ctx['last']
@@ -270,11 +271,7 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             tp_dedup_S.append((v, l))
     tp_pool_S = tp_dedup_S
 
-    _flat_S = [
-        (entry_val * 0.975, "flat fallback — no structure (-2.5%)"),
-        (entry_val * 0.954, "flat fallback — no structure (-4.6%)"),
-        (entry_val * 0.930, "flat fallback — no structure (-7.0%)"),
-    ]
+    _flat_S = get_atr_projections_short(entry_val, atr, ATR_MULT)
     tp1_S = tp_pool_S[0] if len(tp_pool_S) >= 1 else _flat_S[0]
     tp2_S = tp_pool_S[1] if len(tp_pool_S) >= 2 else _flat_S[1]
     tp3_S = tp_pool_S[2] if len(tp_pool_S) >= 3 else _flat_S[2]
