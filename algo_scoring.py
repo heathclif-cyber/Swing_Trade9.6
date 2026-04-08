@@ -1531,31 +1531,87 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         stoch_gate_override = f"LONG skip: {stoch_gatekeeper_reason}"
 
     # ── [P6] Gate L4 & S4 Tren Dominan Override ────────────────
-    _req_score_L = _thr_full + 5
-    _req_score_S = _thr_full + 5
+    # Logika 3-tier Counter-Trend:
+    #   ADJ >= (_thr_full + 5)  → PASS penuh (skor sangat kuat, izinkan melawan tren)
+    #   ADJ >= _thr_half        → WARNING + paksa HALF SIZE (skor cukup untuk buy-dip/sell-rally)
+    #   ADJ <  _thr_half        → FAIL + BLOCKED (skor lemah, skip total)
+    _req_score_full_L = _thr_full + 5   # threshold PASS penuh untuk Long melawan tren
+    _req_score_full_S = _thr_full + 5   # threshold PASS penuh untuk Short melawan tren
     _m_slope = macro_slope if macro_slope is not None else 0.0
+
     if macro_trend == 'UPTREND':
+        # Gate L4 → mendukung arah tren, selalu PASS
         gate_L['gates']['L4'] = ('PASS', f'Tren dominan UPTREND (slope={_m_slope:.2f}%) — mendukung long')
-        if ADJ_S < _req_score_S:
-            gate_S['gates']['S4'] = ('FAIL', f'❌ GATE S4: Tren dominan bullish (slope={_m_slope:.2f}%). Butuh skor ≥ {_req_score_S} untuk short melawan tren.')
+
+        # Gate S4 → Short melawan tren (UPTREND), terapkan 3-tier
+        if ADJ_S >= _req_score_full_S:
+            # Tier 1: Skor sangat kuat — izinkan full short melawan tren
+            gate_S['gates']['S4'] = (
+                'PASS',
+                f'✅ GATE S4: Skor short sangat kuat ({ADJ_S:.1f} ≥ {_req_score_full_S}) — izinkan short melawan UPTREND secara penuh.'
+            )
+        elif ADJ_S >= _thr_half:
+            # Tier 2: Skor cukup untuk entry HALF SIZE (sell the rally / pantulan)
+            gate_S['gates']['S4'] = (
+                'WARN',
+                f'⚠️ GATE S4: Skor cukup untuk entry HALF SIZE melawan UPTREND ({ADJ_S:.1f} ≥ {_thr_half}, slope={_m_slope:.2f}%). Maksimal HALF SIZE ENTRY.'
+            )
+            if gate_S['status'] == 'CLEAR':
+                gate_S['status'] = 'WARNING'
+            # Paksa turunkan keputusan: jika sebelumnya FULL → turunkan ke HALF
+            if code_S not in ('SKIP',):
+                dec_S = 'HALF SIZE ENTRY'
+                code_S = 'HALF'
+        else:
+            # Tier 3: Skor terlalu lemah — blokir total
+            gate_S['gates']['S4'] = (
+                'FAIL',
+                f'❌ GATE S4: Skor short terlalu lemah ({ADJ_S:.1f} < {_thr_half}) untuk short melawan UPTREND (slope={_m_slope:.2f}%). SKIP.'
+            )
             gate_S['status'] = 'BLOCKED'
             dec_S, code_S = 'SKIP', 'SKIP'
-        else:
-            gate_S['gates']['S4'] = ('PASS', f'Tren dominan UPTREND tapi memenuhi skor minimum melawan tren ({ADJ_S:.1f} ≥ {_req_score_S})')
+
     elif macro_trend == 'SIDEWAYS':
+        # SIDEWAYS: pertahankan logika lama (WARN untuk L4 dan S4)
         gate_L['gates']['L4'] = ('WARN', f'⚠️ Tren dominan SIDEWAYS (slope={_m_slope:.2f}%)')
         gate_S['gates']['S4'] = ('WARN', f'⚠️ Tren dominan SIDEWAYS (slope={_m_slope:.2f}%)')
         if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
         if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+
     elif macro_trend == 'DOWNTREND':
+        # Gate S4 → mendukung arah tren, selalu PASS
         gate_S['gates']['S4'] = ('PASS', f'Tren dominan DOWNTREND (slope={_m_slope:.2f}%) — mendukung short')
-        if ADJ_L < _req_score_L:
-            gate_L['gates']['L4'] = ('FAIL', f'❌ GATE L4: Tren dominan bearish (slope={_m_slope:.2f}%). Butuh skor ≥ {_req_score_L} untuk long melawan tren.')
+
+        # Gate L4 → Long melawan tren (DOWNTREND), terapkan 3-tier
+        if ADJ_L >= _req_score_full_L:
+            # Tier 1: Skor sangat kuat — izinkan full long melawan tren
+            gate_L['gates']['L4'] = (
+                'PASS',
+                f'✅ GATE L4: Skor long sangat kuat ({ADJ_L:.1f} ≥ {_req_score_full_L}) — izinkan long melawan DOWNTREND secara penuh.'
+            )
+        elif ADJ_L >= _thr_half:
+            # Tier 2: Skor cukup untuk entry HALF SIZE (buy the dip / pantulan)
+            gate_L['gates']['L4'] = (
+                'WARN',
+                f'⚠️ GATE L4: Skor cukup untuk entry HALF SIZE melawan DOWNTREND ({ADJ_L:.1f} ≥ {_thr_half}, slope={_m_slope:.2f}%). Maksimal HALF SIZE ENTRY.'
+            )
+            if gate_L['status'] == 'CLEAR':
+                gate_L['status'] = 'WARNING'
+            # Paksa turunkan keputusan: jika sebelumnya FULL → turunkan ke HALF
+            if code_L not in ('SKIP',):
+                dec_L = 'HALF SIZE ENTRY'
+                code_L = 'HALF'
+        else:
+            # Tier 3: Skor terlalu lemah — blokir total
+            gate_L['gates']['L4'] = (
+                'FAIL',
+                f'❌ GATE L4: Skor long terlalu lemah ({ADJ_L:.1f} < {_thr_half}) untuk long melawan DOWNTREND (slope={_m_slope:.2f}%). SKIP.'
+            )
             gate_L['status'] = 'BLOCKED'
             dec_L, code_L = 'SKIP', 'SKIP'
-        else:
-            gate_L['gates']['L4'] = ('PASS', f'Tren dominan DOWNTREND tapi memenuhi skor minimum melawan tren ({ADJ_L:.1f} ≥ {_req_score_L})')
+
     else:
+        # Tren tidak diketahui — lewatkan gate (tidak blokir)
         gate_L['gates']['L4'] = ('PASS', 'Tren dominan tidak diketahui — skip L4')
         gate_S['gates']['S4'] = ('PASS', 'Tren dominan tidak diketahui — skip S4')
 
