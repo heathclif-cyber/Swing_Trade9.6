@@ -640,10 +640,9 @@ def api_test_signal():
         trade_entries = load_trade_entries()
         signal_monitor._evaluate_pair(pair, trade_entries)
 
-        # Juga kirim summary skor langsung ke Telegram
-        df = signal_monitor._fetch_klines(pair, interval="4h", limit=250)
+        # Ambil data via SSOT — tidak lagi pakai private function signal_monitor
+        df, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
         if len(df) >= 22:
-            df = signal_monitor._apply_indicators(df)
             coin_data  = trade_entries.get(pair, {})
             entry_list = coin_data.get("entries", [])
             total_cost = sum(e["price"] * e["qty"] for e in entry_list)
@@ -679,13 +678,16 @@ def api_test_signal():
                     f"{'─'*28}\n"
                     f"✅ Signal Monitor berjalan normal di Railway!"
                 )
+                if data_meta.get("data_incomplete"):
+                    msg += f"\n⚠️ Data tidak lengkap: {', '.join(data_meta.get('missing_data', []))}"
                 signal_monitor._send_telegram(msg)
                 return jsonify({
                     "ok": True, "pair": pair,
                     "long": {"score": adj_L, "code": code_L},
                     "short": {"score": adj_S, "code": code_S},
                     "close": close,
-                    "telegram": "sent"
+                    "telegram": "sent",
+                    "data_warning": data_meta.get("missing_data", []),
                 })
 
         return jsonify({"ok": False, "error": "Insufficient data", "pair": pair}), 400
@@ -1132,23 +1134,27 @@ def api_data():
         }
 
         # ── [APEX] MODULE 5: 71-Point Quantitative Analyst ──
-        logger.info("  [APEX] Executing 71-Point Quantitative Algorithm...")
+        # [REFACTOR — SSOT] Gunakan protocol_96_enrichment.get_fully_enriched_data()
+        # sebagai satu-satunya sumber data. Tidak ada lagi perakitan data manual.
+        logger.info("  [APEX] Executing 71-Point Quantitative Algorithm (SSOT)...")
+        _data_warning: dict = {}
         try:
-            # Menggunakan Data Engine sebagai Single Source of Truth
-            df_quant = data_engine.get_data_engine_enriched(coin_pair, interval="4h", limit=250)
-            
+            df_quant, data_meta = enrichment.get_fully_enriched_data(coin_pair, interval="4h", limit=250)
+
+            # Ekspos data warning ke response JSON agar UI bisa menampilkannya
+            if data_meta.get("data_incomplete"):
+                _data_warning = {
+                    "incomplete": True,
+                    "missing":    data_meta.get("missing_data", []),
+                    "message":    f"Data tidak lengkap: {', '.join(data_meta.get('missing_data', []))}. Skor mungkin kurang akurat.",
+                }
+                logger.warning(f"  [APEX] Data incomplete for {coin_pair}: {data_meta.get('missing_data')}")
+
             if df_quant is not None and not df_quant.empty and len(df_quant) >= 22:
-
-                # ── [HYBRID] Inject Macro & Liquidity data (CMC + Orderbook) ──
-                logger.info("  [APEX] Fetching live macro & liquidity context...")
-                df_quant = fetch_live_macro_and_liq(coin_pair, df_quant)
-
-                # ── Apply Market Session and temporal alignment ──
-                df_quant = enrichment.apply_temporal_alignment(df_quant)
-
                 meta = {
                     'Symbol': coin_pair,
                     'AVG_ENTRY_PRICE': entry_summary.get('rolling_avg_cost') if entry_summary.get('remaining_qty', 0) > 0 else None,
+                    'ENTRY_DATE': None,
                 }
                 quant_results = algo_scoring.calculate_71point_score(df_quant, meta)
 
@@ -1159,6 +1165,8 @@ def api_data():
                     ctx_map = {
                         'StochRSI_K': 'StochRSI_K', 'StochRSI_D': 'StochRSI_D',
                         'Funding_Rate': 'Funding_Rate', 'Open_Interest': 'Open_Interest',
+                        'BTC_Dominance': 'BTC_Dominance', 'Altcoin_Index': 'Altcoin_Index',
+                        'Buy_Liq': 'Buy_Liq', 'Sell_Liq': 'Sell_Liq',
                     }
                     for col, key in ctx_map.items():
                         if col in df_quant.columns:
@@ -1167,40 +1175,13 @@ def api_data():
                                 if pd.notna(v): live_ctx[key] = round(float(v), 6)
                             except Exception:
                                 pass
-                    # Add liquidity borders
+                    # Add liquidity borders dari D1/W1
                     for lk in ['PDH', 'PDL', 'PWH', 'PWL']:
                         lv = liquidity.get(lk, 0)
                         if lv: live_ctx[lk] = round(lv, 6)
                     quant_results['market_context'] = live_ctx
-                    
-                    # ── [HYBRID] TELEGRAM SIGNAL ALERTS DINONAKTIFKAN ──
-                    # Notifikasi sudah dikelola sepenuhnya oleh signal_monitor.py
-                    # yang berjalan sebagai background worker setiap 15 menit.
-                    # Mengaktifkan kembali blok ini akan menyebabkan ALERT GANDA (SPAM).
-                    # Untuk mengaktifkan kembali, uncomment blok di bawah ini.
-                    #
-                    # try:
-                    #     current_candle_time = int(last_q['Open_Time'].timestamp())
-                    #     last_alert_time = coin_state["alerts_sent"].get("last_candle_time", 0)
-                    #     if current_candle_time > last_alert_time:
-                    #         coin_state["alerts_sent"]["long_signal"] = None
-                    #         coin_state["alerts_sent"]["short_signal"] = None
-                    #         coin_state["alerts_sent"]["exit_signal"] = False
-                    #         coin_state["alerts_sent"]["last_candle_time"] = current_candle_time
-                    #     curr_long_code = quant_results['long']['code']
-                    #     if curr_long_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("long_signal") != curr_long_code:
-                    #         send_telegram_message(f"...LONG SETUP...")
-                    #         coin_state["alerts_sent"]["long_signal"] = curr_long_code
-                    #     curr_short_code = quant_results['short']['code']
-                    #     if curr_short_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("short_signal") != curr_short_code:
-                    #         send_telegram_message(f"...SHORT SETUP...")
-                    #         coin_state["alerts_sent"]["short_signal"] = curr_short_code
-                    #     has_active = float(entry_summary.get('remaining_qty', 0)) > 0
-                    #     if has_active and quant_results['exit']['hard_count'] > 0 and not coin_state["alerts_sent"].get("exit_signal"):
-                    #         send_telegram_message(f"...EXIT SIGNAL...")
-                    #         coin_state["alerts_sent"]["exit_signal"] = True
-                    # except Exception as alert_err:
-                    #     logger.warning(f"Failed to process Telegram alerts: {alert_err}")
+                    # Notifikasi dikelola sepenuhnya oleh signal_monitor.py (background worker)
+                    # Tidak ada Telegram alert dari sini untuk mencegah spam ganda.
 
                 state["quant_analysis"] = quant_results
             else:
@@ -1212,12 +1193,13 @@ def api_data():
 
         logger.info("✅ Dashboard data ready!")
         return jsonify({
-            "success": True,
-            "timestamp": now_str,
-            "raw_data": raw_data,
-            "oi_data": oi_formatted,
-            "computed": computed,
-            "state": state,
+            "success":      True,
+            "timestamp":    now_str,
+            "raw_data":     raw_data,
+            "oi_data":      oi_formatted,
+            "computed":     computed,
+            "state":        state,
+            "data_warning": _data_warning,   # UI bisa tampilkan banner peringatan
         })
 
     except (BinanceAPIException, BinanceRequestException) as bae:

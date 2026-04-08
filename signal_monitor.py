@@ -3,8 +3,9 @@ Protocol 9.6 — Signal Monitor
 Background thread yang berjalan setiap 15 menit untuk memantau sinyal buy/sell
 dan mengirimkan notifikasi Telegram secara otomatis.
 
-FIX: Semua env vars dibaca saat runtime (bukan saat import) agar kompatibel
-     dengan Gunicorn worker fork di Railway.
+[REFACTOR] Single Source of Truth:
+  Semua penarikan data dilakukan oleh protocol_96_enrichment.get_fully_enriched_data().
+  Signal monitor TIDAK boleh merakit data sendiri.
 """
 import threading
 import time
@@ -12,9 +13,8 @@ import logging
 import os
 import json
 import requests
-import data_engine
 import pandas as pd  # type: ignore
-import pandas_ta as ta  # type: ignore
+import protocol_96_enrichment as enrichment
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
@@ -160,7 +160,26 @@ def _save_alert_state(state: dict) -> None:
 
 
 def _save_alert_state(state: dict) -> None:
-    """Simpan _alert_state ke file JSON agar TP tracking persist antar restart."""
+    """Simpan _alert_state ke PostgreSQL (jika ada) atau fallback JSON."""
+    # ── Coba simpan ke PostgreSQL dulu ────────────────────
+    conn = _get_pg_conn()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO kv_store (key, value, updated_at)
+                    VALUES ('alert_state', %s, NOW())
+                    ON CONFLICT (key) DO UPDATE
+                      SET value = EXCLUDED.value, updated_at = NOW()
+                """, (json.dumps(state),))
+            conn.commit()
+            conn.close()
+            return
+        except Exception as e:
+            logger.warning(f"PG save alert_state failed: {e}")
+            try: conn.close()
+            except: pass
+    # ── Fallback: JSON ─────────────────────────────────────
     path = os.environ.get(
         "ALERT_STATE_PATH",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_state.json")
@@ -169,14 +188,7 @@ def _save_alert_state(state: dict) -> None:
         with open(path, "w") as f:
             json.dump(state, f, indent=2)
     except Exception as e:
-        logger.warning(f"_save_alert_state failed: {e}")
-
-
-# ============================================================
-# DATA FETCHING
-# ============================================================
-# Fetching and enrichment logic has been migrated back to data_engine
-# according to the new single source of truth rule.
+        logger.warning(f"_save_alert_state JSON failed: {e}")
 
 
 # ============================================================
@@ -186,10 +198,29 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
     try:
         import algo_scoring  # lazy import
 
-        df = data_engine.get_data_engine_enriched(symbol, interval="4h", limit=250)
+        # ── [SSOT] Semua data dari satu sumber ──────────────
+        df, data_meta = enrichment.get_fully_enriched_data(symbol, interval="4h", limit=250)
         if df is None or df.empty or len(df) < 22:
             logger.warning(f"[{symbol}] Insufficient data")
             return
+
+        # ── [FAIL-SAFE] Peringatan data tidak lengkap (1×) ──
+        if data_meta.get("data_incomplete"):
+            missing = data_meta.get("missing_data", [])
+            state_key = f"data_warn_{symbol}"
+            with _state_lock:
+                pair_state  = _alert_state.setdefault(symbol, {})
+                last_warned = pair_state.get("_data_warn_ts", 0)
+                # Kirim peringatan maksimal 1x per 4 jam
+                if time.time() - last_warned > 4 * 3600:
+                    _send_telegram(
+                        f"⚠️ <b>Peringatan Sistem — {symbol}</b>\n"
+                        f"Gagal menarik data: <b>{', '.join(missing)}</b>\n"
+                        f"Bot mungkin menggunakan data fallback.\n"
+                        f"Skor mungkin kurang akurat sementara ini."
+                    )
+                    pair_state["_data_warn_ts"] = time.time()
+                    _save_alert_state(_alert_state)
 
         coin_data     = trade_entries.get(symbol, {})
         entry_list    = coin_data.get("entries", [])
@@ -634,11 +665,11 @@ def test_send_pendle_notification() -> dict:
     symbol = "PENDLEUSDT"
     logger.info(f"[TEST] Fetching data for {symbol}...")
 
-    df = _fetch_klines(symbol, interval="4h", limit=250)
+    # [SSOT] Gunakan enrichment terpusat
+    df, data_meta = enrichment.get_fully_enriched_data(symbol, interval="4h", limit=250)
     if df is None or len(df) < 22:
         return {"ok": False, "error": "Insufficient kline data", "symbol": symbol}
 
-    df = _enrich_df(df, symbol)
     close_price = float(df.iloc[-1]["Close"])
 
     meta   = {"Symbol": symbol, "AVG_ENTRY_PRICE": None, "ENTRY_DATE": None}
