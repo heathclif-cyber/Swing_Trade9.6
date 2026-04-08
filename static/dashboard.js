@@ -590,6 +590,7 @@ function fmtVol(v) { const a = Math.abs(v); if (a >= 1e6) return (v/1e6).toFixed
 async function loadTradeEntries() {
     try { const r = await fetch('/api/trade-entries'); const j = await r.json(); if (j.success) { tradeEntries = j.entries || {}; tradeSummaries = j.summaries || {}; } } catch(e) { console.error(e); }
 }
+
 function openEntryModal() {
     const modal = document.getElementById('entryModal');
     const sel = document.getElementById('entrySymbol');
@@ -598,34 +599,71 @@ function openEntryModal() {
     }
     prefillEntryForm(); sel.onchange = prefillEntryForm; renderEntryList(); modal.classList.add('show');
 }
-function prefillEntryForm() { document.getElementById('entryPrice').value = ''; const sym = document.getElementById('entrySymbol').value; document.getElementById('entryCapital').value = tradeEntries[sym]?.allocated_capital || 200; }
+
+function prefillEntryForm() {
+    // Mengosongkan form saat koin diganti
+    document.getElementById('entryPrice').value = '';
+    document.getElementById('entryQty').value = '';
+}
+
 function closeEntryModal() { document.getElementById('entryModal').classList.remove('show'); }
 
 async function saveEntry() {
     const sym = document.getElementById('entrySymbol').value;
-    const ep = parseFloat(document.getElementById('entryPrice').value);
-    const cap = parseFloat(document.getElementById('entryCapital').value);
+    const ep  = parseFloat(document.getElementById('entryPrice').value);
+    const qty = parseFloat(document.getElementById('entryQty').value);
     if (!sym) { showAlert('danger','⚠️ Pilih coin dulu'); return; }
     if (!ep || ep <= 0) { showAlert('danger','⚠️ Entry price harus > 0'); return; }
+    if (!qty || qty <= 0) { showAlert('danger','⚠️ Quantity harus > 0'); return; }
     try {
-        const r = await fetch('/api/trade-entries', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol:sym, entry_price:ep, allocated_capital: isNaN(cap)?200:cap }) });
+        const r = await fetch('/api/trade-entries', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ symbol:sym, entry_price:ep, qty:qty })
+        });
         const j = await r.json();
-        if (j.success) { showAlert('success', `✅ Entry #${j.summary.num_entries} added @ $${ep}`); setTimeout(hideAlert, 3000); await loadTradeEntries(); renderEntryList(); document.getElementById('entryPrice').value = ''; if (sym === currentBackendPair) fetchData(); }
-        else { showAlert('danger','❌ '+j.error); }
+        if (j.success) {
+            showAlert('success', `✅ Entry #${j.summary.num_entries} added @ $${ep}`);
+            setTimeout(hideAlert, 3000);
+            await loadTradeEntries(); renderEntryList();
+            document.getElementById('entryPrice').value = '';
+            document.getElementById('entryQty').value = '';
+            if (sym === currentBackendPair) fetchData();
+        } else { showAlert('danger','❌ '+j.error); }
     } catch(e) { showAlert('danger','❌ '+e.message); }
+}
+
+// Fungsi BARU untuk Tombol MAX di Form Sell
+function setMaxSellQty() {
+    const sel = document.getElementById('sellSymbol');
+    const sm  = tradeSummaries[sel.value] || {};
+    const rq  = sm.remaining_qty || 0;
+    if (rq > 0) {
+        document.getElementById('sellQtyInput').value = rq.toFixed(6);
+    } else {
+        showAlert('danger', '⚠️ Anda tidak memiliki sisa aset untuk dijual');
+    }
 }
 
 async function saveSell() {
     const sym = document.getElementById('sellSymbol').value;
-    const sp = parseFloat(document.getElementById('sellPriceInput').value);
+    const sp  = parseFloat(document.getElementById('sellPriceInput').value);
     const qty = parseFloat(document.getElementById('sellQtyInput').value);
     if (!sp || sp <= 0) { showAlert('danger','⚠️ Sell price harus > 0'); return; }
     if (!qty || qty <= 0) { showAlert('danger','⚠️ Quantity harus > 0'); return; }
     try {
-        const r = await fetch('/api/trade-sales', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ symbol:sym, sell_price:sp, qty }) });
+        const r = await fetch('/api/trade-sales', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ symbol:sym, sell_price:sp, qty:qty })
+        });
         const j = await r.json();
-        if (j.success) { showAlert('success', `💰 Sale recorded @ $${sp} × ${qty}`); setTimeout(hideAlert, 3000); await loadTradeEntries(); renderEntryList(); document.getElementById('sellPriceInput').value = ''; document.getElementById('sellQtyInput').value = ''; if (sym === currentBackendPair) fetchData(); }
-        else { showAlert('danger','❌ '+j.error); }
+        if (j.success) {
+            showAlert('success', `💰 Sale recorded @ $${sp} × ${qty}`);
+            setTimeout(hideAlert, 3000);
+            await loadTradeEntries(); renderEntryList();
+            document.getElementById('sellPriceInput').value = '';
+            document.getElementById('sellQtyInput').value = '';
+            if (sym === currentBackendPair) fetchData();
+        } else { showAlert('danger','❌ '+j.error); }
     } catch(e) { showAlert('danger','❌ '+e.message); }
 }
 
@@ -652,13 +690,20 @@ function switchModalTab(tab) {
     document.querySelectorAll('.modal .tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('tab'+tab.charAt(0).toUpperCase()+tab.slice(1))?.classList.add('active');
     document.getElementById('modalEntryForm').style.display = tab==='entry' ? 'grid' : 'none';
-    document.getElementById('modalSellForm').style.display = tab==='sell' ? 'grid' : 'none';
-    document.getElementById('modalHistory').style.display = tab==='history' ? 'block' : 'none';
+    document.getElementById('modalSellForm').style.display  = tab==='sell'  ? 'grid' : 'none';
+    document.getElementById('modalHistory').style.display   = tab==='history'? 'block': 'none';
     if (tab === 'sell' && APP_DATA) {
         const sel = document.getElementById('sellSymbol');
         sel.innerHTML = (APP_DATA.state?.user_input?.available_pairs||[]).map(p => `<option value="${p}" ${p===currentBackendPair?'selected':''}>${p}</option>`).join('');
-        function upQty() { const sm = tradeSummaries[sel.value]||{}; const rq = sm.remaining_qty||0; document.getElementById('sellQtyInput').value = rq > 0 ? rq : ''; document.getElementById('sellQtyInput').placeholder = rq > 0 ? `Max: ${rq}` : 'No position'; }
-        sel.onchange = upQty; upQty();
+        function updateSellPlaceholder() {
+            const sm = tradeSummaries[sel.value] || {};
+            const rq = sm.remaining_qty || 0;
+            // Kosongkan isian — biarkan user klik MAX untuk auto-fill
+            document.getElementById('sellQtyInput').value = '';
+            document.getElementById('sellQtyInput').placeholder = rq > 0 ? `Tersedia: ${rq.toFixed(4)}` : 'No position';
+        }
+        sel.onchange = updateSellPlaceholder;
+        updateSellPlaceholder();
     }
 }
 

@@ -753,6 +753,73 @@ def api_test_pendle():
         logger.exception(f"test-pendle error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+def fetch_live_macro_and_liq(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Helper mandiri: tarik data Makro (BTC Dominance, Altcoin Index via CMC)
+    dan Likuiditas (Buy_Wall, Sell_Wall via Binance Orderbook), lalu inject
+    ke kolom df sebagai konstanta pada semua baris.
+
+    Dipanggil dari api_data() DAN _enrich_df() di signal_monitor.py
+    agar keduanya punya context makro yang sama saat menghitung skor.
+    """
+    if df.empty:
+        return df
+    df = df.copy()
+
+    # ── 1. BTC Dominance & Altcoin Index via CMC API ──────────────────────
+    try:
+        CMC_API_KEY = os.environ.get("CMC_API_KEY", "aa8eb4dd82974c308c5428e7c1be0121")
+        cmc_url = "https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest"
+        cmc_headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY, "Accept": "application/json"}
+        r = http_requests.get(cmc_url, headers=cmc_headers, timeout=8, verify=False)
+        if r.status_code == 200:
+            d = r.json()["data"]
+            btc_dom_raw   = round(d["btc_dominance"] * 100, 1)
+            total_mcap    = d["quote"]["USD"]["total_market_cap"]
+            btc_dom_frac  = d["btc_dominance"] / 100
+            altcoin_index = round(total_mcap * (1 - btc_dom_frac) / 1_000_000_000, 1)
+            df["BTC_Dominance"] = btc_dom_raw
+            df["Altcoin_Index"]  = altcoin_index
+            logger.info(f"  [Macro] CMC OK — BTC_Dom={btc_dom_raw}%, AltIdx={altcoin_index}B")
+        else:
+            df.setdefault("BTC_Dominance", None)
+            df.setdefault("Altcoin_Index", None)
+    except Exception as e:
+        logger.warning(f"  [Macro] CMC fetch failed: {e}")
+        df["BTC_Dominance"] = None
+        df["Altcoin_Index"]  = None
+
+    # ── 2. Binance Futures Orderbook — Buy Wall & Sell Wall ──────────────
+    try:
+        liq_url    = "https://fapi.binance.com/fapi/v1/depth"
+        liq_params = {"symbol": symbol.upper(), "limit": 500}
+        r_liq = http_requests.get(liq_url, params=liq_params, timeout=8, verify=False)
+        if r_liq.status_code == 200:
+            book       = r_liq.json()
+            close_last = float(df["Close"].iloc[-1])
+            bids = [(float(p), float(q)) for p, q in book.get("bids", []) if float(p) < close_last]
+            asks = [(float(p), float(q)) for p, q in book.get("asks", []) if float(p) > close_last]
+            if bids and asks:
+                buy_wall  = max(bids, key=lambda x: x[1])[0]
+                sell_wall = max(asks, key=lambda x: x[1])[0]
+                df["Buy_Liq"]  = round(buy_wall, 6)
+                df["Sell_Liq"] = round(sell_wall, 6)
+                logger.info(f"  [Macro] Orderbook OK — Buy_Wall={buy_wall:.6f}, Sell_Wall={sell_wall:.6f}")
+            else:
+                df.setdefault("Buy_Liq", 0.0)
+                df.setdefault("Sell_Liq", 0.0)
+        else:
+            df.setdefault("Buy_Liq", 0.0)
+            df.setdefault("Sell_Liq", 0.0)
+    except Exception as e:
+        logger.warning(f"  [Macro] Orderbook fetch failed: {e}")
+        df.setdefault("Buy_Liq", 0.0)
+        df.setdefault("Sell_Liq", 0.0)
+
+    return df
+
+
 @app.route("/api/data")
 def api_data():
     """Master endpoint: returns ALL data categories for the dashboard."""
@@ -1072,6 +1139,10 @@ def api_data():
             
             if df_quant is not None and not df_quant.empty and len(df_quant) >= 22:
 
+                # ── [HYBRID] Inject Macro & Liquidity data (CMC + Orderbook) ──
+                logger.info("  [APEX] Fetching live macro & liquidity context...")
+                df_quant = fetch_live_macro_and_liq(coin_pair, df_quant)
+
                 # ── Apply Market Session and temporal alignment ──
                 df_quant = enrichment.apply_temporal_alignment(df_quant)
 
@@ -1102,41 +1173,34 @@ def api_data():
                         if lv: live_ctx[lk] = round(lv, 6)
                     quant_results['market_context'] = live_ctx
                     
-                    # ── TELEGRAM SIGNAL ALERTS ──
-                    try:
-                        current_candle_time = int(last_q['Open_Time'].timestamp())
-                        last_alert_time = coin_state["alerts_sent"].get("last_candle_time", 0)
-                        
-                        if current_candle_time > last_alert_time:
-                            # New 4H candle -> reset signal tracking
-                            coin_state["alerts_sent"]["long_signal"] = None
-                            coin_state["alerts_sent"]["short_signal"] = None
-                            coin_state["alerts_sent"]["exit_signal"] = False
-                            coin_state["alerts_sent"]["last_candle_time"] = current_candle_time
-                        
-                        # Evaluate LONG signal
-                        curr_long_code = quant_results['long']['code']
-                        if curr_long_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("long_signal") != curr_long_code:
-                            msg = f"🟢 <b>LONG SETUP: {curr_long_code} SIZE ENTRY</b>\nSymbol: {coin_pair}\nScore: {quant_results['long']['total']}/71 ({quant_results['long']['pct']}%)\nPrice: ${quant_results['variables']['close_price']}"
-                            send_telegram_message(msg)
-                            coin_state["alerts_sent"]["long_signal"] = curr_long_code
-                            
-                        # Evaluate SHORT signal
-                        curr_short_code = quant_results['short']['code']
-                        if curr_short_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("short_signal") != curr_short_code:
-                            msg = f"🔴 <b>SHORT SETUP: {curr_short_code} SIZE ENTRY</b>\nSymbol: {coin_pair}\nScore: {quant_results['short']['total']}/71 ({quant_results['short']['pct']}%)\nPrice: ${quant_results['variables']['close_price']}"
-                            send_telegram_message(msg)
-                            coin_state["alerts_sent"]["short_signal"] = curr_short_code
-                            
-                        # Evaluate EXIT signal (only if active position)
-                        has_active = float(entry_summary.get('remaining_qty', 0)) > 0
-                        if has_active and quant_results['exit']['hard_count'] > 0 and not coin_state["alerts_sent"].get("exit_signal"):
-                            msg = f"⚠️ <b>MANDATORY EXIT SIGNAL</b>\nSymbol: {coin_pair}\nReason: {quant_results['exit']['recommendation']}\nPrice: ${quant_results['variables']['close_price']}\nTake action immediately to protect capital."
-                            send_telegram_message(msg)
-                            coin_state["alerts_sent"]["exit_signal"] = True
-                            
-                    except Exception as alert_err:
-                        logger.warning(f"Failed to process Telegram alerts: {alert_err}")
+                    # ── [HYBRID] TELEGRAM SIGNAL ALERTS DINONAKTIFKAN ──
+                    # Notifikasi sudah dikelola sepenuhnya oleh signal_monitor.py
+                    # yang berjalan sebagai background worker setiap 15 menit.
+                    # Mengaktifkan kembali blok ini akan menyebabkan ALERT GANDA (SPAM).
+                    # Untuk mengaktifkan kembali, uncomment blok di bawah ini.
+                    #
+                    # try:
+                    #     current_candle_time = int(last_q['Open_Time'].timestamp())
+                    #     last_alert_time = coin_state["alerts_sent"].get("last_candle_time", 0)
+                    #     if current_candle_time > last_alert_time:
+                    #         coin_state["alerts_sent"]["long_signal"] = None
+                    #         coin_state["alerts_sent"]["short_signal"] = None
+                    #         coin_state["alerts_sent"]["exit_signal"] = False
+                    #         coin_state["alerts_sent"]["last_candle_time"] = current_candle_time
+                    #     curr_long_code = quant_results['long']['code']
+                    #     if curr_long_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("long_signal") != curr_long_code:
+                    #         send_telegram_message(f"...LONG SETUP...")
+                    #         coin_state["alerts_sent"]["long_signal"] = curr_long_code
+                    #     curr_short_code = quant_results['short']['code']
+                    #     if curr_short_code in ['FULL', 'HALF'] and coin_state["alerts_sent"].get("short_signal") != curr_short_code:
+                    #         send_telegram_message(f"...SHORT SETUP...")
+                    #         coin_state["alerts_sent"]["short_signal"] = curr_short_code
+                    #     has_active = float(entry_summary.get('remaining_qty', 0)) > 0
+                    #     if has_active and quant_results['exit']['hard_count'] > 0 and not coin_state["alerts_sent"].get("exit_signal"):
+                    #         send_telegram_message(f"...EXIT SIGNAL...")
+                    #         coin_state["alerts_sent"]["exit_signal"] = True
+                    # except Exception as alert_err:
+                    #     logger.warning(f"Failed to process Telegram alerts: {alert_err}")
 
                 state["quant_analysis"] = quant_results
             else:
