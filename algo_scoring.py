@@ -915,6 +915,17 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     sl_struct_L, sl_label_L = select_sl_long(sl_cands_L, tp1_L[0])
     sl_struct_S, sl_label_S = select_sl_short(sl_cands_S, tp1_S[0])
 
+    # ── [HYBRID] Safe SL Override ──────────────────────────────
+    # Model HYBRID: pilih SL paling jauh/aman agar tidak tersapu wick.
+    # LONG  → ambil nilai lebih kecil (lebih bawah) antara SL struktur vs ATR×2
+    # SHORT → ambil nilai lebih besar (lebih atas) antara SL struktur vs ATR×2
+    if sl_struct_L > sl_atr2_L:
+        sl_struct_L = sl_atr2_L
+        sl_label_L  = f"{sl_label_L} → SAFE SL (ATR×2)"
+    if sl_struct_S < sl_atr2_S:
+        sl_struct_S = sl_atr2_S
+        sl_label_S  = f"{sl_label_S} → SAFE SL (ATR×2)"
+
     # ── R:R calculations ───────────────────────────────────────
     def rr_l(tp):
         d = close_price - sl_struct_L
@@ -1615,10 +1626,41 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         gate_L['gates']['L4'] = ('PASS', 'Tren dominan tidak diketahui — skip L4')
         gate_S['gates']['S4'] = ('PASS', 'Tren dominan tidak diketahui — skip S4')
 
+    # ── [HYBRID] Gate TP1 Minimum Jarak 2% ────────────────────
+    # Jika potensi profit ke TP1 terlalu kecil, skip entry (risk/reward tidak layak).
+    _min_tp_pct = 2.0
+    _dist_tp1_L = (tp1_L[0] - close_price) / close_price * 100 if close_price else 0.0
+    _dist_tp1_S = (close_price - tp1_S[0]) / close_price * 100 if close_price else 0.0
+
+    if code_L not in ('SKIP',) and _dist_tp1_L < _min_tp_pct:
+        dec_L  = 'SKIP'
+        code_L = 'SKIP'
+        _tp1_skip_reason_L = (
+            f"HYBRID Gate TP1: Jarak TP1 LONG terlalu dekat "
+            f"({_dist_tp1_L:.2f}% < {_min_tp_pct}%) — potensi profit tidak layak."
+        )
+        gate_L['gates']['L5_TP1'] = ('FAIL', f'❌ {_tp1_skip_reason_L}')
+        gate_L['status'] = 'BLOCKED'
+    else:
+        _tp1_skip_reason_L = ""
+
+    if code_S not in ('SKIP',) and _dist_tp1_S < _min_tp_pct:
+        dec_S  = 'SKIP'
+        code_S = 'SKIP'
+        _tp1_skip_reason_S = (
+            f"HYBRID Gate TP1: Jarak TP1 SHORT terlalu dekat "
+            f"({_dist_tp1_S:.2f}% < {_min_tp_pct}%) — potensi profit tidak layak."
+        )
+        gate_S['gates']['S5_TP1'] = ('FAIL', f'❌ {_tp1_skip_reason_S}')
+        gate_S['status'] = 'BLOCKED'
+    else:
+        _tp1_skip_reason_S = ""
+
     # ═══════════════════════════════════════════════════════════
     # RETURN — json_safe() memastikan semua numpy type dikonversi
     # ═══════════════════════════════════════════════════════════
     pnl_pct = round((close_price / entry_val - 1) * 100, 4) if is_active and entry_val else None
+
 
     result = {
         'long': {

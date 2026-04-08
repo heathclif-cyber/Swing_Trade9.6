@@ -476,25 +476,27 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _save_alert_state(_alert_state)
 
             # ── EXIT SIGNALS ───────────────────────────────
+            # [HYBRID MODEL] Dynamic Exit Alert DIMATIKAN.
+            # Bot fokus hold hingga TP1/TP2/TP3 atau Trailing SL secara natural.
             exit_signals = exit_r.get("signals", [])
             hard_exits   = [e for e in exit_signals if e[0] == "❌"]
 
-            if is_active and hard_exits and not state["exit_alerted"]:
-                pnl_str   = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
-                exit_lines = "\n".join(
-                    f"  {icon} {name}: {val} ({cond})"
-                    for icon, name, val, cond in exit_signals[:5]
-                )
-                _send_telegram(
-                    f"⚠️ <b>EXIT ALERT — {symbol}</b>\n"
-                    f"{'─'*28}\n"
-                    f"Harga: <b>${close_price:.6f}</b> | PnL: <b>{pnl_str}</b>\n\n"
-                    f"<b>Sinyal keluar:</b>\n{exit_lines}\n\n"
-                    f"📋 Rekomendasi: <b>{exit_r.get('recommendation','PARTIAL EXIT')}</b>"
-                )
-                state["exit_alerted"] = True
-                state["last_alert_ts"] = now_ts
-                return
+            # if is_active and hard_exits and not state["exit_alerted"]:
+            #     pnl_str   = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
+            #     exit_lines = "\n".join(
+            #         f"  {icon} {name}: {val} ({cond})"
+            #         for icon, name, val, cond in exit_signals[:5]
+            #     )
+            #     _send_telegram(
+            #         f"⚠️ <b>EXIT ALERT — {symbol}</b>\n"
+            #         f"{'─'*28}\n"
+            #         f"Harga: <b>${close_price:.6f}</b> | PnL: <b>{pnl_str}</b>\n\n"
+            #         f"<b>Sinyal keluar:</b>\n{exit_lines}\n\n"
+            #         f"📋 Rekomendasi: <b>{exit_r.get('recommendation','PARTIAL EXIT')}</b>"
+            #     )
+            #     state["exit_alerted"] = True
+            #     state["last_alert_ts"] = now_ts
+            #     return
 
             if not hard_exits:
                 state["exit_alerted"] = False
