@@ -252,11 +252,15 @@ def _fetch_funding_rate(symbol: str, limit: int = 200) -> pd.DataFrame:
 
 
 def _enrich_df(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
-    """Enrichment pipeline lengkap — OI + Funding Rate + CVD + Indicators.
-    Identik dengan yang digunakan web dashboard agar skor konsisten."""
+    """Enrichment pipeline lengkap — OI + Funding Rate + CVD + Indicators +
+    Macro Context (BTC_Dominance, Altcoin_Index) + Liquidity Walls (Buy_Liq, Sell_Liq).
+
+    [SYNC FIX] Identik dengan api_data() di protocol_96_ui.py agar skor live
+    konsisten 100% dengan yang ditampilkan di dashboard.
+    """
     df = _apply_indicators(df)
 
-    # Merge Open Interest
+    # ── Merge Open Interest ───────────────────────────────────────────────
     oi_df = _fetch_oi(symbol)
     if not oi_df.empty:
         try:
@@ -271,7 +275,7 @@ def _enrich_df(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     else:
         df["Open_Interest"] = 0.0
 
-    # Merge Funding Rate
+    # ── Merge Funding Rate ────────────────────────────────────────────────
     fr_df = _fetch_funding_rate(symbol)
     if not fr_df.empty:
         try:
@@ -285,6 +289,57 @@ def _enrich_df(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
             df["Funding_Rate"] = 0.0
     else:
         df["Funding_Rate"] = 0.0
+
+    # ── [SYNC FIX] Macro Context: BTC Dominance & Altcoin Index (CMC) ────
+    # Inline fetch agar tidak ada circular import dengan protocol_96_ui.py
+    try:
+        CMC_API_KEY = os.environ.get("CMC_API_KEY", "aa8eb4dd82974c308c5428e7c1be0121")
+        cmc_url     = "https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest"
+        cmc_headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY, "Accept": "application/json"}
+        r = requests.get(cmc_url, headers=cmc_headers, timeout=8, verify=False)
+        if r.status_code == 200:
+            d             = r.json()["data"]
+            btc_dom_raw   = round(d["btc_dominance"] * 100, 1)
+            total_mcap    = d["quote"]["USD"]["total_market_cap"]
+            btc_dom_frac  = d["btc_dominance"] / 100
+            altcoin_index = round(total_mcap * (1 - btc_dom_frac) / 1_000_000_000, 1)
+            df["BTC_Dominance"] = btc_dom_raw
+            df["Altcoin_Index"]  = altcoin_index
+            logger.info(f"  [Macro] CMC OK — BTC_Dom={btc_dom_raw}%, AltIdx={altcoin_index}B")
+        else:
+            df["BTC_Dominance"] = None
+            df["Altcoin_Index"]  = None
+    except Exception as e:
+        logger.warning(f"  [Macro] CMC fetch failed: {e}")
+        df["BTC_Dominance"] = None
+        df["Altcoin_Index"]  = None
+
+    # ── [SYNC FIX] Liquidity Walls: Buy_Liq & Sell_Liq (Binance Orderbook) ──
+    try:
+        liq_url    = "https://fapi.binance.com/fapi/v1/depth"
+        liq_params = {"symbol": symbol.upper(), "limit": 500}
+        r_liq = requests.get(liq_url, params=liq_params, timeout=8, verify=False)
+        if r_liq.status_code == 200:
+            book       = r_liq.json()
+            close_last = float(df["Close"].iloc[-1])
+            bids = [(float(p), float(q)) for p, q in book.get("bids", []) if float(p) < close_last]
+            asks = [(float(p), float(q)) for p, q in book.get("asks", []) if float(p) > close_last]
+            if bids and asks:
+                buy_wall  = max(bids, key=lambda x: x[1])[0]
+                sell_wall = max(asks, key=lambda x: x[1])[0]
+                df["Buy_Liq"]  = round(buy_wall, 6)
+                df["Sell_Liq"] = round(sell_wall, 6)
+                logger.info(f"  [Macro] Orderbook OK — Buy_Wall={buy_wall:.6f}, Sell_Wall={sell_wall:.6f}")
+            else:
+                df["Buy_Liq"]  = 0.0
+                df["Sell_Liq"] = 0.0
+        else:
+            df["Buy_Liq"]  = 0.0
+            df["Sell_Liq"] = 0.0
+    except Exception as e:
+        logger.warning(f"  [Macro] Orderbook fetch failed: {e}")
+        df["Buy_Liq"]  = 0.0
+        df["Sell_Liq"] = 0.0
 
     return df
 
