@@ -377,7 +377,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 vol_ok  = "✅ Volume drop lemah" if sl_wick.get("low_volume_drop") else "⚠️ Volume normal"
                 bull_ok = "✅ Candle berbalik hijau" if sl_wick.get("bullish_body") else "❌ Candle masih merah"
                 _send_telegram(
-                    f"🕯️ <b>SL WICK ALERT — {symbol}</b>\n"
+                    f"⚠️ <b>SL WICK ALERT — {symbol}</b>\n"
                     f"{'─'*28}\n"
                     f"Harga: <b>${close_price:.6f}</b> | PnL: {pnl_str}\n"
                     f"SL Level: ${lvl_L['sl_structure']:.6f}\n\n"
@@ -402,7 +402,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 ema21_val = float(df.iloc[-2].get("EMA_21", 0))
                 pnl_str   = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
                 _send_telegram(
-                    f"💀 <b>KILL SWITCH — {symbol}</b>\n"
+                    f"🚨 <b>KILL SWITCH — {symbol}</b>\n"
                     f"H4 close di bawah EMA21 (${ema21_val:.4f})\n"
                     f"Harga: <b>${close_price:.4f}</b> | PnL: {pnl_str}\n\n"
                     f"❌ <b>Instruksi:</b> PERTIMBANGKAN EXIT PENUH.\n"
@@ -659,7 +659,7 @@ def _monitor_loop() -> None:
         f"  🚀 LONG signal (skor ≥ 36/71)\n"
         f"  📉 SHORT signal (skor ≥ 36/71)\n"
         f"  ⚠️ EXIT ALERT\n"
-        f"  💀 KILL SWITCH\n\n"
+        f"  🚨 KILL SWITCH\n\n"
         f"🕐 Start: {wib} WIB"
     )
 
