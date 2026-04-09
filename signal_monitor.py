@@ -223,6 +223,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     _save_alert_state(_alert_state)
 
         coin_data     = trade_entries.get(symbol, {})
+        pos_side      = str(coin_data.get("side", "LONG")).upper()
         entry_list    = coin_data.get("entries", [])
         sales_list    = coin_data.get("sales", [])
         total_cost    = sum(e["price"] * e["qty"] for e in entry_list)
@@ -279,27 +280,40 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             cooldown        = 4 * 3600
             time_since_last = now_ts - state["last_alert_ts"]
 
+            # Helper untuk PnL dinamis
+            def get_pnl():
+                if not avg_entry: return "N/A"
+                if pos_side == "SHORT":
+                    return f"{((avg_entry/close_price)-1)*100:+.2f}%"
+                return f"{((close_price/avg_entry)-1)*100:+.2f}%"
+
             # ── KILL SWITCH ────────────────────────────────
-            kill_switch = (
-                len(df) >= 2
-                and "EMA_21" in df.columns
-                and float(df.iloc[-2]["Close"]) < float(df.iloc[-2].get("EMA_21", float("inf")))
-            )
-            # ── SL WICK FAKEOUT ALERT (jika ada posisi aktif & wick menyentuh SL) ──
+            ema21_val = float(df.iloc[-2].get("EMA_21", float("inf"))) if len(df) >= 2 else 0
+            if pos_side == "SHORT":
+                kill_switch = len(df) >= 2 and float(df.iloc[-2]["Close"]) > ema21_val
+            else:
+                kill_switch = len(df) >= 2 and float(df.iloc[-2]["Close"]) < ema21_val
+
+            # ── SL WICK FAKEOUT ALERT ──
             if is_active and sl_wick.get("sl_touched_wick") and not state.get("wick_alerted"):
                 verdict = sl_wick.get("verdict", "N/A")
                 action  = sl_wick.get("action", "")
                 conf    = sl_wick.get("confidence_pct", 0)
-                pnl_str = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
+                sl_level = lvl_S['sl_structure'] if pos_side == "SHORT" else lvl_L['sl_structure']
+
                 body_ok = "✅ Body di atas SL" if sl_wick.get("body_above_sl") else "❌ Body TEMBUS SL"
+                if pos_side == "SHORT":
+                    body_ok = "✅ Body di bawah SL" if sl_wick.get("body_above_sl") else "❌ Body TEMBUS SL"
+
                 cvd_ok  = "✅ CVD masih defend" if sl_wick.get("cvd_defending") else "❌ CVD memburuk"
                 vol_ok  = "✅ Volume drop lemah" if sl_wick.get("low_volume_drop") else "⚠️ Volume normal"
-                bull_ok = "✅ Candle berbalik hijau" if sl_wick.get("bullish_body") else "❌ Candle masih merah"
+                bull_ok = "✅ Candle aman" if sl_wick.get("bullish_body") else "❌ Candle berlawanan"
+
                 _send_telegram(
-                    f"🕯️ <b>SL WICK ALERT — {symbol}</b>\n"
+                    f"🕯️ <b>SL WICK ALERT — {symbol} ({pos_side})</b>\n"
                     f"{'─'*28}\n"
-                    f"Harga: <b>${close_price:.6f}</b> | PnL: {pnl_str}\n"
-                    f"SL Level: ${lvl_L['sl_structure']:.6f}\n\n"
+                    f"Harga: <b>${close_price:.6f}</b> | PnL: {get_pnl()}\n"
+                    f"SL Level: ${sl_level:.6f}\n\n"
                     f"<b>Analisis Wick:</b>\n"
                     f"  {body_ok}\n"
                     f"  {cvd_ok}\n"
@@ -314,20 +328,17 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     _save_alert_state(_alert_state)
                     return
 
-            # Reset wick alert jika harga kembali aman
             if not sl_wick.get("sl_touched_wick") and state.get("wick_alerted", False):
                 state["wick_alerted"] = False
                 _save_alert_state(_alert_state)
 
             if is_active and kill_switch and not state["kill_alerted"]:
-                ema21_val = float(df.iloc[-2].get("EMA_21", 0))
-                pnl_str   = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
                 _send_telegram(
-                    f"💀 <b>KILL SWITCH — {symbol}</b>\n"
-                    f"H4 close di bawah EMA21 (${ema21_val:.4f})\n"
-                    f"Harga: <b>${close_price:.4f}</b> | PnL: {pnl_str}\n\n"
+                    f"💀 <b>KILL SWITCH — {symbol} ({pos_side})</b>\n"
+                    f"H4 close menembus EMA21 (${ema21_val:.4f})\n"
+                    f"Harga: <b>${close_price:.4f}</b> | PnL: {get_pnl()}\n\n"
                     f"❌ <b>Instruksi:</b> PERTIMBANGKAN EXIT PENUH.\n"
-                    f"Struktur bullish resmi batal."
+                    f"Struktur resmi batal."
                 )
                 state["kill_alerted"] = True
                 state["last_alert_ts"] = now_ts
@@ -338,28 +349,32 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["kill_alerted"] = False
                 _save_alert_state(_alert_state)
 
-            # ── TRACKING TAKE PROFIT 1, 2, 3 (BARU) ─────────────────
+            # ── TRACKING TAKE PROFIT 1, 2, 3 ─────────────────
             if is_active:
                 high_price = float(df.iloc[-1]["High"])
-                tp1 = lvl_L['tp1']
-                tp2 = lvl_L['tp2']
-                tp3 = lvl_L['tp3']
+                low_price  = float(df.iloc[-1]["Low"])
 
-                # Cek Hold Recommendation berdasarkan analisis momentum
                 mom_signal  = mom_hold.get("signal", False)
                 mom_reasons = " · ".join(mom_hold.get("reasons", [])[:2])
                 hold_reco = (
-                    f"✅ <b>REKOMENDASI HOLD</b> (Momentum masih kuat naik: {mom_reasons})"
-                    if mom_signal
-                    else "⚠️ <b>REKOMENDASI EXIT</b> (Momentum melemah, segera Take Profit)"
+                    f"✅ <b>REKOMENDASI HOLD</b> (Momentum masih kuat: {mom_reasons})"
+                    if mom_signal else "⚠️ <b>REKOMENDASI EXIT</b> (Momentum melemah, segera Take Profit)"
                 )
 
-                # TP 1 Hit
-                if high_price >= tp1 and not state.get("tp1_alerted"):
+                if pos_side == "SHORT":
+                    tp1, tp2, tp3 = lvl_S['tp1'], lvl_S['tp2'], lvl_S['tp3']
+                    tp1_hit, tp2_hit, tp3_hit = (low_price <= tp1), (low_price <= tp2), (low_price <= tp3)
+                    hit_price = low_price
+                else:
+                    tp1, tp2, tp3 = lvl_L['tp1'], lvl_L['tp2'], lvl_L['tp3']
+                    tp1_hit, tp2_hit, tp3_hit = (high_price >= tp1), (high_price >= tp2), (high_price >= tp3)
+                    hit_price = high_price
+
+                if tp1_hit and not state.get("tp1_alerted"):
                     _send_telegram(
-                        f"🎯 <b>TP1 TERCAPAI — {symbol}</b>\n"
+                        f"🎯 <b>TP1 TERCAPAI — {symbol} ({pos_side})</b>\n"
                         f"{'\u2500'*28}\n"
-                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
+                        f"Harga Menyentuh: <b>${hit_price:.6f}</b>\n"
                         f"Level TP1: ${tp1:.6f}\n\n"
                         f"Tindakan: <b>EXIT 30%</b> & GESER SL KE ENTRY (Breakeven)\n\n"
                         f"{hold_reco}"
@@ -367,12 +382,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     state["tp1_alerted"] = True
                     _save_alert_state(_alert_state)
 
-                # TP 2 Hit
-                if high_price >= tp2 and not state.get("tp2_alerted"):
+                if tp2_hit and not state.get("tp2_alerted"):
                     _send_telegram(
-                        f"🎯🎯 <b>TP2 TERCAPAI — {symbol}</b>\n"
+                        f"🎯🎯 <b>TP2 TERCAPAI — {symbol} ({pos_side})</b>\n"
                         f"{'\u2500'*28}\n"
-                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
+                        f"Harga Menyentuh: <b>${hit_price:.6f}</b>\n"
                         f"Level TP2: ${tp2:.6f}\n\n"
                         f"Tindakan: <b>EXIT 40%</b> & GESER SL KE TP1\n\n"
                         f"{hold_reco}"
@@ -380,22 +394,18 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     state["tp2_alerted"] = True
                     _save_alert_state(_alert_state)
 
-                # TP 3 Hit
-                if high_price >= tp3 and not state.get("tp3_alerted"):
+                if tp3_hit and not state.get("tp3_alerted"):
                     _send_telegram(
-                        f"🚀 <b>TP3 TERCAPAI (FINAL) — {symbol}</b>\n"
+                        f"🚀 <b>TP3 TERCAPAI (FINAL) — {symbol} ({pos_side})</b>\n"
                         f"{'\u2500'*28}\n"
-                        f"Harga Menyentuh: <b>${high_price:.6f}</b>\n"
+                        f"Harga Menyentuh: <b>${hit_price:.6f}</b>\n"
                         f"Tindakan: <b>EXIT SISA 30%</b>. Trade Selesai."
                     )
                     state["tp3_alerted"] = True
                     _save_alert_state(_alert_state)
 
-            # Reset alert TP jika tidak ada posisi (sudah terjual/clear)
             if not is_active and state.get("tp1_alerted"):
-                state["tp1_alerted"] = False
-                state["tp2_alerted"] = False
-                state["tp3_alerted"] = False
+                state["tp1_alerted"], state["tp2_alerted"], state["tp3_alerted"] = False, False, False
                 _save_alert_state(_alert_state)
 
             # ── EXIT SIGNALS ───────────────────────────────
@@ -403,7 +413,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             hard_exits   = [e for e in exit_signals if e[0] == "❌"]
 
             if is_active and hard_exits and not state["exit_alerted"]:
-                pnl_str   = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
+                pnl_str   = get_pnl()  # Gunakan fungsi PnL dinamis SSOT
                 exit_lines = "\n".join(
                     f"  {icon} {name}: {val} ({cond})"
                     for icon, name, val, cond in exit_signals[:5]
