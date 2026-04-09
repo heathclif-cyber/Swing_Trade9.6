@@ -103,8 +103,24 @@ def _get_pg_conn():
 
 
 def _load_trade_entries() -> dict:
-    conn = _get_pg_conn()
-    if conn:
+    """Load trade entries dari PostgreSQL.
+
+    STRICT MODE (DATABASE_URL aktif): baca HANYA dari PostgreSQL.
+    Jika koneksi atau query gagal, log DATABASE ERROR dan return {}.
+    JANGAN fallback ke JSON agar kondisi database rusak langsung terdeteksi.
+
+    DEVELOPMENT (tanpa DATABASE_URL): fallback ke file JSON lokal.
+    """
+    db = _db_url()
+    if db:
+        # ── STRICT: PostgreSQL only ──
+        conn = _get_pg_conn()
+        if conn is None:
+            logger.error(
+                "[DB ERROR] _load_trade_entries: Tidak dapat terhubung ke PostgreSQL. "
+                "Data dikembalikan kosong {}. Periksa DATABASE_URL / koneksi Supabase."
+            )
+            return {}
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT value FROM kv_store WHERE key = 'trade_entries'")
@@ -112,10 +128,14 @@ def _load_trade_entries() -> dict:
             conn.close()
             return json.loads(row[0]) if row else {}
         except Exception as e:
-            logger.warning(f"PG load failed: {e}")
+            logger.error(
+                f"[DB ERROR] _load_trade_entries: Query PostgreSQL gagal — {e}. "
+                "Data dikembalikan kosong {}."
+            )
             try: conn.close()
             except: pass
-    # Fallback JSON
+            return {}
+    # ── DEVELOPMENT: fallback ke file JSON lokal ──
     path = os.environ.get(
         "TRADE_DATA_PATH",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_entries.json")
@@ -129,8 +149,24 @@ def _load_trade_entries() -> dict:
     return {}
 
 def _load_alert_state() -> dict:
-    conn = _get_pg_conn()
-    if conn:
+    """Load alert state dari PostgreSQL.
+
+    STRICT MODE (DATABASE_URL aktif): baca HANYA dari PostgreSQL.
+    Jika gagal, log DATABASE ERROR dan return {}.
+    JANGAN fallback ke JSON.
+
+    DEVELOPMENT (tanpa DATABASE_URL): return {} (state ephemeral di memory).
+    """
+    db = _db_url()
+    if db:
+        # ── STRICT: PostgreSQL only ──
+        conn = _get_pg_conn()
+        if conn is None:
+            logger.error(
+                "[DB ERROR] _load_alert_state: Tidak dapat terhubung ke PostgreSQL. "
+                "Alert state dikembalikan kosong."
+            )
+            return {}
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT value FROM kv_store WHERE key = 'alert_state'")
@@ -138,32 +174,32 @@ def _load_alert_state() -> dict:
             conn.close()
             return json.loads(row[0]) if row else {}
         except Exception as e:
+            logger.error(
+                f"[DB ERROR] _load_alert_state: Query PostgreSQL gagal — {e}. "
+                "Alert state dikembalikan kosong."
+            )
             try: conn.close()
             except: pass
     return {}
 
 def _save_alert_state(state: dict) -> None:
-    conn = _get_pg_conn()
-    if conn:
-        try:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO kv_store (key, value, updated_at)
-                    VALUES ('alert_state', %s, NOW())
-                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-                """, (json.dumps(state),))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            try: conn.close()
-            except: pass
+    """Simpan _alert_state ke PostgreSQL.
 
+    STRICT MODE (DATABASE_URL aktif): tulis HANYA ke PostgreSQL.
+    Jika gagal, log DATABASE ERROR. JANGAN fallback ke JSON.
 
-def _save_alert_state(state: dict) -> None:
-    """Simpan _alert_state ke PostgreSQL (jika ada) atau fallback JSON."""
-    # ── Coba simpan ke PostgreSQL dulu ────────────────────
-    conn = _get_pg_conn()
-    if conn:
+    DEVELOPMENT (tanpa DATABASE_URL): fallback ke file JSON lokal.
+    """
+    db = _db_url()
+    if db:
+        # ── STRICT: PostgreSQL only ──
+        conn = _get_pg_conn()
+        if conn is None:
+            logger.error(
+                "[DB ERROR] _save_alert_state: Tidak dapat terhubung ke PostgreSQL. "
+                "Alert state TIDAK disimpan."
+            )
+            return
         try:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -176,10 +212,11 @@ def _save_alert_state(state: dict) -> None:
             conn.close()
             return
         except Exception as e:
-            logger.warning(f"PG save alert_state failed: {e}")
+            logger.error(f"[DB ERROR] _save_alert_state: PostgreSQL write gagal — {e}. State TIDAK disimpan.")
             try: conn.close()
             except: pass
-    # ── Fallback: JSON ─────────────────────────────────────
+            return
+    # ── DEVELOPMENT: fallback ke file JSON lokal ──
     path = os.environ.get(
         "ALERT_STATE_PATH",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_state.json")

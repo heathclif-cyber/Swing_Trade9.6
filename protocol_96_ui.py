@@ -28,12 +28,9 @@ AVAILABLE_PAIRS = ["SUIUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "PENDLEUSDT", "DO
 COIN_PAIR = AVAILABLE_PAIRS[0]
 ALLOCATED_CAPITAL = 200
 
-# File path untuk menyimpan entry price per koin
-# Railway: set env var TRADE_DATA_PATH=/app/data/trade_entries.json dan mount Volume ke /app/data
+# File path untuk fallback lokal (DEVELOPMENT ONLY — tidak dipakai jika DATABASE_URL aktif)
 _default_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'trade_entries.json')
 TRADE_ENTRIES_FILE = os.environ.get('TRADE_DATA_PATH', _default_path)
-# Auto-create direktori jika belum ada (penting untuk Railway Volume)
-os.makedirs(os.path.dirname(os.path.abspath(TRADE_ENTRIES_FILE)), exist_ok=True)
 
 try:
     from dotenv import load_dotenv
@@ -170,7 +167,7 @@ def get_klines_rest(symbol: str, interval: str, limit: int = 250) -> pd.DataFram
 DATABASE_URL = os.environ.get('DATABASE_URL')  # Set automatically by Railway PostgreSQL plugin
 
 def _get_pg_conn():  # type: ignore
-    """Buat koneksi PostgreSQL. Return None jika tidak tersedia."""
+    """Buat koneksi PostgreSQL. Return None jika DATABASE_URL tidak ada."""
     if not DATABASE_URL:
         return None
     try:
@@ -188,7 +185,7 @@ def _get_pg_conn():  # type: ignore
             sslmode='require'
         )
     except Exception as e:
-        logger.warning(f"PostgreSQL connection failed (fallback ke file): {e}")
+        logger.error(f"[DB ERROR] PostgreSQL connection failed: {e}")
         return None
 
 def _ensure_pg_table(conn) -> None:  # type: ignore
@@ -234,9 +231,23 @@ def _migrate_format(data: dict) -> dict:  # type: ignore
     return data
 
 def load_trade_entries() -> dict:  # type: ignore
-    """Load trade entries — PostgreSQL jika DATABASE_URL ada, fallback ke file JSON."""
-    conn = _get_pg_conn()
-    if conn:
+    """Load trade entries.
+
+    STRICT MODE (DATABASE_URL aktif): baca HANYA dari PostgreSQL.
+    Jika koneksi atau query gagal, log DATABASE ERROR dan return {}.
+    JANGAN fallback ke file JSON agar kondisi database rusak langsung terdeteksi.
+
+    DEVELOPMENT (tanpa DATABASE_URL): fallback ke file JSON lokal.
+    """
+    if DATABASE_URL:
+        # ── STRICT: PostgreSQL only ──
+        conn = _get_pg_conn()
+        if conn is None:
+            logger.error(
+                "[DB ERROR] load_trade_entries: Tidak dapat terhubung ke PostgreSQL. "
+                "Data dikembalikan kosong. Periksa DATABASE_URL / koneksi Supabase."
+            )
+            return {}
         try:
             _ensure_pg_table(conn)
             with conn.cursor() as cur:
@@ -247,9 +258,14 @@ def load_trade_entries() -> dict:  # type: ignore
                 return _migrate_format(json.loads(row[0]))
             return {}
         except Exception as e:
-            logger.warning(f"PostgreSQL load failed (fallback ke file): {e}")
-            if conn: conn.close()
-    # ── Fallback: local JSON file (development) ──
+            logger.error(
+                f"[DB ERROR] load_trade_entries: Query PostgreSQL gagal — {e}. "
+                "Data dikembalikan kosong."
+            )
+            try: conn.close()
+            except: pass
+            return {}
+    # ── DEVELOPMENT: fallback ke file JSON lokal ──
     if os.path.exists(TRADE_ENTRIES_FILE):
         try:
             with open(TRADE_ENTRIES_FILE, 'r') as f:
@@ -258,11 +274,17 @@ def load_trade_entries() -> dict:  # type: ignore
             logger.warning(f"Failed to load trade entries from file: {e}")
     return {}
 
-def save_trade_entries(entries: dict) -> None:  # type: ignore
-    """Simpan trade entries — PostgreSQL jika DATABASE_URL ada, fallback ke file JSON.
-    
-    [DATA GUARD] Jika DATABASE_URL aktif dan data kosong {}, tolak penyimpanan
-    untuk mencegah penghapusan (wipe) data existing di database.
+def save_trade_entries(entries: dict) -> bool:  # type: ignore
+    """Simpan trade entries.
+
+    STRICT MODE (DATABASE_URL aktif): tulis HANYA ke PostgreSQL.
+    - Jika data kosong {}, tolak penyimpanan (DATA GUARD) dan return False.
+    - Jika koneksi gagal, log DATABASE ERROR dan raise RuntimeError
+      sehingga caller (endpoint Flask) mengembalikan HTTP 503 ke UI.
+    JANGAN fallback ke JSON agar data mismatch tidak terjadi secara diam-diam.
+
+    DEVELOPMENT (tanpa DATABASE_URL): fallback ke file JSON lokal.
+    Returns True jika berhasil, False jika ditolak DATA GUARD.
     """
     # ── DATA GUARD: blokir save dict kosong ke PostgreSQL ──
     if DATABASE_URL and not entries:
@@ -270,9 +292,18 @@ def save_trade_entries(entries: dict) -> None:  # type: ignore
             "[DATA GUARD] DITOLAK: Mencoba save data kosong {} ke PostgreSQL. "
             "Save diabaikan untuk mencegah data loss."
         )
-        return
-    conn = _get_pg_conn()
-    if conn:
+        return False
+
+    if DATABASE_URL:
+        # ── STRICT: PostgreSQL only ──
+        conn = _get_pg_conn()
+        if conn is None:
+            msg = (
+                "[DB ERROR] save_trade_entries: Tidak dapat terhubung ke PostgreSQL. "
+                "Data TIDAK disimpan. Periksa DATABASE_URL / koneksi Supabase."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
         try:
             _ensure_pg_table(conn)
             with conn.cursor() as cur:
@@ -284,17 +315,25 @@ def save_trade_entries(entries: dict) -> None:  # type: ignore
             conn.commit()
             conn.close()
             logger.info("💾 Trade entries saved to PostgreSQL")
-            return
+            return True
+        except RuntimeError:
+            raise
         except Exception as e:
-            logger.warning(f"PostgreSQL save failed (fallback ke file): {e}")
-            if conn: conn.close()
-    # ── Fallback: local JSON file ──
+            msg = f"[DB ERROR] save_trade_entries: PostgreSQL write gagal — {e}. Data TIDAK disimpan."
+            logger.error(msg)
+            try: conn.close()
+            except: pass
+            raise RuntimeError(msg)
+
+    # ── DEVELOPMENT: fallback ke file JSON lokal ──
     try:
         with open(TRADE_ENTRIES_FILE, 'w') as f:
             json.dump(entries, f, indent=2)
         logger.info(f"💾 Trade entries saved to {TRADE_ENTRIES_FILE}")
+        return True
     except Exception as e:
-        logger.error(f"Failed to save trade entries: {e}")
+        logger.error(f"Failed to save trade entries to file: {e}")
+        return False
 
 
 def get_entry_summary(symbol: str) -> dict:  # type: ignore
@@ -1365,6 +1404,10 @@ def set_trade_entry():
             "message": f"{symbol} {side} entry #{summary['num_entries']} added",
             "summary": summary,
         })
+    except RuntimeError as e:
+        # DATABASE ERROR — jangan fallback, beri tahu UI secara eksplisit
+        logger.error(f"[DB] set_trade_entry database error: {e}")
+        return jsonify({"success": False, "error": str(e), "db_error": True}), 503
     except Exception as e:
         logger.error(f"Save entry error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1393,6 +1436,9 @@ def delete_trade_entry():
                 del entries[symbol]
                 save_trade_entries(entries)
         return jsonify({"success": True})
+    except RuntimeError as e:
+        logger.error(f"[DB] delete_trade_entry database error: {e}")
+        return jsonify({"success": False, "error": str(e), "db_error": True}), 503
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1427,6 +1473,9 @@ def set_trade_sale():
 
         summary = get_entry_summary(symbol)
         return jsonify({"success": True, "summary": summary})
+    except RuntimeError as e:
+        logger.error(f"[DB] set_trade_sale database error: {e}")
+        return jsonify({"success": False, "error": str(e), "db_error": True}), 503
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1449,6 +1498,9 @@ def delete_trade_sale():
                 save_trade_entries(entries)
                 return jsonify({"success": True})
         return jsonify({"success": False, "error": "Not found"}), 404
+    except RuntimeError as e:
+        logger.error(f"[DB] delete_trade_sale database error: {e}")
+        return jsonify({"success": False, "error": str(e), "db_error": True}), 503
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
