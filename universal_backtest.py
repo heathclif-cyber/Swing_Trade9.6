@@ -27,8 +27,6 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
     start_idx = 101
     total_candles = len(df)
     
-    print(f"🚀 Simulasi {trade_direction} | BE={use_breakeven} | SL={sl_type} | DYN={dynamic_exit} | HOLD={max_hold_candles} | TP={tp_strategy}")
-    
     for i in tqdm(range(start_idx, total_candles)):
         window_start = 0 if window_size > i else max(0, i - window_size)
         window_df = df.iloc[window_start : i+1].copy()
@@ -40,7 +38,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
         close_price = float(current_candle['Close'])
         ema_50 = float(current_candle['EMA_50']) if 'EMA_50' in current_candle else close_price
         
-        # Ekstraksi Indikator Dinamis (RSI, StochRSI, CVD)
+        # Ekstraksi Indikator Dinamis
         rsi_6 = float(current_candle.get('RSI_6', 50))
         stoch_k = float(current_candle.get('StochRSI_K', 50))
         stoch_d = float(current_candle.get('StochRSI_D', 50))
@@ -71,7 +69,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                 active_trade = None
                 continue
 
-            # B. Dynamic Exits (EMA21, MOMENTUM, CVD)
+            # B. Dynamic Exits
             if dynamic_exit == 'EMA21' and 'EMA_21' in current_candle:
                 ema_21 = float(current_candle['EMA_21'])
                 if (active_trade['side'] == 'LONG' and close_price < ema_21) or (active_trade['side'] == 'SHORT' and close_price > ema_21):
@@ -82,7 +80,6 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     trade_history.append(active_trade)
                     active_trade = None
                     continue
-            
             elif dynamic_exit == 'MOMENTUM':
                 if active_trade['side'] == 'LONG' and rsi_6 > 75 and stoch_cross_down:
                     active_trade['status'] = 'CLOSED_DYNAMIC_MOMENTUM'
@@ -100,7 +97,6 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     trade_history.append(active_trade)
                     active_trade = None
                     continue
-
             elif dynamic_exit == 'CVD':
                 if active_trade['side'] == 'LONG' and cvd_div_bear:
                     active_trade['status'] = 'CLOSED_DYNAMIC_CVD_BEAR'
@@ -119,11 +115,11 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     active_trade = None
                     continue
 
-            # C. Standar / Fixed TP & SL Logic
+            # C. Fixed Hit & Run Logic vs Scaling
             if active_trade['side'] == 'LONG':
                 if tp_strategy.startswith('fixed_rr'):
                     if high_price >= active_trade['tp_fixed']:
-                        active_trade['status'] = 'CLOSED_FIXED_RR'
+                        active_trade['status'] = 'CLOSED_HIT_AND_RUN'
                         active_trade['exit_price'] = active_trade['tp_fixed']
                         active_trade['exit_date'] = timestamp_now
                         active_trade['pnl_pct'] = (active_trade['exit_price'] / active_trade['entry_price'] - 1) * 100
@@ -133,7 +129,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
 
                 if active_trade is not None:
                     if low_price <= active_trade['sl']:
-                        active_trade['status'] = 'CLOSED_SL_OR_TRAILING'
+                        active_trade['status'] = 'CLOSED_SL'
                         active_trade['exit_price'] = active_trade['sl']
                         active_trade['exit_date'] = timestamp_now
                         active_trade['pnl_pct'] = (active_trade['exit_price'] / active_trade['entry_price'] - 1) * 100
@@ -155,7 +151,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
             elif active_trade['side'] == 'SHORT':
                 if tp_strategy.startswith('fixed_rr'):
                     if low_price <= active_trade['tp_fixed']:
-                        active_trade['status'] = 'CLOSED_FIXED_RR'
+                        active_trade['status'] = 'CLOSED_HIT_AND_RUN'
                         active_trade['exit_price'] = active_trade['tp_fixed']
                         active_trade['exit_date'] = timestamp_now
                         active_trade['pnl_pct'] = (active_trade['entry_price'] / active_trade['exit_price'] - 1) * 100
@@ -165,7 +161,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
 
                 if active_trade is not None:
                     if high_price >= active_trade['sl']:
-                        active_trade['status'] = 'CLOSED_SL_OR_TRAILING'
+                        active_trade['status'] = 'CLOSED_SL'
                         active_trade['exit_price'] = active_trade['sl']
                         active_trade['exit_date'] = timestamp_now
                         active_trade['pnl_pct'] = (active_trade['entry_price'] / active_trade['exit_price'] - 1) * 100
@@ -203,9 +199,13 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                 safe_sl = min(float(sl_struct), float(chosen_sl))
                 risk = abs(close_price - safe_sl)
                 
-                tp_fixed = close_price + (1.5 * risk) if tp_strategy == 'fixed_rr_15' else (close_price + (2.0 * risk) if tp_strategy == 'fixed_rr_20' else close_price * 1.05)
+                # HIT AND RUN CALCULATION (LONG)
+                if tp_strategy == 'fixed_rr_10': tp_fixed = close_price + (1.0 * risk)
+                elif tp_strategy == 'fixed_rr_15': tp_fixed = close_price + (1.5 * risk)
+                elif tp_strategy == 'fixed_rr_20': tp_fixed = close_price + (2.0 * risk)
+                else: tp_fixed = close_price * 1.05
                 
-                if (levels_L.get('tp1', close_price * 1.05) / close_price - 1) * 100 >= 2.0:
+                if (levels_L.get('tp1', close_price * 1.05) / close_price - 1) * 100 >= 1.0:
                     active_trade = {
                         'side': 'LONG', 'entry_date': timestamp_now, 'entry_index': i, 'entry_price': close_price,
                         'sl': safe_sl, 'tp_fixed': tp_fixed,
@@ -222,9 +222,13 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                 safe_sl = max(float(sl_struct), float(chosen_sl))
                 risk = abs(safe_sl - close_price)
                 
-                tp_fixed = close_price - (1.5 * risk) if tp_strategy == 'fixed_rr_15' else (close_price - (2.0 * risk) if tp_strategy == 'fixed_rr_20' else close_price * 0.95)
+                # HIT AND RUN CALCULATION (SHORT)
+                if tp_strategy == 'fixed_rr_10': tp_fixed = close_price - (1.0 * risk)
+                elif tp_strategy == 'fixed_rr_15': tp_fixed = close_price - (1.5 * risk)
+                elif tp_strategy == 'fixed_rr_20': tp_fixed = close_price - (2.0 * risk)
+                else: tp_fixed = close_price * 0.95
                 
-                if (1 - levels_S.get('tp1', close_price * 0.95) / close_price) * 100 >= 2.0:
+                if (1 - levels_S.get('tp1', close_price * 0.95) / close_price) * 100 >= 1.0:
                     active_trade = {
                         'side': 'SHORT', 'entry_date': timestamp_now, 'entry_index': i, 'entry_price': close_price,
                         'sl': safe_sl, 'tp_fixed': tp_fixed,
@@ -234,9 +238,6 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                         'tp1_hit': False, 'tp2_hit': False, 'tp3_hit': False, 'status': 'OPEN'
                     }
 
-    # ==========================================
-    # 3. KIRAAN PRESTASI (HASIL)
-    # ==========================================
     total_trades = len(trade_history)
     if active_trade is not None:
         last_close = float(current_candle['Close'])
