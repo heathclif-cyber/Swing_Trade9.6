@@ -513,6 +513,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     )
                     state["last_trailing_action"] = action_text
                     state["last_alert_ts"] = now_ts
+                    _save_alert_state(_alert_state)   # persist agar tidak spam setelah restart
                     return
             elif not active_tsl:
                 state["last_trailing_action"] = None

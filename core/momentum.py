@@ -98,26 +98,17 @@ def calculate_trailing_sl_long(is_active, high_price, tp1_val, tp2_val, tp1_labe
         if _tp2_L_hit:
             trailing_sl['recommended_sl']       = round(tp1_val, 8)
             trailing_sl['recommended_sl_label'] = f'Trailing SL @ TP1 [{tp1_label}]'
-            trailing_sl['action'] = (
-                f'⭐ TP2 tercapai → GESER SL ke TP1 = ${tp1_val:.4f} '
-                f'(+{(tp1_val/entry_val-1)*100:.2f}% dari entry). Lock profit partial.'
-            )
+            trailing_sl['action'] = '⭐ TP2 tercapai → GESER SL ke TP1. Lock profit partial.'
             trailing_sl['note'] = 'Trailing aktif: SL di TP1 — risiko closed di profit TP1 level'
         elif _tp1_L_hit:
             trailing_sl['recommended_sl']       = round(entry_val, 8)
-            trailing_sl['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry ${entry_val:.4f})'
-            trailing_sl['action'] = (
-                f'✅ TP1 tercapai → GESER SL ke Breakeven = ${entry_val:.4f}. '
-                f'Trade sudah risk-free.'
-            )
+            trailing_sl['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry)'
+            trailing_sl['action'] = '✅ TP1 tercapai → GESER SL ke Breakeven. Trade sudah risk-free.'
             trailing_sl['note'] = 'Trailing aktif: SL di entry — trade risk-free, tunggu TP2'
         else:
             trailing_sl['recommended_sl']       = round(sl_struct_L, 8)
             trailing_sl['recommended_sl_label'] = f'SL Struktural [{sl_label_L}]'
-            trailing_sl['action'] = (
-                f'⏳ TP1 belum tercapai. Pertahankan SL struktural ${sl_struct_L:.4f}. '
-                f'TP1 target: ${tp1_val:.4f}.'
-            )
+            trailing_sl['action'] = '⏳ TP1 belum tercapai. Pertahankan SL struktural awal.'
             trailing_sl['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
     return trailing_sl
 
@@ -137,26 +128,17 @@ def calculate_trailing_sl_short(is_active, low_price, tp1_val, tp2_val, tp1_labe
         if _tp2_S_hit:
             trailing_sl['recommended_sl']       = round(tp1_val, 8)
             trailing_sl['recommended_sl_label'] = f'Trailing SL @ TP1 [{tp1_label}]'
-            trailing_sl['action'] = (
-                f'⭐ TP2 tercapai → GESER SL ke TP1 = ${tp1_val:.4f} '
-                f'(-{(1-tp1_val/entry_val)*100:.2f}% dari entry). Lock profit partial.'
-            )
+            trailing_sl['action'] = '⭐ TP2 tercapai → GESER SL ke TP1. Lock profit partial.'
             trailing_sl['note'] = 'Trailing aktif: SL di TP1 — risiko closed di profit TP1 level'
         elif _tp1_S_hit:
             trailing_sl['recommended_sl']       = round(entry_val, 8)
-            trailing_sl['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry ${entry_val:.4f})'
-            trailing_sl['action'] = (
-                f'✅ TP1 tercapai → GESER SL ke Breakeven = ${entry_val:.4f}. '
-                f'Trade sudah risk-free.'
-            )
+            trailing_sl['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry)'
+            trailing_sl['action'] = '✅ TP1 tercapai → GESER SL ke Breakeven. Trade sudah risk-free.'
             trailing_sl['note'] = 'Trailing aktif: SL di entry — trade risk-free, tunggu TP2'
         else:
             trailing_sl['recommended_sl']       = round(sl_struct_S, 8)
             trailing_sl['recommended_sl_label'] = f'SL Struktural [{sl_label_S}]'
-            trailing_sl['action'] = (
-                f'⏳ TP1 belum tercapai. Pertahankan SL struktural ${sl_struct_S:.4f}. '
-                f'TP1 target: ${tp1_val:.4f}.'
-            )
+            trailing_sl['action'] = '⏳ TP1 belum tercapai. Pertahankan SL struktural awal.'
             trailing_sl['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
     return trailing_sl
 
