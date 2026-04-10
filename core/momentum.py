@@ -116,7 +116,7 @@ def calculate_trailing_sl_long(is_active, high_price, tp1_val, tp2_val, tp1_labe
             trailing_sl['recommended_sl_label'] = f'SL Struktural [{sl_label_L}]'
             trailing_sl['action'] = (
                 f'⏳ TP1 belum tercapai. Pertahankan SL struktural ${sl_struct_L:.4f}. '
-                f'TP1 target: ${tp1_val:.4f} ({(tp1_val/close_price-1)*100:+.2f}% dari close).'
+                f'TP1 target: ${tp1_val:.4f}.'
             )
             trailing_sl['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
     return trailing_sl
@@ -155,7 +155,7 @@ def calculate_trailing_sl_short(is_active, low_price, tp1_val, tp2_val, tp1_labe
             trailing_sl['recommended_sl_label'] = f'SL Struktural [{sl_label_S}]'
             trailing_sl['action'] = (
                 f'⏳ TP1 belum tercapai. Pertahankan SL struktural ${sl_struct_S:.4f}. '
-                f'TP1 target: ${tp1_val:.4f} ({(tp1_val/close_price-1)*100:+.2f}% dari close).'
+                f'TP1 target: ${tp1_val:.4f}.'
             )
             trailing_sl['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
     return trailing_sl
