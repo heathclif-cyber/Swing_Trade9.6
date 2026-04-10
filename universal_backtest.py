@@ -4,7 +4,9 @@ from tqdm import tqdm
 import os
 import argparse
 
-def run_universal_backtest(csv_file, symbol, trade_direction, window_size=9999999):
+def run_universal_backtest(csv_file, symbol, trade_direction, window_size=9999999, 
+                           use_breakeven=True, sl_type='sl_lebar', 
+                           dynamic_exit=None, max_hold_candles=None, tp_strategy='scaling'):
     print(f"🔄 Membaca data dari {csv_file}...")
     if not os.path.exists(csv_file):
         print(f"❌ Ralat: Fail {csv_file} tidak dijumpai di direktori ini.")
@@ -26,6 +28,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
     total_candles = len(df)
     
     print(f"🚀 Memulakan simulasi {trade_direction} pada {total_candles - start_idx} candle untuk {symbol}...")
+    print(f"⚙️ Params: BE={use_breakeven}, SL={sl_type}, DynamicExit={dynamic_exit}, MaxHold={max_hold_candles}, TP={tp_strategy}")
     
     for i in tqdm(range(start_idx, total_candles)):
         window_start = 0 if window_size > i else max(0, i - window_size)
@@ -37,13 +40,45 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
         low_price = float(current_candle['Low'])
         close_price = float(current_candle['Close'])
         
-        # 💡 Tarik data EMA-50 untuk kawalan mod Runner
         ema_50 = float(current_candle['EMA_50']) if 'EMA_50' in current_candle else close_price
         
         # ==========================================
-        # 1. PENGURUSAN TRADE AKTIF (Runner Mode)
+        # 1. PENGURUSAN TRADE AKTIF (Exit Logic)
         # ==========================================
         if active_trade is not None:
+            # A. Time-Based Exit
+            if max_hold_candles:
+                candles_held = i - active_trade['entry_index']
+                if candles_held >= max_hold_candles:
+                    active_trade['status'] = 'CLOSED_TIME_LIMIT'
+                    active_trade['exit_price'] = close_price
+                    active_trade['exit_date'] = timestamp_now
+                    active_trade['pnl_pct'] = (close_price / active_trade['entry_price'] - 1) * 100 if active_trade['side'] == 'LONG' else (active_trade['entry_price'] / close_price - 1) * 100
+                    trade_history.append(active_trade)
+                    active_trade = None
+                    continue
+
+            # B. Dynamic Exit (EMA21)
+            if dynamic_exit == 'EMA21' and 'EMA_21' in current_candle:
+                ema_21 = float(current_candle['EMA_21'])
+                if active_trade['side'] == 'LONG' and close_price < ema_21:
+                    active_trade['status'] = 'CLOSED_DYNAMIC_EMA21'
+                    active_trade['exit_price'] = close_price
+                    active_trade['exit_date'] = timestamp_now
+                    active_trade['pnl_pct'] = (close_price / active_trade['entry_price'] - 1) * 100
+                    trade_history.append(active_trade)
+                    active_trade = None
+                    continue
+                elif active_trade['side'] == 'SHORT' and close_price > ema_21:
+                    active_trade['status'] = 'CLOSED_DYNAMIC_EMA21'
+                    active_trade['exit_price'] = close_price
+                    active_trade['exit_date'] = timestamp_now
+                    active_trade['pnl_pct'] = (active_trade['entry_price'] / close_price - 1) * 100
+                    trade_history.append(active_trade)
+                    active_trade = None
+                    continue
+
+            # C. Standard Target/Stop Logic
             if active_trade['side'] == 'LONG':
                 if active_trade.get('tp3_hit', False):
                     active_trade['sl'] = max(active_trade['sl'], ema_50)
@@ -57,17 +92,21 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     active_trade = None
                     continue
 
-                if high_price >= active_trade['tp1'] and not active_trade.get('tp1_hit', False):
-                    active_trade['tp1_hit'] = True
-                    active_trade['sl'] = max(active_trade['sl'], active_trade['entry_price']) 
-                    
-                if high_price >= active_trade['tp2'] and not active_trade.get('tp2_hit', False):
-                    active_trade['tp2_hit'] = True
-                    active_trade['sl'] = max(active_trade['sl'], active_trade['tp1']) 
-                    
-                if high_price >= active_trade['tp3'] and not active_trade.get('tp3_hit', False):
-                    active_trade['tp3_hit'] = True
-                    active_trade['sl'] = max(active_trade['tp2'], ema_50) 
+                if tp_strategy != 'trailing_only':
+                    if high_price >= active_trade['tp1'] and not active_trade.get('tp1_hit', False):
+                        active_trade['tp1_hit'] = True
+                        if use_breakeven:
+                            active_trade['sl'] = max(active_trade['sl'], active_trade['entry_price']) 
+                        
+                    if high_price >= active_trade['tp2'] and not active_trade.get('tp2_hit', False):
+                        active_trade['tp2_hit'] = True
+                        if use_breakeven:
+                            active_trade['sl'] = max(active_trade['sl'], active_trade['tp1']) 
+                        
+                    if high_price >= active_trade['tp3'] and not active_trade.get('tp3_hit', False):
+                        active_trade['tp3_hit'] = True
+                        if use_breakeven:
+                            active_trade['sl'] = max(active_trade['tp2'], ema_50) 
 
             elif active_trade['side'] == 'SHORT':
                 if active_trade.get('tp3_hit', False):
@@ -82,17 +121,21 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     active_trade = None
                     continue
 
-                if low_price <= active_trade['tp1'] and not active_trade.get('tp1_hit', False):
-                    active_trade['tp1_hit'] = True
-                    active_trade['sl'] = min(active_trade['sl'], active_trade['entry_price'])
-                    
-                if low_price <= active_trade['tp2'] and not active_trade.get('tp2_hit', False):
-                    active_trade['tp2_hit'] = True
-                    active_trade['sl'] = min(active_trade['sl'], active_trade['tp1'])
-                    
-                if low_price <= active_trade['tp3'] and not active_trade.get('tp3_hit', False):
-                    active_trade['tp3_hit'] = True
-                    active_trade['sl'] = min(active_trade['tp2'], ema_50)
+                if tp_strategy != 'trailing_only':
+                    if low_price <= active_trade['tp1'] and not active_trade.get('tp1_hit', False):
+                        active_trade['tp1_hit'] = True
+                        if use_breakeven:
+                            active_trade['sl'] = min(active_trade['sl'], active_trade['entry_price'])
+                        
+                    if low_price <= active_trade['tp2'] and not active_trade.get('tp2_hit', False):
+                        active_trade['tp2_hit'] = True
+                        if use_breakeven:
+                            active_trade['sl'] = min(active_trade['sl'], active_trade['tp1'])
+                        
+                    if low_price <= active_trade['tp3'] and not active_trade.get('tp3_hit', False):
+                        active_trade['tp3_hit'] = True
+                        if use_breakeven:
+                            active_trade['sl'] = min(active_trade['tp2'], ema_50)
 
         # ==========================================
         # 2. MENCARI ENTRY BARU
@@ -114,9 +157,9 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
             levels_S = short_data.get('levels', {})
             
             if (trade_direction in ['LONG', 'BOTH']) and (code_L in ['FULL', 'HALF']):
-                sl_struct = levels_L.get('sl_structure', close_price * 0.95)
-                sl_lebar = levels_L.get('sl_lebar', close_price * 0.95)
-                safe_sl = min(float(sl_struct), float(sl_lebar))
+                chosen_sl = levels_L.get(sl_type, close_price * 0.95)
+                sl_struct = levels_L.get('sl_structure', chosen_sl)
+                safe_sl = min(float(sl_struct), float(chosen_sl))
                 
                 tp1 = float(levels_L.get('tp1', close_price * 1.05))
                 
@@ -124,6 +167,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     active_trade = {
                         'side': 'LONG',
                         'entry_date': timestamp_now,
+                        'entry_index': i,
                         'entry_price': close_price,
                         'sl': safe_sl,
                         'tp1': tp1,
@@ -134,9 +178,9 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     continue 
                     
             if (trade_direction in ['SHORT', 'BOTH']) and (code_S in ['FULL', 'HALF']) and (active_trade is None):
-                sl_struct = levels_S.get('sl_structure', close_price * 1.05)
-                sl_lebar = levels_S.get('sl_lebar', close_price * 1.05)
-                safe_sl = max(float(sl_struct), float(sl_lebar))
+                chosen_sl = levels_S.get(sl_type, close_price * 1.05)
+                sl_struct = levels_S.get('sl_structure', chosen_sl)
+                safe_sl = max(float(sl_struct), float(chosen_sl))
                 
                 tp1 = float(levels_S.get('tp1', close_price * 0.95))
                 
@@ -144,6 +188,7 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
                     active_trade = {
                         'side': 'SHORT',
                         'entry_date': timestamp_now,
+                        'entry_index': i,
                         'entry_price': close_price,
                         'sl': safe_sl,
                         'tp1': tp1,
@@ -189,19 +234,12 @@ def run_universal_backtest(csv_file, symbol, trade_direction, window_size=999999
     print(f"Kadar Kemenangan (Win%)  : {win_rate:.2f}%")
     print(f"Total PnL Terkumpul      : {total_pnl:+.2f}%\n")
 
-    print("\n20 Trade Terakhir:")
-    for t in trade_history[-20:]:
-        print(f" 🔹 {t['entry_date']} | {t['side']} | Entry: {t['entry_price']:.4f} | Exit: {t['exit_price']:.4f} | PnL: {t['pnl_pct']:+.2f}% | Status: {t['status']}")
-    print("="*60)
-
-    # KEMBALIKAN DATA KE COLAB
     return df, trade_history
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Universal Backtester")
     parser.add_argument("--csv", type=str, required=True, help="Nama fail CSV")
-    parser.add_argument("--symbol", type=str, required=True, help="Symbol Koin (cth: DOGEUSDT)")
-    parser.add_argument("--direction", type=str, default="LONG", help="Arah trade: LONG, SHORT, atau BOTH")
+    parser.add_argument("--symbol", type=str, required=True, help="Symbol Koin")
+    parser.add_argument("--direction", type=str, default="LONG")
     args = parser.parse_args()
-    
     run_universal_backtest(args.csv, args.symbol, args.direction)
