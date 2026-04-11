@@ -17,8 +17,8 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException  # t
 import protocol_96_enrichment as enrichment  # type: ignore
 import algo_scoring  # type: ignore
 import signal_monitor  # type: ignore
-import data_engine
 from requests.packages import urllib3  # type: ignore
+# NOTE: data_engine.py telah dipensiun — semua fetch data melalui protocol_96_enrichment (SSOT)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
@@ -506,161 +506,11 @@ def get_klines_df(symbol: str, interval: str, limit: int = 100) -> pd.DataFrame:
     logger.info(f"  Using REST fallback for {symbol} {interval}...")
     return get_klines_rest(symbol, interval, limit)
 
-def get_klines_fapi(symbol: str, interval: str, limit: int = 1000) -> pd.DataFrame:
-    """Fetch from Binance Futures for indices like BTCDOMUSDT and DEFIUSDT."""
-    try:
-        url = "https://fapi.binance.com/fapi/v1/klines"
-        total_klines = []
-        end_time = None
-        while len(total_klines) < limit:
-            req_limit = min(1500, limit - len(total_klines))
-            params = {"symbol": symbol, "interval": interval, "limit": req_limit}
-            if end_time:
-                params['endTime'] = end_time
-            resp = http_requests.get(url, params=params, timeout=10, verify=False)
-            if resp.status_code == 200:
-                chunk = resp.json()
-                if not chunk: break
-                total_klines = chunk + total_klines
-                if len(chunk) < req_limit: break
-                end_time = chunk[0][0] - 1
-            else:
-                break
-        if total_klines:
-            df = pd.DataFrame(total_klines, columns=[
-                'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
-                'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
-            ])
-            df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
-            for col in ['Open', 'High', 'Low', 'Close', 'Total_Volume']:
-                df[col] = df[col].astype(float)
-            return df
-    except Exception as e:
-        logger.warning(f"Error fetching fapi klines for {symbol} {interval}: {e}")
-    return pd.DataFrame()
-
-
-def apply_full_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply EMA, RSI, StochRSI, and ATR indicators."""
-    if df.empty:
-        return df
-
-    df['EMA_7']   = ta.ema(df['Close'], length=7)
-    df['EMA_21']  = ta.ema(df['Close'], length=21)
-    df['EMA_50']  = ta.ema(df['Close'], length=50)
-    df['EMA_200'] = ta.ema(df['Close'], length=200)
-    df['RSI_6']   = ta.rsi(df['Close'], length=6)
-
-    # ATR-14 for structural SL calculation
-    atr_result = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-    df['ATR_14'] = atr_result if atr_result is not None else None
-
-    try:
-        stoch_rsi = ta.stochrsi(df['Close'], length=14, rsi_length=14, k=3, d=3)
-        if stoch_rsi is not None and not stoch_rsi.empty:
-            df['StochRSI_K'] = stoch_rsi.iloc[:, 0]
-            df['StochRSI_D'] = stoch_rsi.iloc[:, 1]
-        else:
-            df['StochRSI_K'] = None
-            df['StochRSI_D'] = None
-    except Exception:
-        df['StochRSI_K'] = None
-        df['StochRSI_D'] = None
-
-    return df
-
-
-def fetch_oi_data(symbol: str = COIN_PAIR, limit: int = 4) -> list:
-    """Fetch Open Interest history from Binance Futures."""
-    try:
-        url = "https://fapi.binance.com/futures/data/openInterestHist"
-        total_data = []
-        end_time = None
-        while len(total_data) < limit:
-            req_limit = min(500, limit - len(total_data))
-            params = {"symbol": symbol, "period": "15m", "limit": req_limit}
-            if end_time:
-                params['endTime'] = end_time
-            resp = http_requests.get(url, params=params, timeout=10, verify=False)
-            if resp.status_code == 200:
-                chunk = resp.json()
-                if not chunk: break
-                total_data = chunk + total_data
-                if len(chunk) < req_limit: break
-                end_time = chunk[0]['timestamp'] - 1
-            else:
-                break
-        return total_data
-    except Exception as e:
-        logger.warning(f"OI fetch error: {e}")
-    return []
-
-
-def fetch_funding_rate(symbol: str = COIN_PAIR, limit: int = 100) -> list:
-    """Fetch Funding Rate history from Binance Futures USDⓈ-M."""
-    try:
-        url = "https://fapi.binance.com/fapi/v1/fundingRate"
-        total_data = []
-        end_time = None
-        while len(total_data) < limit:
-            req_limit = min(1000, limit - len(total_data))
-            params = {"symbol": symbol, "limit": req_limit}
-            if end_time:
-                params['endTime'] = end_time
-            resp = http_requests.get(url, params=params, timeout=10, verify=False)
-            if resp.status_code == 200:
-                chunk = resp.json()
-                if not chunk: break
-                total_data = chunk + total_data
-                if len(chunk) < req_limit: break
-                end_time = chunk[0]['fundingTime'] - 1
-            else:
-                break
-        return total_data
-    except Exception as e:
-        logger.warning(f"Funding Rate fetch error: {e}")
-    return []
-
-
-def fetch_liquidation_data(symbol: str = COIN_PAIR, limit: int = 100) -> list:
-    """Fetch recent Force Order (Liquidation) events from Binance Futures."""
-    try:
-        url = "https://fapi.binance.com/fapi/v1/allForceOrders"
-        total_data = []
-        end_time = None
-        while len(total_data) < limit:
-            req_limit = min(100, limit - len(total_data))
-            params = {"symbol": symbol, "limit": req_limit}
-            if end_time:
-                params['endTime'] = end_time
-            resp = http_requests.get(url, params=params, timeout=10, verify=False)
-            if resp.status_code == 200:
-                chunk = resp.json()
-                if not chunk: break
-                total_data = chunk + total_data
-                if len(chunk) < req_limit: break
-                end_time = chunk[0]['time'] - 1
-            else:
-                break
-        return total_data
-    except Exception as e:
-        logger.warning(f"Liquidation data fetch error: {e}")
-    return []
-
-
-def apply_cvd(df: pd.DataFrame) -> pd.DataFrame:
-    """Calculate per-bar Volume_Delta and Cumulative Volume Delta (CVD).
-    Volume_Delta = Buy_Volume - Sell_Volume  (already exists, recalculated for safety)
-    CVD = cumsum(Volume_Delta) over the dataset window.
-    """
-    df = df.copy()
-    if 'Buy_Volume' in df.columns and 'Sell_Volume' in df.columns:
-        df['Volume_Delta'] = df['Buy_Volume'] - df['Sell_Volume']
-        df['CVD'] = df['Volume_Delta'].cumsum()
-    else:
-        df['Volume_Delta'] = 0.0
-        df['CVD'] = 0.0
-    return df
+# ── Dead code removed ────────────────────────────────────────────────────────
+# get_klines_fapi, apply_full_indicators, fetch_oi_data, fetch_funding_rate,
+# fetch_liquidation_data, apply_cvd — semua telah dihapus.
+# Semua fetch data kini dilakukan oleh protocol_96_enrichment (SSOT).
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def format_ohlcv_for_json(df: pd.DataFrame, last_n: int = 10) -> list:
@@ -824,15 +674,10 @@ def api_test_pendle():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-def fetch_live_macro_and_liq(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Helper mandiri: tarik data Makro (BTC Dominance, Altcoin Index via CMC)
-    dan Likuiditas (Buy_Wall, Sell_Wall via Binance Orderbook), lalu inject
-    ke kolom df sebagai konstanta pada semua baris.
-
-    Dipanggil dari api_data() DAN _enrich_df() di signal_monitor.py
-    agar keduanya punya context makro yang sama saat menghitung skor.
-    """
+# fetch_live_macro_and_liq() — DIHAPUS.
+# Fungsi ini tidak lagi dipanggil. Semua data Macro + Liquiditas
+# diambil oleh enrichment.get_fully_enriched_data() (SSOT).
+def _removed_placeholder():
     if df.empty:
         return df
     df = df.copy()
@@ -901,30 +746,34 @@ def api_data():
         now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         logger.info(f"📡 Fetching dashboard data for {coin_pair}...")
 
-        # ── ⚡ Optimized Data Fetching ──
-        # Fetch each timeframe ONCE to reduce API calls and latency
+        # ── ⚡ Data Fetching — Pakai enrichment SSOT untuk 4h, get_klines_df untuk display ──
         df_cache: dict[str, pd.DataFrame] = {}
         btc_cache: dict[str, pd.DataFrame] = {}
-        
-        for label, interval in INTERVAL_MAP.items():
+
+        DISPLAY_INTERVALS = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w"}
+        for label in DISPLAY_INTERVALS:
             req_limit = 250 if label in ['1h', '4h'] else 20
-            
+            interval_str = label  # string interval untuk get_klines_df
             logger.info(f"  Fetching {coin_pair} {label} ({req_limit} candles)...")
-            if label in ['1d', '1w']:
-                df = data_engine.get_macro_data(coin_pair, interval)
-            else:
-                df = get_klines_df(coin_pair, interval, limit=req_limit)
-            
-            # Apply base indicators for UI display consistency
-            if label in ['1h', '4h'] and not df.empty:
-                df = data_engine.apply_base_indicators(df)
-            df_cache[label] = df
-            
+            df_raw = get_klines_df(coin_pair, interval_str, limit=req_limit)
+            # Apply base indicators (EMA/RSI) hanya untuk panel display 1h/4h
+            if label in ['1h', '4h'] and not df_raw.empty:
+                df_raw['EMA_7']   = ta.ema(df_raw['Close'], length=7)
+                df_raw['EMA_21']  = ta.ema(df_raw['Close'], length=21)
+                df_raw['EMA_50']  = ta.ema(df_raw['Close'], length=50)
+                df_raw['EMA_200'] = ta.ema(df_raw['Close'], length=200)
+                df_raw['RSI_6']   = ta.rsi(df_raw['Close'], length=6)
+                try:
+                    stoch = ta.stochrsi(df_raw['Close'], length=14, rsi_length=14, k=3, d=3)
+                    if stoch is not None and not stoch.empty:
+                        df_raw['StochRSI_K'] = stoch.iloc[:, 0]
+                        df_raw['StochRSI_D'] = stoch.iloc[:, 1]
+                except Exception:
+                    pass
+            df_cache[label] = df_raw
+
             logger.info(f"  Fetching BTCUSDT {label} (20 candles)...")
-            if label in ['1d', '1w']:
-                btc_df = data_engine.get_macro_data("BTCUSDT", interval)
-            else:
-                btc_df = get_klines_df("BTCUSDT", interval, limit=20)
+            btc_df = get_klines_df("BTCUSDT", interval_str, limit=20)
             btc_cache[label] = btc_df
 
         # ── Section 1: Raw API Data ──
@@ -972,159 +821,11 @@ def api_data():
         computed["oi_delta_pct"] = 0.0
         oi_formatted = []
 
-        # ── Protocol 9.6 Battle Plan Computation (Wick Hunter Edition) ──
-        # Uses ATR-based Structural SL and Liquidity-based TPs
+        # ── Battle Plan: sumber data dari quant_results (SSOT) ──
+        # Dihitung SETELAH quant_results selesai (lihat bawah).
         df_1h = df_cache.get('1h', pd.DataFrame())
         df_4h = df_cache.get('4h', pd.DataFrame())
-        
-        battle_plan: dict = {}
-        if not df_4h.empty and len(df_4h) >= 20:
-            last4h  = df_4h.iloc[-1]
-            atr_val = last4h.get('ATR_14')
-            atr_h4  = float(atr_val) if pd.notna(atr_val) else 0.0
-
-            # Swing Low macro: lowest Low in last 20 H4 bars (≈ 80 hours)
-            swing_low_h4 = float(df_4h['Low'].iloc[-20:].min())
-            swing_high_h4 = float(df_4h['High'].iloc[-20:].max())
-
-            # Structural SL = Swing Low - (2.0 × ATR_H4) — stop-hunt proof
-            structural_sl = swing_low_h4 - (2.0 * atr_h4) if atr_h4 > 0 else swing_low_h4 * 0.985
-
-            # EMA walls above current price (for TP1 in Markdown phase)
-            ema_levels = []
-            for col in ['EMA_7', 'EMA_21', 'EMA_50', 'EMA_200']:
-                v = last4h.get(col)
-                if pd.notna(v):
-                    ema_levels.append((col, float(v)))
-
-            # Determine market phase: Markup if price > EMA_21 H4, else Markdown
-            price_h4 = float(last4h['Close'])
-            ema21_h4 = float(last4h.get('EMA_21', price_h4))
-            market_phase = "MARKUP" if price_h4 > ema21_h4 else "MARKDOWN"
-
-            # ── TP Candidate Pool: all meaningful levels ABOVE current price ──
-            tp_candidates: list[tuple[str, float]] = []
-            for name, val in ema_levels:
-                if val > price_h4:
-                    tp_candidates.append((name, val))
-            pdh = liquidity.get('PDH', 0.0)
-            pwh = liquidity.get('PWH', 0.0)
-            if pdh > price_h4:
-                tp_candidates.append(('PDH', pdh))
-            if pwh > price_h4:
-                tp_candidates.append(('PWH', pwh))
-            # Sort ascending, deduplicate by label
-            tp_candidates.sort(key=lambda x: x[1])
-            seen_lbls: dict[str, float] = {}
-            deduped_candidates: list[tuple[str, float]] = []
-            for lbl, v in tp_candidates:
-                if lbl not in seen_lbls:
-                    seen_lbls[lbl] = v
-                    deduped_candidates.append((lbl, v))
-            tp_candidates = deduped_candidates
-
-            # ── FIX 1: TP Validation Against Entry Price ──
-            # We need the avg_entry_price here. Fetch it early from trade_entries.
-            avg_entry_for_tp = get_entry_price(coin_pair)  # 0.0 if not set
-
-            # Re-classify candidates: only count as "TP" if they are ABOVE avg_entry_price
-            # If below entry → classify as "Relief Exit / Cut Minor"
-            classified_tps = []
-            relief_exits = []
-            for lbl, v in tp_candidates:
-                if avg_entry_for_tp > 0 and v <= avg_entry_for_tp:
-                    relief_exits.append((lbl, v, "RELIEF_EXIT"))
-                else:
-                    classified_tps.append((lbl, v, "TP"))
-
-            # Assign TP1/2/3 only from validated TP levels (above entry)
-            # If insufficient valid TPs, fallback to escalated projections
-            def _tp_fallback(n: int, base: float) -> tuple[str, float]:
-                multiples = [1.06, 1.10, 1.15]
-                return (f'Proj+{int(multiples[n]*100-100)}%', base * multiples[n])
-
-            if len(classified_tps) >= 1:
-                tp1_name, tp1_val, _ = classified_tps[0]
-            else:
-                tp1_name, tp1_val = _tp_fallback(0, max(avg_entry_for_tp, price_h4))
-            if len(classified_tps) >= 2:
-                tp2_name, tp2_val, _ = classified_tps[1]
-            else:
-                tp2_name, tp2_val = _tp_fallback(1, max(avg_entry_for_tp, price_h4))
-            if len(classified_tps) >= 3:
-                tp3_name, tp3_val, _ = classified_tps[2]
-            else:
-                tp3_name, tp3_val = _tp_fallback(2, max(avg_entry_for_tp, price_h4))
-
-            # ── FIX 2: Safety Net Layer Validation (must be BELOW current price) ──
-            # A buy-limit order above current price executes as market immediately → INVALID
-            current_price_for_layers = float(df_1h.iloc[-1]['Close']) if not df_1h.empty else price_h4
-            fib_range = swing_high_h4 - swing_low_h4
-            fib_786  = swing_high_h4 - (fib_range * 0.786)
-            pdl_val  = liquidity.get('PDL', swing_low_h4)
-            pwl_val  = liquidity.get('PWL', swing_low_h4 * 0.97)
-
-            def _validate_layer(val: float, current: float) -> tuple[float, bool]:
-                """Returns (val, is_valid). Invalid if >= current price."""
-                return (val, val < current)
-
-            layer1_val, layer1_valid = _validate_layer(fib_786, current_price_for_layers)
-            layer2_val, layer2_valid = _validate_layer(pdl_val, current_price_for_layers)
-            layer3_val, layer3_valid = _validate_layer(pwl_val, current_price_for_layers)
-
-            # ── FIX 3: Kill Switch Emergency Override Flag ──
-            # Detect kill switch condition here so battle_plan can react
-            kill_switch_now = False
-            abort_note = ""
-            relief_label = ""
-            if not df_4h.empty and len(df_4h) >= 2:
-                last_closed_h4 = df_4h.iloc[-2]
-                ema21_ks = last_closed_h4.get('EMA_21')
-                if pd.notna(ema21_ks) and float(last_closed_h4['Close']) < float(ema21_ks):
-                    kill_switch_now = True
-                    # Find nearest EMA above price for abort target
-                    relief_candidates = [(n, v) for n, v in ema_levels if v > current_price_for_layers]
-                    relief_candidates.sort(key=lambda x: x[1])
-                    if relief_candidates:
-                        relief_name, relief_price = relief_candidates[0]
-                        relief_label = f"{relief_name} (${relief_price:.4f})"
-                    abort_note = (
-                        f"🚨 ABORT PROCEDURE AKTIF. Posisi dalam Death Spiral. "
-                        f"JANGAN menunggu TP. Eksekusi Surgical Cut saat relief bounce pertama "
-                        f"ke {relief_label or 'resistance terdekat'}. "
-                        f"Proteksi modal adalah prioritas utama."
-                    )
-
-            # Relief exits info for frontend labeling
-            relief_exit_levels = [{"label": f"{lbl} (Relief)", "val": round(v, 8)} for lbl, v, _ in relief_exits]
-
-            battle_plan = {
-                "market_phase": market_phase,
-                "atr_h4": round(atr_h4, 8),
-                "swing_low": round(swing_low_h4, 8),
-                "swing_high": round(swing_high_h4, 8),
-                "structural_sl": round(structural_sl, 8),
-                # TP (validated above entry)
-                "tp1_val": round(tp1_val, 8),
-                "tp1_label": tp1_name,
-                "tp2_val": round(tp2_val, 8),
-                "tp2_label": tp2_name,
-                "tp3_val": round(tp3_val, 8),
-                "tp3_label": tp3_name,
-                "relief_exits": relief_exit_levels,   # EMAs below entry (Cut Loss targets)
-                # Layers (validated below current price)
-                "layer1_val": round(layer1_val, 8),
-                "layer1_valid": layer1_valid,
-                "layer2_val": round(layer2_val, 8),
-                "layer2_valid": layer2_valid,
-                "layer3_val": round(layer3_val, 8),
-                "layer3_valid": layer3_valid,
-                # Kill Switch Emergency Override
-                "kill_switch_active": kill_switch_now,
-                "abort_note": abort_note,
-            }
-
-        computed["battle_plan"] = battle_plan  # type: ignore[assignment]
+        computed["battle_plan"] = battle_plan  # Akan diisi dari quant_results di bawah (SSOT)
 
         # ── Section 3: User & System State ──
         current_price = 0.0
@@ -1258,6 +959,37 @@ def api_data():
                         lv = liquidity.get(lk, 0)
                         if lv: live_ctx[lk] = round(lv, 6)
                     quant_results['market_context'] = live_ctx
+
+                    # ── Battle Plan dari quant_results (SSOT — sinkron dengan Telegram) ──
+                    lvl_L = quant_results["long"]["levels"]
+                    lvl_S = quant_results["short"]["levels"]
+                    em    = quant_results.get("emergency", {})
+                    computed["battle_plan"] = {
+                        # LONG levels (dari algo_scoring — sama persis dengan notif Telegram)
+                        "structural_sl":       lvl_L.get("sl_structure"),
+                        "tp1_val":             lvl_L.get("tp1"),
+                        "tp1_label":           lvl_L.get("tp1_label", "TP1"),
+                        "tp2_val":             lvl_L.get("tp2"),
+                        "tp2_label":           lvl_L.get("tp2_label", "TP2"),
+                        "tp3_val":             lvl_L.get("tp3"),
+                        "tp3_label":           lvl_L.get("tp3_label", "TP3"),
+                        "dist_sl":             lvl_L.get("dist_sl"),
+                        "dist_tp1":            lvl_L.get("dist_tp1"),
+                        "dist_tp2":            lvl_L.get("dist_tp2"),
+                        "dist_tp3":            lvl_L.get("dist_tp3"),
+                        "rr1":                 lvl_L.get("rr1"),
+                        "rr2":                 lvl_L.get("rr2"),
+                        "rr3":                 lvl_L.get("rr3"),
+                        # SHORT levels
+                        "structural_sl_short": lvl_S.get("sl_structure"),
+                        "tp1_val_short":        lvl_S.get("tp1"),
+                        "tp2_val_short":        lvl_S.get("tp2"),
+                        "tp3_val_short":        lvl_S.get("tp3"),
+                        # Kill Switch
+                        "kill_switch_active":  em.get("sl_touched", False),
+                        # Source metadata
+                        "source": "algo_scoring_ssot",
+                    }
                     # Notifikasi dikelola sepenuhnya oleh signal_monitor.py (background worker)
                     # Tidak ada Telegram alert dari sini untuk mencegah spam ganda.
 
@@ -1519,237 +1251,46 @@ def api_entry_summary():
 # ==========================================
 def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "4h", limit: int = 1000) -> pd.DataFrame:
     """
-    Bangun DataFrame lengkap berisi semua kolom yang dibutuhkan untuk upload ke Gemini:
-    Timestamp, OHLCV, Volume breakdown, EMA 7/21/50/200, RSI 6,
-    StochRSI K/D, Open_Interest, dan BTC_Price untuk korelasi SMT.
+    [SSOT REFACTOR] Bangun DataFrame export menggunakan enrichment.get_fully_enriched_data().
+    Semua indikator, OI, Funding Rate, Macro, dan Liquidity Walls sudah di-handle oleh SSOT.
+    Fungsi ini hanya bertugas: memilih kolom, menambah BTC_Price, dan memformat output.
     """
-    interval_map = {
-        "15m": Client.KLINE_INTERVAL_15MINUTE,
-        "1h":  Client.KLINE_INTERVAL_1HOUR,
-        "4h":  Client.KLINE_INTERVAL_4HOUR,
-        "1d":  Client.KLINE_INTERVAL_1DAY,
-        "1w":  Client.KLINE_INTERVAL_1WEEK,
-    }
-    interval = str(interval_map.get(timeframe, Client.KLINE_INTERVAL_1HOUR))
-
-    # ── Fetch target coin OHLCV + indicators ──
-    logger.info(f"  [Export] Fetching {symbol} {timeframe} ({limit} candles)...")
-    df = get_klines_df(symbol, interval, limit=limit)
-    if df.empty:
+    logger.info(f"  [Export] Building {symbol} {timeframe} ({limit} candles) via SSOT...")
+    df, meta = enrichment.get_fully_enriched_data(symbol, interval=timeframe, limit=limit)
+    if df is None or df.empty:
+        logger.warning(f"  [Export] SSOT returned empty data for {symbol} {timeframe}")
         return pd.DataFrame()
-    df = apply_full_indicators(df)
 
-    # ── Fetch BTC_Price sebagai kolom korelasi SMT ──
-    logger.info(f"  [Export] Fetching BTCUSDT {timeframe} for SMT...")
-    df_btc = get_klines_df("BTCUSDT", interval, limit=limit)
+    if meta.get("data_incomplete"):
+        logger.warning(f"  [Export] Data not fully complete: {meta.get('missing_data')}")
+
+    # ── Tambah BTC_Price untuk korelasi SMT ──
+    logger.info(f"  [Export] Fetching BTCUSDT {timeframe} for SMT correlation...")
+    df_btc = get_klines_df("BTCUSDT", timeframe, limit=limit)
     if not df_btc.empty:
-        # Align berdasarkan Open_Time — merge outer lalu forward fill
         df_btc_slim = df_btc[['Open_Time', 'Close']].rename(columns={'Close': 'BTC_Price'})
-        df = pd.merge(df, df_btc_slim, on='Open_Time', how='left')
+        df = pd.merge_asof(
+            df.sort_values('Open_Time'),
+            df_btc_slim.sort_values('Open_Time'),
+            on='Open_Time', direction='backward'
+        )
     else:
         df['BTC_Price'] = None
 
-    # ── Fetch Open Interest (M15 Futures) ──
-    # Ambil history OI lebih banyak (misal 100 titik) untuk merge
-    logger.info(f"  [Export] Fetching OI history (limit={limit})...")
-    oi_raw = fetch_oi_data(symbol=symbol, limit=limit)
+    # ── Rename Open_Time → Timestamp untuk format export ──
+    if 'Timestamp' not in df.columns and 'Open_Time' in df.columns:
+        df = df.rename(columns={'Open_Time': 'Timestamp'})
+    if 'Timestamp' in df.columns:
+        df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
-    if oi_raw:
-        oi_df = pd.DataFrame(oi_raw)
-        oi_df['Open_Time'] = pd.to_datetime(oi_df['timestamp'], unit='ms')
-        oi_df = oi_df[['Open_Time', 'sumOpenInterest']].rename(columns={'sumOpenInterest': 'Open_Interest'})
-        oi_df['Open_Interest'] = oi_df['Open_Interest'].astype(float)
-        
-        # Merge dengan df utama berdasarkan Open_Time paling dekat (nearest match)
-        df = pd.merge_asof(
-            df.sort_values('Open_Time'), 
-            oi_df.sort_values('Open_Time'), 
-            on='Open_Time', 
-            direction='backward'
-        )
-    else:
-        df['Open_Interest'] = None
-
-    # ── [NEW] ENRICHMENT: Protocol 9.6 Anti-Inducement ──
-    logger.info("  [Export] Applying Protocol 9.6 Data Enrichment...")
-    try:
-        # Fetch data for enrichment - Use more H4 data for stable EMA 200
-        h4_limit = max(limit, 300)
-        d1_limit = max(int(limit / 6), 50) # approximate D1 candles needed for the timeframe window
-        w1_limit = max(int(limit / 42), 10)
-        df_h4 = get_klines_df(symbol, Client.KLINE_INTERVAL_4HOUR, limit=h4_limit)
-        df_d1 = get_klines_df(symbol, Client.KLINE_INTERVAL_1DAY, limit=d1_limit)
-        df_w1 = get_klines_df(symbol, Client.KLINE_INTERVAL_1WEEK, limit=w1_limit)
-        
-        # Enrich dataset
-        df = enrichment.enrich_dataset(df, df_h4, df_d1, df_w1)
-    except Exception as e:
-        logger.error(f"Enrichment error: {e}")
-        import traceback
-        traceback.print_exc()
-
-    # ── [APEX] MODULE 1: Cumulative Volume Delta (CVD) ──
-    logger.info("  [Export] Computing CVD (Cumulative Volume Delta)...")
-    df = apply_cvd(df)
-
-    # ── [APEX] MODULE 2: Funding Rate ──
-    logger.info("  [Export] Fetching Funding Rate history...")
-    try:
-        fr_raw = fetch_funding_rate(symbol=symbol, limit=limit)
-        if fr_raw:
-            fr_df = pd.DataFrame(fr_raw)
-            fr_df['Open_Time'] = pd.to_datetime(fr_df['fundingTime'], unit='ms')
-            fr_df['Funding_Rate'] = fr_df['fundingRate'].astype(float)
-            fr_df = fr_df[['Open_Time', 'Funding_Rate']]
-            df = pd.merge_asof(
-                df.sort_values('Open_Time'),
-                fr_df.sort_values('Open_Time'),
-                on='Open_Time',
-                direction='backward'
-            )
-        else:
-            df['Funding_Rate'] = None
-    except Exception as e:
-        logger.warning(f"Funding Rate merge error: {e}")
-        df['Funding_Rate'] = None
-
-    # ── [APEX] MODULE 3: Aggregated Liquidation Data ──
-    logger.info("  [Export] Fetching Liquidation events...")
-    try:
-        liq_raw = fetch_liquidation_data(symbol=symbol, limit=limit)
-        if liq_raw:
-            liq_df = pd.DataFrame(liq_raw)
-            # Each record has: symbol, side (BUY/SELL), price, origQty, time
-            liq_df['liq_time'] = pd.to_datetime(liq_df['time'], unit='ms')
-            liq_df['liq_value'] = liq_df['price'].astype(float) * liq_df['origQty'].astype(float)
-
-            # Aggregate by matching to candle Open_Time using merge_asof
-            # BUY side = Short liquidations (forced buy), SELL side = Long liquidations (forced sell)
-            buy_liq = liq_df[liq_df['side'] == 'BUY'][['liq_time', 'liq_value']].rename(
-                columns={'liq_time': 'Open_Time', 'liq_value': 'Buy_Liq'})
-            sell_liq = liq_df[liq_df['side'] == 'SELL'][['liq_time', 'liq_value']].rename(
-                columns={'liq_time': 'Open_Time', 'liq_value': 'Sell_Liq'})
-
-            # Group by Open_Time (sum within same ms)
-            if not buy_liq.empty:
-                buy_liq = buy_liq.groupby('Open_Time', as_index=False).sum()
-                df = pd.merge_asof(
-                    df.sort_values('Open_Time'),
-                    buy_liq.sort_values('Open_Time'),
-                    on='Open_Time', direction='backward'
-                )
-            else:
-                df['Buy_Liq'] = 0.0
-
-            if not sell_liq.empty:
-                sell_liq = sell_liq.groupby('Open_Time', as_index=False).sum()
-                df = pd.merge_asof(
-                    df.sort_values('Open_Time'),
-                    sell_liq.sort_values('Open_Time'),
-                    on='Open_Time', direction='backward'
-                )
-            else:
-                df['Sell_Liq'] = 0.0
-        else:
-            df['Buy_Liq'] = 0.0
-            df['Sell_Liq'] = 0.0
-    except Exception as e:
-        logger.warning(f"Liquidation merge error: {e}")
-        df['Buy_Liq'] = 0.0
-        df['Sell_Liq'] = 0.0
-
-    # ── [APEX] MODULE 4: MACRO ALTCOIN CONTEXT (BTC.D & TOTAL3/DEFI) ──
-    logger.info("  [Export] Fetching Crypto Macro Context (BTC.D & Altcoin Index)...")
-    try:
-        df_btcd = get_klines_fapi("BTCDOMUSDT", interval, limit=limit)
-        if not df_btcd.empty:
-            df_btcd_slim = df_btcd[['Open_Time', 'Close']].rename(columns={'Close': 'BTC_Dominance'})
-            df = pd.merge_asof(
-                df.sort_values('Open_Time'),
-                df_btcd_slim.sort_values('Open_Time'),
-                on='Open_Time',
-                direction='backward'
-            )
-        else:
-            df['BTC_Dominance'] = None
-
-        df_defi = get_klines_fapi("1000DEFIUSDT", interval, limit=limit) # DEFI index mapping
-        if df_defi.empty: df_defi = get_klines_fapi("DEFIUSDT", interval, limit=limit)
-        if not df_defi.empty:
-            df_defi_slim = df_defi[['Open_Time', 'Close']].rename(columns={'Close': 'Altcoin_Index'})
-            df = pd.merge_asof(
-                df.sort_values('Open_Time'),
-                df_defi_slim.sort_values('Open_Time'),
-                on='Open_Time',
-                direction='backward'
-            )
-        else:
-            df['Altcoin_Index'] = None
-            
-        # ── [APEX] LATEST MACRO FIX WITH CMC API ──
-        # Binance FAPI indices drop the latest candles due to computation lag. We fill these gaps using precise live CMC API.
-        try:
-            CMC_API_KEY = "aa8eb4dd82974c308c5428e7c1be0121"
-            cmc_url = "https://pro-api.coinmarketcap.com/v1/global-metrics/quotes/latest"
-            cmc_headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY, "Accept": "application/json"}
-            r = http_requests.get(cmc_url, headers=cmc_headers, timeout=10)
-            if r.status_code == 200:
-                d = r.json()["data"]
-                btc_dom_raw = round(d["btc_dominance"] * 100, 1)
-                total_mcap = d["quote"]["USD"]["total_market_cap"]
-                btc_dom_frac = d["btc_dominance"] / 100
-                altcoin_index = round(total_mcap * (1 - btc_dom_frac) / 1_000_000_000, 1)
-                
-                mask_btc = df['BTC_Dominance'].isna() | (df['BTC_Dominance'] == 0)
-                mask_alt = df['Altcoin_Index'].isna() | (df['Altcoin_Index'] == 0)
-                df.loc[mask_btc, 'BTC_Dominance'] = btc_dom_raw
-                df.loc[mask_alt, 'Altcoin_Index'] = altcoin_index
-                logger.info(f"  [Export] Filled missing macro with CMC: BTC_Dom={btc_dom_raw}, AltIndex={altcoin_index}")
-        except Exception as e:
-            logger.warning(f"CMC API fetch error in export: {e}")
-            
-        # ── [APEX] LIVE LIQUIDITY WALL FIX (Orderbook) ──
-        # Fetch current Bid/Ask walls from Binance Futures to fill missing Buy_Liq and Sell_Liq
-        try:
-            liq_url = "https://fapi.binance.com/fapi/v1/depth"
-            liq_params = {"symbol": symbol.upper(), "limit": 500}
-            r_liq = http_requests.get(liq_url, params=liq_params, timeout=10)
-            if r_liq.status_code == 200:
-                book = r_liq.json()
-                close_last = float(df['Close'].iloc[-1])
-                bids = [(float(p), float(q)) for p, q in book.get("bids", []) if float(p) < close_last]
-                asks = [(float(p), float(q)) for p, q in book.get("asks", []) if float(p) > close_last]
-                if bids and asks:
-                    buy_wall = max(bids, key=lambda x: x[1])[0]
-                    sell_wall = max(asks, key=lambda x: x[1])[0]
-                    
-                    mask_buy = df['Buy_Liq'].isna() | (df['Buy_Liq'] == 0)
-                    mask_sell = df['Sell_Liq'].isna() | (df['Sell_Liq'] == 0)
-                    
-                    df.loc[mask_buy, 'Buy_Liq'] = round(buy_wall, 6)
-                    df.loc[mask_sell, 'Sell_Liq'] = round(sell_wall, 6)
-                    logger.info(f"  [Export] Filled missing Liquidity with Orderbook: Buy_Wall={buy_wall}, Sell_Wall={sell_wall}")
-        except Exception as e:
-            logger.warning(f"Orderbook API fetch error in export: {e}")
-            
-    except Exception as e:
-        logger.warning(f"Macro context merge error: {e}")
-        df['BTC_Dominance'] = None
-        df['Altcoin_Index'] = None
-
-    # ── Pilih dan urutkan kolom sesuai spesifikasi ──
+    # ── Pilih dan urutkan kolom ──
     col_order = [
-        'Timestamp',
-        'Market_Session',
+        'Timestamp', 'Market_Session',
         'Open', 'High', 'Low', 'Close',
-        'Total_Volume',
-        'Buy_Volume',
-        'Sell_Volume',
-        'Volume_Delta', 'CVD',
+        'Total_Volume', 'Buy_Volume', 'Sell_Volume', 'Volume_Delta', 'CVD',
         'EMA_7', 'EMA_21', 'EMA_50', 'EMA_200',
         'EMA_7_H4', 'EMA_21_H4', 'EMA_50_H4', 'EMA_200_H4',
-        'RSI_6',
-        'StochRSI_K', 'StochRSI_D',
+        'RSI_6', 'StochRSI_K', 'StochRSI_D',
         'ATR_14', 'ATR_14_H4',
         'PDH', 'PDL', 'PWH', 'PWL',
         'FVG_Up_Top', 'FVG_Up_Bottom', 'FVG_Down_Top', 'FVG_Down_Bottom',
@@ -1757,61 +1298,31 @@ def build_export_dataframe(symbol: str = COIN_PAIR, timeframe: str = "4h", limit
         'Fib_0.618', 'Fib_0.786',
         'MSB', 'BOS', 'CHoCH',
         'POC', 'VAH', 'VAL',
-        'Open_Interest',
-        'Funding_Rate',
+        'Open_Interest', 'Funding_Rate',
         'Buy_Liq', 'Sell_Liq',
-        'BTC_Price',
-        'BTC_Dominance', 'Altcoin_Index'
+        'BTC_Price', 'BTC_Dominance', 'Altcoin_Index',
     ]
-
-    # Rename Close_Time → Timestamp (waktu close candle) jika belum ada (merging mungkin merubah nama)
-    if 'Timestamp' not in df.columns and 'Close_Time' in df.columns:
-        df = df.rename(columns={'Close_Time': 'Timestamp'})
-
-    # Format Timestamp sebagai string ISO agar mudah dibaca AI
-    if 'Timestamp' in df.columns:
-        df['Timestamp'] = pd.to_datetime(df['Timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
     # Pastikan semua kolom ada (isi None jika tidak tersedia)
     for col in col_order:
         if col not in df.columns:
             df[col] = None
 
-    # Forward fill NaN values for institutional data columns
-    apex_cols = ['CVD', 'Funding_Rate', 'Buy_Liq', 'Sell_Liq']
-    for col in apex_cols:
+    # Forward fill untuk kolom institusional
+    ffill_cols = ['CVD', 'Funding_Rate', 'Buy_Liq', 'Sell_Liq', 'BTC_Dominance', 'Altcoin_Index']
+    for col in ffill_cols:
         if col in df.columns:
             df[col] = df[col].ffill().fillna(0.0)
-            
-    # Fallback ffill untuk BTC_Dominance dan Altcoin_Index barangkali request CMC gagal
-    for col in ['BTC_Dominance', 'Altcoin_Index']:
-        if col in df.columns:
-            df[col] = df[col].ffill()
 
     df_export = df[col_order].copy()
 
-    # Bulatkan float ke 6 desimal agar file rapi
-    float_cols = [
-        'Open', 'High', 'Low', 'Close', 'Total_Volume',
-        'Buy_Volume', 'Sell_Volume', 'Volume_Delta', 'CVD',
-        'EMA_7', 'EMA_21', 'EMA_50', 'EMA_200',
-        'EMA_7_H4', 'EMA_21_H4', 'EMA_50_H4', 'EMA_200_H4',
-        'RSI_6', 'StochRSI_K', 'StochRSI_D',
-        'ATR_14', 'ATR_14_H4',
-        'PDH', 'PDL', 'PWH', 'PWL',
-        'FVG_Up_Top', 'FVG_Up_Bottom', 'FVG_Down_Top', 'FVG_Down_Bottom',
-        'OB_Price',
-        'Fib_0.618', 'Fib_0.786',
-        'MSB', 'BOS', 'CHoCH',
-        'POC', 'VAH', 'VAL',
-        'Open_Interest', 'Funding_Rate',
-        'Buy_Liq', 'Sell_Liq',
-        'BTC_Price', 'BTC_Dominance', 'Altcoin_Index'
-    ]
+    # Bulatkan float ke 6 desimal
+    float_cols = [c for c in col_order if c not in ('Timestamp', 'Market_Session', 'SFP_Sweep')]
     for col in float_cols:
         if col in df_export.columns:
             df_export[col] = pd.to_numeric(df_export[col], errors='coerce').round(6)
 
+    logger.info(f"  [Export] Done — {len(df_export)} rows, cols={len(df_export.columns)}")
     return df_export
 
 
