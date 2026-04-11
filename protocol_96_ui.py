@@ -821,39 +821,17 @@ def api_data():
         computed["oi_delta_pct"] = 0.0
         oi_formatted = []
 
-        # ── Battle Plan: sumber data dari quant_results (SSOT) ──
-        # Dihitung SETELAH quant_results selesai (lihat bawah).
+        # ── Battle Plan & BotState: diisi dari quant_results setelah scoring selesai ──
         df_1h = df_cache.get('1h', pd.DataFrame())
         df_4h = df_cache.get('4h', pd.DataFrame())
-        computed["battle_plan"] = battle_plan  # Akan diisi dari quant_results di bawah (SSOT)
+        computed["battle_plan"] = {}  # Inisialisasi aman, akan diisi SSOT di bawah
 
-        # ── Section 3: User & System State ──
+        coin_state = BotState.get(coin_pair)
+
+        # ── Current price dari candle 1h terakhir ──
         current_price = 0.0
         if not df_1h.empty:
             current_price = float(df_1h.iloc[-1]['Close'])
-
-        # --- Dynamic Structural SL: Swing Low - 2×ATR_H4 ---
-        coin_state = BotState.get(coin_pair)
-        bp = computed.get("battle_plan", {})
-        if bp and bp.get("structural_sl", 0) > 0:
-            new_sl = bp["structural_sl"]
-            # Trailing: SL only moves UP (locks in profit)
-            if new_sl > coin_state["active_sl"] or coin_state["active_sl"] == 0:
-                coin_state["active_sl"] = new_sl
-            if coin_state["initial_sl"] == 0:
-                coin_state["initial_sl"] = coin_state["active_sl"]
-
-        # Check for kill switch trigger
-        if not df_4h.empty and len(df_4h) >= 2:
-            ema21_check = df_4h.iloc[-2].get('EMA_21')
-            if pd.notna(ema21_check):
-                if float(df_4h.iloc[-2]['Close']) < float(ema21_check):
-                    coin_state["status"] = "KILL_SWITCH"
-                    coin_state["alerts_sent"]["KILL_SWITCH"] = True
-                else:
-                    # Reset kill switch if recovered above EMA21
-                    if coin_state["status"] == "KILL_SWITCH":
-                        coin_state["status"] = "ACTIVE"
 
         # ── Lookup dynamic entry price for this coin ──
         entry_summary = get_entry_summary(coin_pair)
@@ -964,9 +942,10 @@ def api_data():
                     lvl_L = quant_results["long"]["levels"]
                     lvl_S = quant_results["short"]["levels"]
                     em    = quant_results.get("emergency", {})
+                    sl_val = lvl_L.get("sl_structure") or 0.0
                     computed["battle_plan"] = {
                         # LONG levels (dari algo_scoring — sama persis dengan notif Telegram)
-                        "structural_sl":       lvl_L.get("sl_structure"),
+                        "structural_sl":       sl_val,
                         "tp1_val":             lvl_L.get("tp1"),
                         "tp1_label":           lvl_L.get("tp1_label", "TP1"),
                         "tp2_val":             lvl_L.get("tp2"),
@@ -985,11 +964,25 @@ def api_data():
                         "tp1_val_short":        lvl_S.get("tp1"),
                         "tp2_val_short":        lvl_S.get("tp2"),
                         "tp3_val_short":        lvl_S.get("tp3"),
-                        # Kill Switch
+                        # Kill Switch (dari emergency algo_scoring, bukan EMA manual)
                         "kill_switch_active":  em.get("sl_touched", False),
-                        # Source metadata
                         "source": "algo_scoring_ssot",
                     }
+
+                    # ── Update BotState tracking SL (Trailing — hanya naik) ──
+                    if sl_val > 0:
+                        if sl_val > coin_state["active_sl"] or coin_state["active_sl"] == 0:
+                            coin_state["active_sl"] = sl_val
+                        if coin_state["initial_sl"] == 0:
+                            coin_state["initial_sl"] = coin_state["active_sl"]
+
+                    # ── Update Kill Switch status dari algo_scoring ──
+                    if em.get("sl_touched", False):
+                        coin_state["status"] = "KILL_SWITCH"
+                        coin_state["alerts_sent"]["KILL_SWITCH"] = True
+                    elif coin_state["status"] == "KILL_SWITCH" and not em.get("sl_touched", False):
+                        coin_state["status"] = "ACTIVE"
+
                     # Notifikasi dikelola sepenuhnya oleh signal_monitor.py (background worker)
                     # Tidak ada Telegram alert dari sini untuk mencegah spam ganda.
 
