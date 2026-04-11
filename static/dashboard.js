@@ -615,6 +615,7 @@ function openEntryModal() {
 function prefillEntryForm() {
     // Mengosongkan form saat koin diganti
     document.getElementById('entryPrice').value = '';
+    document.getElementById('entryUsdt').value = '';
     document.getElementById('entryQty').value = '';
 }
 
@@ -634,6 +635,7 @@ function onMarketTypeChange() {
         sideEl.disabled = false;
     }
     onEntrySideChange();
+    calcQtyFromUsdt(); // Update hitungan saat switch Spot ↔ Futures
 }
 function onEntrySideChange() {
     const side = document.getElementById('entrySide').value;
@@ -644,6 +646,26 @@ function onEntrySideChange() {
     } else {
         btn.style.background = 'var(--accent-blue)';
         btn.textContent = '🟢 Open LONG Position';
+    }
+}
+
+/* ── AUTO-CALCULATE QTY DARI MARGIN USDT ───────────────────────────────── */
+function calcQtyFromUsdt() {
+    const price      = parseFloat(document.getElementById('entryPrice').value);
+    const usdt       = parseFloat(document.getElementById('entryUsdt').value);
+    const leverage   = parseInt(document.getElementById('entryLeverage').value) || 1;
+    const marketType = document.getElementById('entryMarketType').value;
+
+    if (price > 0 && usdt > 0) {
+        let qty = 0;
+        // Futures: Quantity = (Margin USDT × Leverage) / Harga Koin
+        if (marketType === 'FUTURES') {
+            qty = (usdt * leverage) / price;
+        } else {
+            // Spot: Quantity = Amount USDT / Harga Koin
+            qty = usdt / price;
+        }
+        document.getElementById('entryQty').value = qty.toFixed(6);
     }
 }
 

@@ -686,10 +686,17 @@ tbody tr:last-child td { border-bottom: none; }
                     <input type="number" id="entryLeverage" class="form-input" value="10" min="1" max="125" placeholder="e.g. 10">
                 </div>
             </div>
-            <!-- Row 3: Price + Qty -->
+            <!-- Row 3: Price + Margin USDT -->
             <div class="form-row">
-                <div class="form-group"><label class="form-label">Entry Price ($)</label><input type="number" step="any" id="entryPrice" class="form-input" placeholder="0.000"></div>
-                <div class="form-group"><label class="form-label">Quantity</label><input type="number" step="any" id="entryQty" class="form-input" placeholder="0.00"></div>
+                <div class="form-group"><label class="form-label">Entry Price ($)</label><input type="number" step="any" id="entryPrice" class="form-input" placeholder="0.000" oninput="calcQtyFromUsdt()"></div>
+                <div class="form-group"><label class="form-label">Margin (USDT)</label><input type="number" step="any" id="entryUsdt" class="form-input" placeholder="0.00" oninput="calcQtyFromUsdt()"></div>
+            </div>
+            <!-- Row 4: Calculated Quantity -->
+            <div class="form-row" style="margin-top: 14px;">
+                <div class="form-group">
+                    <label class="form-label">Calculated Quantity (Coin)</label>
+                    <input type="number" step="any" id="entryQty" class="form-input" placeholder="0.00">
+                </div>
             </div>
             <button class="btn-save" id="btnSaveEntry" onclick="saveEntry()">💾 Open Position</button>
         </div>

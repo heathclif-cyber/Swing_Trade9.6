@@ -260,7 +260,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     _save_alert_state(_alert_state)
 
         coin_data     = trade_entries.get(symbol, {})
-        pos_side      = str(coin_data.get("side", "LONG")).upper()
+        pos_side      = str(coin_data.get("position_side", "LONG")).upper()  # ✅ FIX: key adalah "position_side"
         entry_list    = coin_data.get("entries", [])
         sales_list    = coin_data.get("sales", [])
         total_cost    = sum(e["price"] * e["qty"] for e in entry_list)
