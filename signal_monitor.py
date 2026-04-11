@@ -309,7 +309,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "last_signal": None,
                 "last_alert_ts": 0,
                 "exit_alerted": False,
-                "kill_alerted": False,
                 "tp1_alerted": False,
                 "tp2_alerted": False,
                 "tp3_alerted": False,
@@ -323,13 +322,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 if pos_side == "SHORT":
                     return f"{((avg_entry/close_price)-1)*100:+.2f}%"
                 return f"{((close_price/avg_entry)-1)*100:+.2f}%"
-
-            # ── KILL SWITCH ────────────────────────────────
-            ema21_val = float(df.iloc[-2].get("EMA_21", float("inf"))) if len(df) >= 2 else 0
-            if pos_side == "SHORT":
-                kill_switch = len(df) >= 2 and float(df.iloc[-2]["Close"]) > ema21_val
-            else:
-                kill_switch = len(df) >= 2 and float(df.iloc[-2]["Close"]) < ema21_val
 
             # ── SL WICK FAKEOUT ALERT ──
             if is_active and sl_wick.get("sl_touched_wick") and not state.get("wick_alerted"):
@@ -367,23 +359,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
             if not sl_wick.get("sl_touched_wick") and state.get("wick_alerted", False):
                 state["wick_alerted"] = False
-                _save_alert_state(_alert_state)
-
-            if is_active and kill_switch and not state["kill_alerted"]:
-                _send_telegram(
-                    f"💀 <b>KILL SWITCH — {symbol} ({pos_side})</b>\n"
-                    f"H4 close menembus EMA21 (${ema21_val:.4f})\n"
-                    f"Harga: <b>${close_price:.4f}</b> | PnL: {get_pnl()}\n\n"
-                    f"❌ <b>Instruksi:</b> PERTIMBANGKAN EXIT PENUH.\n"
-                    f"Struktur resmi batal."
-                )
-                state["kill_alerted"] = True
-                state["last_alert_ts"] = now_ts
-                _save_alert_state(_alert_state)
-                return
-
-            if not kill_switch and state.get("kill_alerted", False):
-                state["kill_alerted"] = False
                 _save_alert_state(_alert_state)
 
             # ── TRACKING TAKE PROFIT 1, 2, 3 ─────────────────
@@ -658,8 +633,7 @@ def _monitor_loop() -> None:
         f"Notifikasi akan dikirim otomatis saat:\n"
         f"  🚀 LONG signal (skor ≥ 36/71)\n"
         f"  📉 SHORT signal (skor ≥ 36/71)\n"
-        f"  ⚠️ EXIT ALERT\n"
-        f"  💀 KILL SWITCH\n\n"
+        f"  ⚠️ EXIT ALERT\n\n"
         f"🕐 Start: {wib} WIB"
     )
 
