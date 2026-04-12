@@ -31,10 +31,12 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         else:
             df['CVD'] = 0.0
 
-    last = df.iloc[-1]
+    last  = df.iloc[-1]
+    prev1 = df.iloc[-2] if len(df) >= 2 else last
+    prev2 = df.iloc[-3] if len(df) >= 3 else prev1
     close_price = safe_float(last.get('Close', 0))
-    low_price = safe_float(last.get('Low', close_price))
-    high_price = safe_float(last.get('High', close_price))
+    low_price   = safe_float(last.get('Low', close_price))
+    high_price  = safe_float(last.get('High', close_price))
 
     # ── Metadata ───────────────────────────────────────────────
     symbol = str(meta.get('Symbol', '')).upper()
@@ -83,6 +85,10 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     C2 = ((A - B100) / B100 * 100) if B100 else 0.0
     C_final = (C + C2) / 2
 
+    # oi_change: perubahan OI 1 candle (untuk Liquidation Hunter)
+    A_prev = safe_float(prev1.get('Open_Interest', A))
+    oi_change = ((A - A_prev) / A_prev * 100) if A_prev else 0.0
+
     D = safe_float(last.get('Total_Volume', 0))
     E20 = s20['Total_Volume'].mean() if _has_col(df, 'Total_Volume') else (D or 1.0)
     E100 = s100['Total_Volume'].mean() if _has_col(df, 'Total_Volume') and has100 else E20
@@ -103,11 +109,10 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     cvd_div_bull = bool((I_cvd > J_cvd) and (close_price < close_21))
     cvd_div_bear = bool((I_cvd < J_cvd) and (close_price > close_21))
 
-    stoch_k   = _last_val(last, 'StochRSI_K')
-    stoch_d   = _last_val(last, 'StochRSI_D')
-    prev_row  = df.iloc[-2] if len(df) >= 2 else last
-    stoch_k_prev = _last_val(prev_row, 'StochRSI_K')
-    stoch_d_prev = _last_val(prev_row, 'StochRSI_D')
+    stoch_k      = _last_val(last,  'StochRSI_K')
+    stoch_d      = _last_val(last,  'StochRSI_D')
+    stoch_k_prev = _last_val(prev1, 'StochRSI_K')
+    stoch_d_prev = _last_val(prev1, 'StochRSI_D')
     has_stoch = stoch_k is not None and stoch_d is not None
     stoch_cross_up   = False
     stoch_cross_down = False
@@ -118,7 +123,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     ema21 = safe_float(last.get('EMA_21', close_price)) or close_price
     ema50 = safe_float(last.get('EMA_50', close_price)) or close_price
     ema200 = safe_float(last.get('EMA_200', close_price)) or close_price
-    O_rsi = safe_float(last.get('RSI_6', 50))
+    O_rsi   = safe_float(last.get('RSI_6',  50))
+    O_rsi_1 = safe_float(prev1.get('RSI_6', 50))
+    O_rsi_2 = safe_float(prev2.get('RSI_6', 50))
 
     ref_long = close_price if is_active else low_price
     L = (ref_long - ema21) / ema21 * 100 if ema21 else 0.0
@@ -127,6 +134,8 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     Lp = (high_price - ema21) / ema21 * 100 if ema21 else 0.0
     Mp = (high_price - ema50) / ema50 * 100 if ema50 else 0.0
     Np = (high_price - ema200) / ema200 * 100 if ema200 else 0.0
+    # dist_ema21_close: jarak Close ke EMA21 (selalu berbasis close, bukan low/high)
+    dist_ema21_close = (close_price - ema21) / ema21 * 100 if ema21 else 0.0
 
     # ATR helpers
     atr_data = get_atr_multiplier(symbol, df, last)
@@ -203,6 +212,9 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         'sl_atr1_S': sl_atr1_S, 'sl_atr15_S': sl_atr15_S, 'sl_atr2_S': sl_atr2_S,
         '_thr_full': _thr_full, '_thr_half': _thr_half, '_thr_wait': _thr_wait,
         'ema21': ema21, 'ema50': ema50, 'ema200': ema200,
+        # ── Variabel baru untuk 3 improvisasi ──────────────────
+        'oi_change': oi_change, 'O_rsi_1': O_rsi_1, 'O_rsi_2': O_rsi_2,
+        'dist_ema21_close': dist_ema21_close,
     }
     ctx.update(atr_data) # Include all ATR sweet spots
 

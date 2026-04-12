@@ -65,15 +65,40 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     atr_score_t1_lo    = ctx['atr_score_t1_lo']
     atr_score_t1_hi    = ctx['atr_score_t1_hi']
 
+    # ── Variabel baru (3 improvisasi) ──────────────────────────────
+    oi_change        = ctx['oi_change']
+    O_rsi_1          = ctx['O_rsi_1']
+    O_rsi_2          = ctx['O_rsi_2']
+    dist_ema21_close = ctx['dist_ema21_close']
+    F                = ctx['F']  # Rel Volume vs MA20
+
+    # ── [IMPR. 3] Karet Gelang: hitung bonus SEBELUM gate agar bisa bypass S1
+    _karet_gelang_triggered_s = bool(dist_ema21_close > 6.0)
+    _karet_gelang_bonus_s     = 5 if _karet_gelang_triggered_s else 0
+    _karet_gelang_note_s      = (
+        f"⚡ KARET GELANG SHORT: Close {dist_ema21_close:.2f}% di atas EMA21 (>+6%). +5 bonus darurat mean reversion."
+        if _karet_gelang_triggered_s else ""
+    )
+
+    # ── [IMPR. 2] RSI V-Shape Memory (precomputed dari ctx) ───
+    rsi_vshaped_short  = (O_rsi >= 65) and (O_rsi_1 > 80 or O_rsi_2 > 80)
+    rsi_vshaped_note_s = (
+        f"V-Shape RSI SHORT: candle-1={O_rsi_1:.1f}, candle-2={O_rsi_2:.1f} (salah satu >80)"
+        if rsi_vshaped_short else ""
+    )
+
     # ── Gate SHORT ──────────────────────────────────────────────
     gate_S = {'status': 'CLEAR', 'gates': {}}
 
-    if not has_bos:
+    # [IMPR. 3] Karet Gelang ekstrem → bypass Gate S1 (BOS diabaikan)
+    if _karet_gelang_triggered_s:
+        gate_S['gates']['S1'] = ('PASS', f'BOS diabaikan — Karet Gelang Ekstrem (Close {dist_ema21_close:.2f}% vs EMA21 >+6%)')
+    elif not has_bos:
         gate_S['gates']['S1'] = ('PASS', 'BOS tidak tersedia — skip')
     elif bos_val != 1:
         gate_S['gates']['S1'] = ('PASS', f'BOS={bos_val} — struktur netral/bearish')
-    elif cvd_div_bear and O_rsi > 75 and has_funding and funding_val >= 0:
-        gate_S['gates']['S1'] = ('PASS', 'BOS=+1 tapi exception: CVD div bear + RSI>75 + funding≥0')
+    elif cvd_div_bear and (O_rsi > 75 or rsi_vshaped_short) and has_funding and funding_val >= 0:
+        gate_S['gates']['S1'] = ('PASS', 'BOS=+1 exception: CVD div bear + RSI V-Shape/Overbought + funding≥0')
     else:
         gate_S['gates']['S1'] = ('FAIL', '❌ GATE S1: Struktur bullish aktif (BOS=+1). Tunggu BOS flip ke 0/−1.')
         gate_S['status'] = 'BLOCKED'
@@ -131,28 +156,17 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_S['gates']['S3'] = ('FAIL', f'❌ GATE S3: Funding sangat negatif ({funding_val:.5f}) — short squeeze risk.')
         gate_S['status'] = 'BLOCKED'
 
-    # ── [IMPR. 2] RSI V-Shape Memory: 2-candle lookback ──────
-    rsi_vshaped_short = False
-    rsi_vshaped_note_s = ""
-    if len(df) >= 3:
-        rsi_1ago = df.iloc[-2].get('RSI_6', None)
-        rsi_2ago = df.iloc[-3].get('RSI_6', None)
-        if rsi_1ago is not None and rsi_2ago is not None:
-            if float(rsi_1ago) > 80 or float(rsi_2ago) > 80:
-                rsi_vshaped_short = True
-                rsi_vshaped_note_s = f"V-Shape RSI SHORT: candle-1={float(rsi_1ago):.1f}, candle-2={float(rsi_2ago):.1f} (salah satu >80)"
-
-    # ── Scoring ───────────────────────────────────────────────
-    # [IMPR. 1] Liquidation Hunter: OI turun drastis + volume meledak = poin maksimal
+    # ── [IMPR. 2] RSI V-Shape Memory: sudah precomputed di atas, hapus df-read lama
+    # ── [IMPR. 1] Liquidation Hunter: gunakan oi_change (1-candle) + F (Rel Vol MA20)
     def score_oi(v):
-        if C_final < -10 and F_final > 50:
+        if oi_change < -10 and F > 50:
             return 3  # Liquidation Hunter: max score — panic selling + volume spike
         if v > 30: return 3
         if v >= 5: return 2
         if v >= -20: return 1
         return 0
 
-    _liq_hunter_triggered_s = bool(C_final < -10 and F_final > 50)
+    _liq_hunter_triggered_s = bool(oi_change < -10 and F > 50)
 
     def score_vol(v):
         if v > 70: return 3
@@ -175,7 +189,7 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     s7s = 3 if Mp > 6 else (2 if Mp >= 4 else (1 if Mp >= 2 else 0))
     s8s = 3 if Np > 10 else (2 if Np >= 5 else (1 if Np >= 2 else 0))
 
-    # [IMPR. 2] RSI V-Shape Memory: izinkan entry jika RSI sekarang >= 65 DAN ada lookback >80 di 2 candle sebelumnya
+    # [IMPR. 2] RSI V-Shape Memory: izinkan entry jika RSI ≥ 65 DAN lookback >80
     if rsi_vshaped_short and O_rsi >= 65:
         s9s = 3  # V-Shape konfirmasi — beri skor penuh
     else:
@@ -195,15 +209,8 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     RAW_S = sum(v[0] for v in scores_S.values())
     ADJ_S = round(RAW_S * SESSION_MULT, 1)
 
-    # [IMPR. 3] Elastisitas "Karet Gelang" — Mean Reversion Bonus SHORT
-    # Jika harga sudah sangat jauh di atas EMA21 (> +6%), beri +5 poin darurat
-    _karet_gelang_triggered_s = bool(Lp > 6.0)
-    _karet_gelang_bonus_s = 0
-    _karet_gelang_note_s = ""
-    if _karet_gelang_triggered_s:
-        _karet_gelang_bonus_s = 5
-        _karet_gelang_note_s = f"⚡ KARET GELANG SHORT: Harga {Lp:.2f}% di atas EMA21 (>+6%). +5 bonus darurat mean reversion."
-        ADJ_S = round(ADJ_S + _karet_gelang_bonus_s, 1)
+    # [IMPR. 3] Karet Gelang bonus diterapkan ke ADJ_S
+    ADJ_S = round(ADJ_S + _karet_gelang_bonus_s, 1)
 
     # ── KEPUTUSAN
     def get_tier(adj):
