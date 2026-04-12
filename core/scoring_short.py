@@ -156,17 +156,17 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_S['gates']['S3'] = ('FAIL', f'❌ GATE S3: Funding sangat negatif ({funding_val:.5f}) — short squeeze risk.')
         gate_S['status'] = 'BLOCKED'
 
-    # ── [IMPR. 2] RSI V-Shape Memory: sudah precomputed di atas, hapus df-read lama
-    # ── [IMPR. 1] Liquidation Hunter: gunakan oi_change (1-candle) + F (Rel Vol MA20)
-    def score_oi(v):
-        if oi_change < -10 and F > 50:
-            return 3  # Liquidation Hunter: max score — panic selling + volume spike
-        if v > 30: return 3
-        if v >= 5: return 2
-        if v >= -20: return 1
+    # ── [IMPR. 1] OI SHORT — Exhaustion & FOMO Top ──────────────
+    def score_oi(v, oi_chg, rsi_val):
+        # Skenario 1: FOMO Pucuk (OI meledak + RSI jenuh beli ekstrem)
+        if v > 30 and rsi_val > 75: return 3          # 15 Poin
+        # Skenario 2: Kelelahan Beli (harga naik tapi OI stagnan/turun tipis)
+        if -5 <= oi_chg <= 0: return 3                # 15 Poin
+        if v > 30: return 2                           # 10 Poin
+        if v >= 5: return 1                           #  5 Poin
         return 0
 
-    _liq_hunter_triggered_s = bool(oi_change < -10 and F > 50)
+    _liq_hunter_triggered_s = bool((C_final > 30 and O_rsi > 75) or (-5 <= oi_change <= 0))
 
     def score_vol(v):
         if v > 70: return 3
@@ -180,7 +180,7 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
         return 0
 
-    s1 = score_oi(C_final)
+    s1 = score_oi(C_final, oi_change, O_rsi)
     s2 = score_vol(F_final)
     s3s = 2 if G > 53 else (1 if G >= 51 else 0)
     s4 = score_atr_scoring(H)

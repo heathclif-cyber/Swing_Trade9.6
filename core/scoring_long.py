@@ -159,14 +159,14 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_L['gates']['L3'] = ('FAIL', f'❌ GATE L3: Funding positif tinggi ({funding_val:.5f}). Tunggu funding ≤ +0.0003.')
         gate_L['status'] = 'BLOCKED'
 
-    # ── [IMPR. 2] RSI V-Shape Memory: sudah precomputed di atas, hapus df-read lama
-    # ── [IMPR. 1] Liquidation Hunter: gunakan oi_change (1-candle) + F (Rel Vol MA20)
-    def score_oi(v):
-        if oi_change < -10 and F > 50:
-            return 3  # Liquidation Hunter: max score — panic selling + volume spike
-        if v > 30: return 3
-        if v >= 5: return 2
-        if v >= -20: return 1
+    # ── [IMPR. 1] OI LONG — Liquidation Hunter ────────────────
+    def score_oi(v, oi_chg, rel_vol):
+        # Skenario 1: Serok Bawah (Ritel Rekt, Institusi Beli)
+        if oi_chg < -10 and rel_vol > 50: return 3   # 15 Poin
+        # Skenario 2: Tren Naik Kuat
+        if v > 30: return 3                           # 15 Poin
+        if v >= 5: return 2                           # 10 Poin
+        if v >= -20: return 1                         #  5 Poin
         return 0
 
     _liq_hunter_triggered = bool(oi_change < -10 and F > 50)
@@ -183,7 +183,7 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
         return 0
 
-    s1 = score_oi(C_final)
+    s1 = score_oi(C_final, oi_change, F)
     s2 = score_vol(F_final)
     s3 = 2 if G < 49 else (1 if G <= 52 else 0)
     s4 = score_atr_scoring(H)
