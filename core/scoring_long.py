@@ -159,31 +159,25 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_L['gates']['L3'] = ('FAIL', f'❌ GATE L3: Funding positif tinggi ({funding_val:.5f}). Tunggu funding ≤ +0.0003.')
         gate_L['status'] = 'BLOCKED'
 
-    # ── [IMPR. 1] OI LONG — Liquidation Hunter ────────────────
-    def score_oi(v, oi_chg, rel_vol):
-        # Skenario 1: Serok Bawah (Ritel Rekt, Institusi Beli)
-        if oi_chg < -10 and rel_vol > 50: return 3   # 15 Poin
-        # Skenario 2: Tren Naik Kuat
-        if v > 30: return 3                           # 15 Poin
-        if v >= 5: return 2                           # 10 Poin
-        if v >= -20: return 1                         #  5 Poin
+    # ── [FIX v2.0] OI LONG — dua sub-fungsi terpisah (Fix 1 + Fix 2) ────
+    def _score_oi_trend(v):
+        """Membaca momentum OI jangka menengah via C_final."""
+        if v > 30: return 3    # OI bengkak kuat → tren naik meyakinkan
+        if v >= 5: return 2
+        if v >= -20: return 1
+        return 0               # OI kolaps ekstrem tanpa pemulihan
+
+    def _score_oi_event(oi_chg, rel_vol):
+        """Membaca event liquidasi sweep via oi_change + volume + CVD konfirmasi."""
+        if oi_chg < -10 and rel_vol > 50 and K >= 0: return 3   # [FIX v2.0] Serok bawah terkonfirmasi CVD
+        if oi_chg < -10 and rel_vol > 50: return 2               # [FIX v2.0] Serok bawah belum terkonfirmasi
+        if oi_chg < -10: return 1                                 # [FIX v2.0] OI turun tapi volume normal
         return 0
 
+    _oi_trend_score = _score_oi_trend(C_final)
+    _oi_event_score = _score_oi_event(oi_change, F)
+    s1 = max(_oi_trend_score, _oi_event_score)  # [FIX v2.0] ambil sinyal terkuat
     _liq_hunter_triggered = bool(oi_change < -10 and F > 50)
-
-    def score_vol(v):
-        if v > 70: return 3
-        if v >= 20: return 2
-        if v >= -10: return 1
-        return 0
-
-    def score_atr_scoring(h):
-        if atr_score_sweet_lo <= h <= atr_score_sweet_hi: return 3
-        if (atr_score_t2_lo <= h < atr_score_sweet_lo) or (atr_score_sweet_hi < h <= atr_score_t2_hi): return 2
-        if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
-        return 0
-
-    s1 = score_oi(C_final, oi_change, F)
     s2 = score_vol(F_final)
     s3 = 2 if G < 49 else (1 if G <= 52 else 0)
     s4 = score_atr_scoring(H)
@@ -192,25 +186,44 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     s7 = 3 if M < -4 else (2 if M < -2 else (1 if M < 0 else 0))
     s8 = 3 if N < -7 else (2 if N < -3 else (1 if N < 0 else 0))
 
-    # [FIX 3] RSI V-Shape Memory + threshold diturunkan agar tidak terlalu ketat
+    # [FIX v2.0] RSI threshold: V-Shape tetap skor penuh; normal threshold <35/<50/<62
     if rsi_vshaped_long and O_rsi <= 35:
-        s9 = 3  # V-Shape konfirmasi — beri skor penuh
+        s9 = 3  # V-Shape konfirmasi — skor penuh (tidak berubah)
     else:
-        s9 = 3 if O_rsi < 35 else (2 if O_rsi < 50 else (1 if O_rsi < 60 else 0))  # [FIX 3] was <25/<40/<55
+        s9 = 3 if O_rsi < 35 else (2 if O_rsi < 50 else (1 if O_rsi < 62 else 0))  # [FIX v2.0] was <35/<50/<60
 
     scores_L = {
-        'OI':       (s1*5, 15, C_final, s1),
-        'Vol':      (s2*4, 12, F_final, s2),
-        'TakerBuy': (s3*4,  8, G, s3),
-        'ATR':      (s4*3,  9, H, s4),
-        'CVD':      (s5*3,  9, K, s5),
-        'EMA21':    (s6*2,  6, L, s6),
-        'EMA50':    (s7*2,  6, M, s7),
-        'EMA200':   (s8*1,  3, N, s8),
-        'RSI':      (s9*1,  3, O_rsi, s9),
-    }
+        'OI':       (s1*4,  12, C_final, s1),  # [FIX v2.0] 5×→12 max → 4× 12 max
+        'Vol':      (s2*3,   9, F_final, s2),  # [FIX v2.0] 4× → 3×
+        'TakerBuy': (s3*3,   6, G, s3),        # [FIX v2.0] 4× → 3× (s3 max=2 → max=6)
+        'ATR':      (s4*3,   9, H, s4),        # tetap
+        'CVD':      (s5*4,  12, K, s5),        # [FIX v2.0] 3× → 4× (price action lebih dominan)
+        'EMA21':    (s6*3,   9, L, s6),        # [FIX v2.0] 2× → 3×
+        'EMA50':    (s7*3,   9, M, s7),        # [FIX v2.0] 2× → 3×
+        'EMA200':   (s8*2,   6, N, s8),        # [FIX v2.0] 1× → 2×
+        'RSI':      (s9*2,   6, O_rsi, s9),    # [FIX v2.0] 1× → 2×
+    }  # [FIX v2.0] Total max: 12+9+6+9+12+9+9+6+6 = 78 poin (was 71)
     RAW_L = sum(v[0] for v in scores_L.values())
-    ADJ_L = round(RAW_L * SESSION_MULT, 1)
+
+    # ── [FIX v2.0] Conflict Penalty ────────────────────────────────────
+    _conflict_penalties = []
+    # Konflik 1: OI naik kuat tapi CVD negatif (bullish OI vs bearish flow)
+    if C_final > 20 and K < -1:
+        _conflict_penalties.append(('OI_vs_CVD', -5,
+            f'OI={C_final:.1f}% naik tapi CVD={K:.1f}% negatif'))
+    # Konflik 2: RSI oversold tapi funding positif tinggi
+    if O_rsi < 35 and has_funding and funding_val > 0.0005:
+        _conflict_penalties.append(('RSI_vs_Funding', -4,
+            f'RSI={O_rsi:.1f} oversold tapi funding={funding_val:.5f} positif tinggi'))
+    # Konflik 3: Harga di bawah EMA21 tapi BOS bearish aktif
+    if L < -2 and has_bos and bos_val == -1 and not _karet_gelang_triggered:
+        _conflict_penalties.append(('EMA_vs_BOS', -3,
+            f'Harga {L:.1f}% di bawah EMA21 tapi BOS=-1 bearish'))
+    _total_conflict_penalty = sum(p[1] for p in _conflict_penalties)
+    RAW_L = RAW_L + _total_conflict_penalty  # [FIX v2.0] penalti ke RAW sebelum session mult
+    # ── End Conflict Penalty ────────────────────────────────────────
+
+    ADJ_L = round(RAW_L * SESSION_MULT, 1)  # [FIX v2.0] threshold ctx perlu ×1.098
 
     # [IMPR. 3] Karet Gelang bonus diterapkan ke ADJ_L
     ADJ_L = round(ADJ_L + _karet_gelang_bonus, 1)
@@ -482,8 +495,8 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         if close_price <= buy_liq_val * 1.020: return ('⚠️', f'+{j:.2f}%', 'Mendekati')
         return ('❌', f'+{j:.2f}%', 'Belum diambil')
     def _ppi_rsi_long():
-        if O_rsi < 35:  return ('✅', f'{O_rsi:.1f}', 'Oversold')                 # [FIX 3] was <25
-        if O_rsi < 50:  return ('⚠️', f'{O_rsi:.1f}', 'Mendekati oversold')      # [FIX 3] was <40
+        if O_rsi < 35:  return ('✅', f'{O_rsi:.1f}', 'Oversold')            # [FIX v2.0]
+        if O_rsi < 50:  return ('⚠️', f'{O_rsi:.1f}', 'Mendekati oversold') # [FIX v2.0]
         return ('❌', f'{O_rsi:.1f}', 'Tidak oversold')
     def _ppi_stoch_long():
         if not has_stoch: return ('⚠️', 'N/A', 'Tidak tersedia')
@@ -522,10 +535,14 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         'stoch_gatekeeper_ok': stoch_gatekeeper_ok, 'stoch_gatekeeper_skip': stoch_gatekeeper_skip,
         'stoch_gatekeeper_reason': stoch_gatekeeper_reason, 'stoch_bonus_points': stoch_bonus_points,
         'stoch_gate_override': stoch_gate_override,
-        'stoch_penalty_applied': stoch_penalty_applied,  # [FIX 4]
-        'stoch_penalty_pts': stoch_penalty_pts,           # [FIX 4]
+        'stoch_penalty_applied': stoch_penalty_applied,
+        'stoch_penalty_pts': stoch_penalty_pts,
         'liq_hunter_triggered': _liq_hunter_triggered,
         'rsi_vshaped_long': rsi_vshaped_long, 'rsi_vshaped_note': rsi_vshaped_note,
         'karet_gelang_triggered': _karet_gelang_triggered, 'karet_gelang_bonus': _karet_gelang_bonus,
         'karet_gelang_note': _karet_gelang_note,
+        'oi_trend_score': _oi_trend_score,                       # [FIX v2.0]
+        'oi_event_score': _oi_event_score,                       # [FIX v2.0]
+        'conflict_penalties': _conflict_penalties,               # [FIX v2.0]
+        'total_conflict_penalty': _total_conflict_penalty,       # [FIX v2.0]
     }

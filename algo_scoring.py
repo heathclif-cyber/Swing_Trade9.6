@@ -174,10 +174,10 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
             _atr_extreme = bool(H > _atr_avg_20 * 2.0)
 
     if macro_data['macro_trend'] == 'UPTREND':
-        _thr_full, _thr_half, _thr_wait = 48, 33, 20
+        _thr_full, _thr_half, _thr_wait = 53, 36, 22  # [FIX v2.0] ×1.098: was 48,33,20
         threshold_regime = "BULL"
     else:
-        _thr_full, _thr_half, _thr_wait = 58, 42, 28
+        _thr_full, _thr_half, _thr_wait = 64, 46, 31  # [FIX v2.0] ×1.098: was 58,42,28
         threshold_regime = "BEAR/SIDEWAYS"
 
     if _atr_extreme:
@@ -250,14 +250,14 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
 
     # Validation
     validations = []
-    if not (0 <= res_L['raw_score'] <= 71): validations.append("⚠️ V1: Skor long anomali")
-    if not (0 <= res_S['raw_score'] <= 71): validations.append("⚠️ V2: Skor short anomali")
+    if not (0 <= res_L['raw_score'] <= 78): validations.append("⚠️ V1: Skor long anomali")   # [FIX v2.0] was 71
+    if not (0 <= res_S['raw_score'] <= 78): validations.append("⚠️ V2: Skor short anomali")  # [FIX v2.0] was 71
     for k, (pts, mx, _, _) in res_L['scores'].items():
         if pts > mx: validations.append(f"⚠️ V3: Overflow {k} (L)")
     for k, (pts, mx, _, _) in res_S['scores'].items():
         if pts > mx: validations.append(f"⚠️ V3: Overflow {k} (S)")
-    if res_L['scores']['TakerBuy'][0] > 8 or res_S['scores']['TakerBuy'][0] > 8:
-        validations.append("⚠️ V4: TakerBuy overflow (maks 8)")
+    if res_L['scores']['TakerBuy'][0] > 6 or res_S['scores']['TakerBuy'][0] > 6:  # [FIX v2.0] was 8
+        validations.append("⚠️ V4: TakerBuy overflow (maks 6)")
     if res_L['sl_struct'] >= close_price: validations.append("⚠️ V5: SL long di atas harga")
     if res_S['sl_struct'] <= close_price: validations.append("⚠️ V6: SL short di bawah harga")
     if not (res_L['tp1'][0] <= res_L['tp2'][0] <= res_L['tp3'][0]): validations.append("⚠️ V7: Urutan TP long terbalik")
@@ -292,7 +292,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
     result = {
         'long': {
             'raw': res_L['raw_score'], 'total': res_L['adj_score'],
-            'pct': round(res_L['adj_score'] / 71 * 100, 2),
+            'pct': round(res_L['adj_score'] / 78 * 100, 2),  # [FIX v2.0] was /71
             'decision': res_L['dec'], 'code': res_L['code'],
             'gate': res_L['gate'],
             'scores': res_L['scores'], 'narrative': res_L['narrative'],
@@ -313,7 +313,7 @@ def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
         },
         'short': {
             'raw': res_S['raw_score'], 'total': res_S['adj_score'],
-            'pct': round(res_S['adj_score'] / 71 * 100, 2),
+            'pct': round(res_S['adj_score'] / 78 * 100, 2),  # [FIX v2.0] was /71
             'decision': res_S['dec'], 'code': res_S['code'],
             'gate': res_S['gate'],
             'scores': res_S['scores'], 'narrative': res_S['narrative'],

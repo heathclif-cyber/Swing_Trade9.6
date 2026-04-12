@@ -156,31 +156,24 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_S['gates']['S3'] = ('FAIL', f'❌ GATE S3: Funding sangat negatif ({funding_val:.5f}) — short squeeze risk.')
         gate_S['status'] = 'BLOCKED'
 
-    # ── [IMPR. 1] OI SHORT — Exhaustion & FOMO Top ──────────────
-    def score_oi(v, oi_chg, rsi_val):
-        # Skenario 1: FOMO Pucuk (OI meledak + RSI jenuh beli ekstrem)
-        if v > 30 and rsi_val > 75: return 3          # 15 Poin
-        # Skenario 2: Kelelahan Beli (harga naik tapi OI stagnan/turun tipis)
-        if -5 <= oi_chg <= 0: return 3                # 15 Poin
-        if v > 30: return 2                           # 10 Poin
-        if v >= 5: return 1                           #  5 Poin
+    # ── [FIX v2.0] OI SHORT — dua sub-fungsi terpisah (Fix 2) ──────────
+    def _score_oi_trend_s(v, rsi_val):
+        """Membaca momentum OI untuk setup short."""
+        if v > 30 and rsi_val > 75: return 3  # FOMO top: OI bengkak + RSI jenuh beli
+        if v > 30: return 2                   # OI bengkak tapi RSI belum konfirmasi
+        if v >= 5: return 1
         return 0
 
+    def _score_oi_event_s(oi_chg):
+        """Membaca event exhaustion buyer via oi_change."""
+        if -5 <= oi_chg <= 0: return 3    # [FIX v2.0] Kelelahan beli: OI stagnan/turun tipis
+        if oi_chg < -5: return 1          # [FIX v2.0] OI turun — hati-hati short squeeze
+        return 0
+
+    _oi_trend_score_s = _score_oi_trend_s(C_final, O_rsi)
+    _oi_event_score_s = _score_oi_event_s(oi_change)
+    s1 = max(_oi_trend_score_s, _oi_event_score_s)  # [FIX v2.0] ambil sinyal terkuat
     _liq_hunter_triggered_s = bool((C_final > 30 and O_rsi > 75) or (-5 <= oi_change <= 0))
-
-    def score_vol(v):
-        if v > 70: return 3
-        if v >= 20: return 2
-        if v >= -10: return 1
-        return 0
-
-    def score_atr_scoring(h):
-        if atr_score_sweet_lo <= h <= atr_score_sweet_hi: return 3
-        if (atr_score_t2_lo <= h < atr_score_sweet_lo) or (atr_score_sweet_hi < h <= atr_score_t2_hi): return 2
-        if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
-        return 0
-
-    s1 = score_oi(C_final, oi_change, O_rsi)
     s2 = score_vol(F_final)
     s3s = 2 if G > 53 else (1 if G >= 51 else 0)
     s4 = score_atr_scoring(H)
@@ -196,18 +189,37 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         s9s = 3 if O_rsi > 75 else (2 if O_rsi >= 60 else (1 if O_rsi >= 45 else 0))
 
     scores_S = {
-        'OI':       (s1*5,  15, C_final, s1),
-        'Vol':      (s2*4,  12, F_final, s2),
-        'TakerBuy': (s3s*4,  8, G, s3s),
-        'ATR':      (s4*3,   9, H, s4),
-        'CVD':      (s5s*3,  9, K, s5s),
-        'EMA21':    (s6s*2,  6, Lp, s6s),
-        'EMA50':    (s7s*2,  6, Mp, s7s),
-        'EMA200':   (s8s*1,  3, Np, s8s),
-        'RSI':      (s9s*1,  3, O_rsi, s9s),
-    }
+        'OI':       (s1*4,  12, C_final, s1),  # [FIX v2.0] 5× → 4×
+        'Vol':      (s2*3,   9, F_final, s2),  # [FIX v2.0] 4× → 3×
+        'TakerBuy': (s3s*3,  6, G, s3s),       # [FIX v2.0] 4× → 3× (s3s max=2 → max=6)
+        'ATR':      (s4*3,   9, H, s4),        # tetap
+        'CVD':      (s5s*4, 12, K, s5s),       # [FIX v2.0] 3× → 4×
+        'EMA21':    (s6s*3,  9, Lp, s6s),      # [FIX v2.0] 2× → 3×
+        'EMA50':    (s7s*3,  9, Mp, s7s),      # [FIX v2.0] 2× → 3×
+        'EMA200':   (s8s*2,  6, Np, s8s),      # [FIX v2.0] 1× → 2×
+        'RSI':      (s9s*2,  6, O_rsi, s9s),   # [FIX v2.0] 1× → 2×
+    }  # [FIX v2.0] Total max: 12+9+6+9+12+9+9+6+6 = 78 poin (was 71)
     RAW_S = sum(v[0] for v in scores_S.values())
-    ADJ_S = round(RAW_S * SESSION_MULT, 1)
+
+    # ── [FIX v2.0] Conflict Penalty (SHORT) ───────────────────────────
+    _conflict_penalties_s = []
+    # Konflik 1: OI turun tapi CVD positif (bearish OI tapi flow masih beli)
+    if C_final < -10 and K > 1:
+        _conflict_penalties_s.append(('OI_vs_CVD', -5,
+            f'OI={C_final:.1f}% turun tapi CVD={K:.1f}% positif'))
+    # Konflik 2: RSI overbought tapi funding sangat negatif (short squeeze risk)
+    if O_rsi > 70 and has_funding and funding_val < -0.0005:
+        _conflict_penalties_s.append(('RSI_vs_Funding', -4,
+            f'RSI={O_rsi:.1f} overbought tapi funding={funding_val:.5f} sangat negatif'))
+    # Konflik 3: Harga di atas EMA21 tapi BOS bullish aktif
+    if Lp > 2 and has_bos and bos_val == 1 and not _karet_gelang_triggered_s:
+        _conflict_penalties_s.append(('EMA_vs_BOS', -3,
+            f'Harga {Lp:.1f}% di atas EMA21 tapi BOS=+1 bullish'))
+    _total_conflict_penalty_s = sum(p[1] for p in _conflict_penalties_s)
+    RAW_S = RAW_S + _total_conflict_penalty_s  # [FIX v2.0] penalti ke RAW sebelum session mult
+    # ── End Conflict Penalty ────────────────────────────────
+
+    ADJ_S = round(RAW_S * SESSION_MULT, 1)  # [FIX v2.0] threshold ctx perlu ×1.098
 
     # [IMPR. 3] Karet Gelang bonus diterapkan ke ADJ_S
     ADJ_S = round(ADJ_S + _karet_gelang_bonus_s, 1)
@@ -466,4 +478,8 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         'rsi_vshaped_short': rsi_vshaped_short, 'rsi_vshaped_note': rsi_vshaped_note_s,
         'karet_gelang_triggered': _karet_gelang_triggered_s, 'karet_gelang_bonus': _karet_gelang_bonus_s,
         'karet_gelang_note': _karet_gelang_note_s,
+        'oi_trend_score': _oi_trend_score_s,                     # [FIX v2.0]
+        'oi_event_score': _oi_event_score_s,                     # [FIX v2.0]
+        'conflict_penalties': _conflict_penalties_s,             # [FIX v2.0]
+        'total_conflict_penalty': _total_conflict_penalty_s,     # [FIX v2.0]
     }
