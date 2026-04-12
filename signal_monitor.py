@@ -536,7 +536,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _send_telegram(
                     f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                     f"{'─'*28}\n"
-                    f"📊 Skor: <b>{adj_L:.0f}/71 pts</b> ({result['long']['pct']:.1f}%)\n"
+                    f"📊 Skor: <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%)\n"  # [FIX v2.0] was /71
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
@@ -584,7 +584,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _send_telegram(
                     f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                     f"{'─'*28}\n"
-                    f"📊 Skor: <b>{adj_S:.0f}/71 pts</b> ({result['short']['pct']:.1f}%)\n"
+                    f"📊 Skor: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%)\n"  # [FIX v2.0] was /71
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
@@ -631,8 +631,8 @@ def _monitor_loop() -> None:
         f"✅ Monitoring {len(MONITOR_PAIRS)} pair setiap 15 menit\n"
         f"Pairs: {', '.join(MONITOR_PAIRS)}\n\n"
         f"Notifikasi akan dikirim otomatis saat:\n"
-        f"  🚀 LONG signal (skor ≥ 36/71)\n"
-        f"  📉 SHORT signal (skor ≥ 36/71)\n"
+        f"  🚀 LONG signal (skor ≥ 46/78)\n"   # [FIX v2.0] was 36/71
+        f"  📉 SHORT signal (skor ≥ 46/78)\n"   # [FIX v2.0] was 36/71
         f"  ⚠️ EXIT ALERT\n\n"
         f"🕐 Start: {wib} WIB"
     )
@@ -768,8 +768,8 @@ def test_send_pendle_notification() -> dict:
         f"💰 Harga: <b>${close_price:.6f}</b>\n"
         f"\n"
         f"━━ 📊 SKOR ━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  LONG : <b>{adj_L:.0f}/71 pts</b> ({result['long']['pct']:.1f}%) → <b>{code_L}</b>\n"
-        f"  SHORT: <b>{adj_S:.0f}/71 pts</b> ({result['short']['pct']:.1f}%) → <b>{code_S}</b>\n"
+        f"  LONG : <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%) → <b>{code_L}</b>\n"  # [FIX v2.0]
+        f"  SHORT: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%) → <b>{code_S}</b>\n"  # [FIX v2.0]
         f"  Threshold: FULL≥{thr_full} | HALF≥{thr_half} | Regime: {threshold_regime}\n"
         f"\n"
         f"━━ {macro_icon} TREN MACRO ━━━━━━━━━━━━━━━━━━━\n"

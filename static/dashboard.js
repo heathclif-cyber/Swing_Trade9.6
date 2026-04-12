@@ -213,7 +213,7 @@ function renderQuantAnalysis(quant, state) {
         document.getElementById('quantDecisionName').className = 'decision-name color-SKIP';
         if (document.getElementById('decisionBanner')) document.getElementById('decisionBanner').className = 'quant-decision-banner decision-SKIP';
         if (document.getElementById('quantTotalBar')) document.getElementById('quantTotalBar').style.width = '0%';
-        if (document.getElementById('quantTotalPts')) document.getElementById('quantTotalPts').textContent = '—/71';
+        if (document.getElementById('quantTotalPts')) document.getElementById('quantTotalPts').textContent = '—/78';
         if (document.getElementById('activePosBanner')) document.getElementById('activePosBanner').innerHTML = '';
         if (document.getElementById('featureGrid')) document.getElementById('featureGrid').innerHTML = '<div style="color:var(--text-3);padding:20px;text-align:center;grid-column:1/-1">Belum ada data cukup untuk analisis.</div>';
         if (document.getElementById('slLevels')) document.getElementById('slLevels').innerHTML = '';
@@ -244,10 +244,10 @@ function renderQuantAnalysis(quant, state) {
     }
 
     document.getElementById('quantDecisionName').textContent = data.decision;
-    document.getElementById('quantScoreSummary').innerHTML = `Score: ${data.total}/71 (${data.pct.toFixed(1)}%)${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}`;
+    document.getElementById('quantScoreSummary').innerHTML = `Score: ${data.total}/78 (${data.pct.toFixed(1)}%)${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}`;
     // Total bar
     const pct = data.total / 71 * 100;
-    document.getElementById('quantTotalPts').textContent = `${data.total}/71`;
+    document.getElementById('quantTotalPts').textContent = `${data.total}/78`;
     const barEl = document.getElementById('quantTotalBar');
     barEl.style.width = pct + '%';
     barEl.style.background = data.code === 'FULL' ? 'var(--accent-green)' : data.code === 'HALF' ? 'var(--accent-blue)' : data.code === 'WAIT' ? 'var(--accent-yellow)' : 'var(--accent-red)';
@@ -518,9 +518,9 @@ function renderCSVResult(json) {
             <div class="quant-decision-banner decision-${d.code}" style="margin-bottom:14px;padding:16px">
                 <div class="decision-label">${tab === 'long' ? '🐂' : '🐻'} ${tab.toUpperCase()} Setup</div>
                 <div class="decision-name color-${d.code}" style="font-size:22px">${d.decision}</div>
-                <div class="decision-score">${d.total}/71 · ${d.pct.toFixed(1)}%${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}</div></div>
-            <div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-bottom:4px"><span>Score</span><span>${d.total}/71</span></div>
-                <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${d.total/71*100}%;background:${d.code==='FULL'?'var(--accent-green)':d.code==='HALF'?'var(--accent-blue)':d.code==='WAIT'?'var(--accent-yellow)':'var(--accent-red)'}"></div></div></div>
+                <div class="decision-score">${d.total}/78 · ${d.pct.toFixed(1)}%${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}</div></div>
+            <div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-bottom:4px"><span>Score</span><span>${d.total}/78</span></div>
+                <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${d.total/78*100}%;background:${d.code==='FULL'?'var(--accent-green)':d.code==='HALF'?'var(--accent-blue)':d.code==='WAIT'?'var(--accent-yellow)':'var(--accent-red)'}"></div></div></div>
             <div style="margin-bottom:14px">${featureRows}</div>
             <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:6px">Stop Loss</div>
                 <div class="level-pill"><span>Ketat</span><span class="val-neg">$${lv.sl_ketat.toFixed(5)}</span></div>

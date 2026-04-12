@@ -178,6 +178,20 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     _oi_event_score = _score_oi_event(oi_change, F)
     s1 = max(_oi_trend_score, _oi_event_score)  # [FIX v2.0] ambil sinyal terkuat
     _liq_hunter_triggered = bool(oi_change < -10 and F > 50)
+
+    # ── Helper scoring functions (dikembalikan setelah refactor OI)
+    def score_vol(v):
+        if v > 70: return 3
+        if v >= 20: return 2
+        if v >= -10: return 1
+        return 0
+
+    def score_atr_scoring(h):
+        if atr_score_sweet_lo <= h <= atr_score_sweet_hi: return 3
+        if (atr_score_t2_lo <= h < atr_score_sweet_lo) or (atr_score_sweet_hi < h <= atr_score_t2_hi): return 2
+        if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
+        return 0
+
     s2 = score_vol(F_final)
     s3 = 2 if G < 49 else (1 if G <= 52 else 0)
     s4 = score_atr_scoring(H)

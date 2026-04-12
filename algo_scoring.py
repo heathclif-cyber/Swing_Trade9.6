@@ -1,11 +1,14 @@
 """
-Protocol 9.6 — 71-Point Quantitative Swing Trading Scoring Engine
+Protocol 9.6 — 78-Point Quantitative Swing Trading Scoring Engine
 Full spec-compliant implementation (Bagian 0–10).
 
 Refactored to orchestrator pattern.
 """
+import logging
 import pandas as pd
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from core.helpers import (
     safe_float, json_safe, _has_col, _last_val,
@@ -19,6 +22,14 @@ from core.scoring_long import calculate_long_score
 from core.scoring_short import calculate_short_score
 
 def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
+    """78-point scoring engine (was 71-point, upgraded v2.0)."""
+    try:
+        return _calculate_score_internal(df, meta)
+    except Exception as e:
+        logger.error(f"[Scoring] Crash saat kalkulasi skor: {e}", exc_info=True)
+        return None
+
+def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
     if len(df) < 22:
         return None
 

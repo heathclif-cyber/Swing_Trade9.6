@@ -174,6 +174,20 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     _oi_event_score_s = _score_oi_event_s(oi_change)
     s1 = max(_oi_trend_score_s, _oi_event_score_s)  # [FIX v2.0] ambil sinyal terkuat
     _liq_hunter_triggered_s = bool((C_final > 30 and O_rsi > 75) or (-5 <= oi_change <= 0))
+
+    # ── Helper scoring functions (dikembalikan setelah refactor OI)
+    def score_vol(v):
+        if v > 70: return 3
+        if v >= 20: return 2
+        if v >= -10: return 1
+        return 0
+
+    def score_atr_scoring(h):
+        if atr_score_sweet_lo <= h <= atr_score_sweet_hi: return 3
+        if (atr_score_t2_lo <= h < atr_score_sweet_lo) or (atr_score_sweet_hi < h <= atr_score_t2_hi): return 2
+        if (atr_score_t1_lo <= h < atr_score_t2_lo) or (atr_score_t2_hi < h <= atr_score_t1_hi): return 1
+        return 0
+
     s2 = score_vol(F_final)
     s3s = 2 if G > 53 else (1 if G >= 51 else 0)
     s4 = score_atr_scoring(H)
