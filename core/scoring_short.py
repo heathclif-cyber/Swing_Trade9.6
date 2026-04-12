@@ -131,12 +131,28 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_S['gates']['S3'] = ('FAIL', f'❌ GATE S3: Funding sangat negatif ({funding_val:.5f}) — short squeeze risk.')
         gate_S['status'] = 'BLOCKED'
 
+    # ── [IMPR. 2] RSI V-Shape Memory: 2-candle lookback ──────
+    rsi_vshaped_short = False
+    rsi_vshaped_note_s = ""
+    if len(df) >= 3:
+        rsi_1ago = df.iloc[-2].get('RSI_6', None)
+        rsi_2ago = df.iloc[-3].get('RSI_6', None)
+        if rsi_1ago is not None and rsi_2ago is not None:
+            if float(rsi_1ago) > 80 or float(rsi_2ago) > 80:
+                rsi_vshaped_short = True
+                rsi_vshaped_note_s = f"V-Shape RSI SHORT: candle-1={float(rsi_1ago):.1f}, candle-2={float(rsi_2ago):.1f} (salah satu >80)"
+
     # ── Scoring ───────────────────────────────────────────────
+    # [IMPR. 1] Liquidation Hunter: OI turun drastis + volume meledak = poin maksimal
     def score_oi(v):
+        if C_final < -10 and F_final > 50:
+            return 3  # Liquidation Hunter: max score — panic selling + volume spike
         if v > 30: return 3
         if v >= 5: return 2
         if v >= -20: return 1
         return 0
+
+    _liq_hunter_triggered_s = bool(C_final < -10 and F_final > 50)
 
     def score_vol(v):
         if v > 70: return 3
@@ -158,7 +174,12 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     s6s = 3 if Lp > 5 else (2 if Lp >= 3 else (1 if Lp >= 1.5 else 0))
     s7s = 3 if Mp > 6 else (2 if Mp >= 4 else (1 if Mp >= 2 else 0))
     s8s = 3 if Np > 10 else (2 if Np >= 5 else (1 if Np >= 2 else 0))
-    s9s = 3 if O_rsi > 75 else (2 if O_rsi >= 60 else (1 if O_rsi >= 45 else 0))
+
+    # [IMPR. 2] RSI V-Shape Memory: izinkan entry jika RSI sekarang >= 65 DAN ada lookback >80 di 2 candle sebelumnya
+    if rsi_vshaped_short and O_rsi >= 65:
+        s9s = 3  # V-Shape konfirmasi — beri skor penuh
+    else:
+        s9s = 3 if O_rsi > 75 else (2 if O_rsi >= 60 else (1 if O_rsi >= 45 else 0))
 
     scores_S = {
         'OI':       (s1*5,  15, C_final, s1),
@@ -173,6 +194,16 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     }
     RAW_S = sum(v[0] for v in scores_S.values())
     ADJ_S = round(RAW_S * SESSION_MULT, 1)
+
+    # [IMPR. 3] Elastisitas "Karet Gelang" — Mean Reversion Bonus SHORT
+    # Jika harga sudah sangat jauh di atas EMA21 (> +6%), beri +5 poin darurat
+    _karet_gelang_triggered_s = bool(Lp > 6.0)
+    _karet_gelang_bonus_s = 0
+    _karet_gelang_note_s = ""
+    if _karet_gelang_triggered_s:
+        _karet_gelang_bonus_s = 5
+        _karet_gelang_note_s = f"⚡ KARET GELANG SHORT: Harga {Lp:.2f}% di atas EMA21 (>+6%). +5 bonus darurat mean reversion."
+        ADJ_S = round(ADJ_S + _karet_gelang_bonus_s, 1)
 
     # ── KEPUTUSAN
     def get_tier(adj):
@@ -339,9 +370,14 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             f"CVD: {cvd_desc} (I={I_cvd:.0f}, J={J_cvd:.0f}). "
             f"RSI_6={O_rsi:.1f}. {_stoch_desc()}. "
             f"ATR={H:.2f}% | ATR_MULT={ATR_MULT} ({atr_mult_reason}) | sweet spot {sweet_lo:.1f}%–{sweet_hi:.1f}%."
+            + (f" | 🎯 {rsi_vshaped_note_s}" if rsi_vshaped_short else "")
+            + (f" | {_karet_gelang_note_s}" if _karet_gelang_triggered_s else "")
+            + (f" | 🩸 LIQUIDATION HUNTER: OI={C_final:.1f}% + Vol={F_final:.1f}% → OI MAX SCORE" if _liq_hunter_triggered_s else "")
         ),
         'keputusan': (
-            f"RAW={RAW_S} → ADJ={ADJ_S} (×{SESSION_MULT}) → {dec_S}"
+            f"RAW={RAW_S} → ADJ={ADJ_S} (×{SESSION_MULT}"
+            + (f"+{_karet_gelang_bonus_s}pts KaretGelang" if _karet_gelang_triggered_s else "")
+            + f") → {dec_S}"
             + (f" [GATE BLOCKED: {_gate_summary(gate_S)}]" if gate_S['status'] == 'BLOCKED' else "")
             + (f" [AGING: {aging_status}]" if aging_status in ('AGING', 'STALE') else "")
             + f". Driver: {_top_driver(scores_S)}. Hambatan: {_top_blocker(scores_S, False)}. "
@@ -353,7 +389,9 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         'skenario': (
             f"Tier 1 butuh: BOS→-1 (saat ini {bos_val}), CVD div bear (+RSI>75+funding≥0), Funding≥0. "
             f"Tier 2 butuh: {'sweep Sell_Liq $' + str(round(sell_liq_val,4)) if has_sell_liq else 'Sell_Liq N/A'}, "
-            f"RSI>{'75 (saat ini '+str(round(O_rsi,1))+')' if s9s<3 else 'OK'}, StochRSI cross down dari >80. "
+            f"RSI>{'75 (saat ini '+str(round(O_rsi,1))+')' if s9s<3 else 'OK'}"
+            + (f" [V-Shape RSI aktif ✅]" if rsi_vshaped_short else "")
+            + f", StochRSI cross down dari >80. "
             f"Level kunci: Close ${close_price:.4f}, EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
             f"Sesi optimal: London/NY ({session_label} saat ini)."
         ),
@@ -416,5 +454,9 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         'sl_cands': sl_cands_S, 'tp_candidates': tp_pool_S,
         'sl_struct': sl_struct_S, 'sl_label': sl_label_S,
         'tp1': tp1_S, 'tp2': tp2_S, 'tp3': tp3_S,
-        'rr1': rr1_S, 'rr2': rr2_S, 'rr3': rr3_S
+        'rr1': rr1_S, 'rr2': rr2_S, 'rr3': rr3_S,
+        'liq_hunter_triggered': _liq_hunter_triggered_s,
+        'rsi_vshaped_short': rsi_vshaped_short, 'rsi_vshaped_note': rsi_vshaped_note_s,
+        'karet_gelang_triggered': _karet_gelang_triggered_s, 'karet_gelang_bonus': _karet_gelang_bonus_s,
+        'karet_gelang_note': _karet_gelang_note_s,
     }

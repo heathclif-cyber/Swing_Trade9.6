@@ -134,12 +134,28 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_L['gates']['L3'] = ('FAIL', f'❌ GATE L3: Funding positif tinggi ({funding_val:.5f}). Tunggu funding ≤ +0.0003.')
         gate_L['status'] = 'BLOCKED'
 
+    # ── [IMPR. 2] RSI V-Shape Memory: 2-candle lookback ──────
+    rsi_vshaped_long = False
+    rsi_vshaped_note = ""
+    if len(df) >= 3:
+        rsi_1ago = df.iloc[-2].get('RSI_6', None)
+        rsi_2ago = df.iloc[-3].get('RSI_6', None)
+        if rsi_1ago is not None and rsi_2ago is not None:
+            if float(rsi_1ago) < 20 or float(rsi_2ago) < 20:
+                rsi_vshaped_long = True
+                rsi_vshaped_note = f"V-Shape RSI: candle-1={float(rsi_1ago):.1f}, candle-2={float(rsi_2ago):.1f} (salah satu <20)"
+
     # ── Scoring ───────────────────────────────────────────────
+    # [IMPR. 1] Liquidation Hunter: OI turun drastis + volume meledak = poin maksimal
     def score_oi(v):
+        if C_final < -10 and F_final > 50:
+            return 3  # Liquidation Hunter: max score — panic selling + volume spike
         if v > 30: return 3
         if v >= 5: return 2
         if v >= -20: return 1
         return 0
+
+    _liq_hunter_triggered = bool(C_final < -10 and F_final > 50)
 
     def score_vol(v):
         if v > 70: return 3
@@ -161,7 +177,12 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     s6 = 3 if L < -3 else (2 if L < -1.5 else (1 if L < -0.5 else 0))
     s7 = 3 if M < -4 else (2 if M < -2 else (1 if M < 0 else 0))
     s8 = 3 if N < -7 else (2 if N < -3 else (1 if N < 0 else 0))
-    s9 = 3 if O_rsi < 25 else (2 if O_rsi < 40 else (1 if O_rsi < 55 else 0))
+
+    # [IMPR. 2] RSI V-Shape Memory: izinkan entry jika RSI sekarang <= 35 DAN ada lookback <20 di 2 candle sebelumnya
+    if rsi_vshaped_long and O_rsi <= 35:
+        s9 = 3  # V-Shape konfirmasi — beri skor penuh
+    else:
+        s9 = 3 if O_rsi < 25 else (2 if O_rsi < 40 else (1 if O_rsi < 55 else 0))
 
     scores_L = {
         'OI':       (s1*5, 15, C_final, s1),
@@ -176,6 +197,16 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     }
     RAW_L = sum(v[0] for v in scores_L.values())
     ADJ_L = round(RAW_L * SESSION_MULT, 1)
+
+    # [IMPR. 3] Elastisitas "Karet Gelang" — Mean Reversion Bonus
+    # Jika harga sudah sangat jauh di bawah EMA21 (< -6%), beri +5 poin darurat
+    _karet_gelang_triggered = bool(L < -6.0)
+    _karet_gelang_bonus = 0
+    _karet_gelang_note = ""
+    if _karet_gelang_triggered:
+        _karet_gelang_bonus = 5
+        _karet_gelang_note = f"⚡ KARET GELANG LONG: Harga {L:.2f}% di bawah EMA21 (<-6%). +5 bonus darurat mean reversion."
+        ADJ_L = round(ADJ_L + _karet_gelang_bonus, 1)
 
     # ── [P4] StochRSI Gatekeeper
     stoch_gatekeeper_ok   = False
@@ -380,9 +411,14 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
             f"CVD: {cvd_desc} (I={I_cvd:.0f}, J={J_cvd:.0f}). "
             f"RSI_6={O_rsi:.1f}. {_stoch_desc()}. "
             f"ATR={H:.2f}% | ATR_MULT={ATR_MULT} ({atr_mult_reason}) | sweet spot {sweet_lo:.1f}%–{sweet_hi:.1f}%."
+            + (f" | 🎯 {rsi_vshaped_note}" if rsi_vshaped_long else "")
+            + (f" | {_karet_gelang_note}" if _karet_gelang_triggered else "")
+            + (f" | 🩸 LIQUIDATION HUNTER: OI={C_final:.1f}% + Vol={F_final:.1f}% → OI MAX SCORE" if _liq_hunter_triggered else "")
         ),
         'keputusan': (
-            f"RAW={RAW_L} → ADJ={ADJ_L} (×{SESSION_MULT}) → {dec_L}"
+            f"RAW={RAW_L} → ADJ={ADJ_L} (×{SESSION_MULT}"
+            + (f"+{_karet_gelang_bonus}pts KaretGelang" if _karet_gelang_triggered else "")
+            + f") → {dec_L}"
             + (f" [GATE BLOCKED: {_gate_summary(gate_L)}]" if gate_L['status'] == 'BLOCKED' else "")
             + (f" [AGING: {aging_status}]" if aging_status in ('AGING', 'STALE') else "")
             + f". Driver: {_top_driver(scores_L)}. Hambatan: {_top_blocker(scores_L, True)}. "
@@ -394,7 +430,9 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         'skenario': (
             f"Tier 1 butuh: BOS→+1 (saat ini {bos_val}), CVD div bull (+RSI<25+funding≤0), Funding≤0. "
             f"Tier 2 butuh: {'sweep Buy_Liq $' + str(round(buy_liq_val,4)) if has_buy_liq else 'Buy_Liq N/A'}, "
-            f"RSI<{'25 (saat ini '+str(round(O_rsi,1))+')' if s9<3 else 'OK'}, StochRSI cross up dari <20. "
+            f"RSI<{'25 (saat ini '+str(round(O_rsi,1))+')' if s9<3 else 'OK'}"
+            + (f" [V-Shape RSI aktif ✅]" if rsi_vshaped_long else "")
+            + f", StochRSI cross up dari <20. "
             f"Level kunci: Close ${close_price:.4f}, EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
             f"Sesi optimal: London ({session_label} saat ini). "
             + (f"Posisi {aging_status}: pertimbangkan exit dan re-entry setelah kondisi Tier 1 kembali positif." if aging_status in ('AGING','STALE') else "")
@@ -461,5 +499,9 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         'rr1': rr1_L, 'rr2': rr2_L, 'rr3': rr3_L,
         'stoch_gatekeeper_ok': stoch_gatekeeper_ok, 'stoch_gatekeeper_skip': stoch_gatekeeper_skip,
         'stoch_gatekeeper_reason': stoch_gatekeeper_reason, 'stoch_bonus_points': stoch_bonus_points,
-        'stoch_gate_override': stoch_gate_override
+        'stoch_gate_override': stoch_gate_override,
+        'liq_hunter_triggered': _liq_hunter_triggered,
+        'rsi_vshaped_long': rsi_vshaped_long, 'rsi_vshaped_note': rsi_vshaped_note,
+        'karet_gelang_triggered': _karet_gelang_triggered, 'karet_gelang_bonus': _karet_gelang_bonus,
+        'karet_gelang_note': _karet_gelang_note,
     }
