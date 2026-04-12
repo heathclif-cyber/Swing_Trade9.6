@@ -127,14 +127,14 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
                 f'Kemungkinan sedang tersapu — TUNGGU konfirmasi reversal.'
             )
             if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
-        elif _d <= 5.0:
+        elif _d <= 8.0:  # [FIX 2] Perlebar sweet spot: 5% → 8%
             gate_L['gates']['L2'] = (
                 'PASS',
                 f'✅ GATE L2: Sweet Spot (dist={_d:.2f}%). '
                 f'Harga cukup dekat dengan dyn_Buy_Liq ${dyn_buy_liq:.4f} — '
                 f'likuiditas hampir/sudah diambil. SwingLow(20): ${swing_low_20:.4f}.'
             )
-        elif _d <= 10.0:
+        elif _d <= 15.0:  # [FIX 2] Perlebar warning zone: 10% → 15%
             gate_L['gates']['L2'] = (
                 'WARN',
                 f'⚠️ GATE L2: Warning Zone (dist={_d:.2f}%). '
@@ -142,7 +142,7 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
                 f'Tunggu harga lebih dekat ke SwingLow(20) ${swing_low_20:.4f}.'
             )
             if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
-        else:
+        else:  # [FIX 2] BLOCK threshold: 10% → 15%
             gate_L['gates']['L2'] = (
                 'FAIL',
                 f'❌ GATE L2: Likuiditas belum diambil (dist={_d:.2f}%). '
@@ -192,11 +192,11 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     s7 = 3 if M < -4 else (2 if M < -2 else (1 if M < 0 else 0))
     s8 = 3 if N < -7 else (2 if N < -3 else (1 if N < 0 else 0))
 
-    # [IMPR. 2] RSI V-Shape Memory: izinkan entry jika RSI ≤ 35 DAN lookback <20
+    # [FIX 3] RSI V-Shape Memory + threshold diturunkan agar tidak terlalu ketat
     if rsi_vshaped_long and O_rsi <= 35:
         s9 = 3  # V-Shape konfirmasi — beri skor penuh
     else:
-        s9 = 3 if O_rsi < 25 else (2 if O_rsi < 40 else (1 if O_rsi < 55 else 0))
+        s9 = 3 if O_rsi < 35 else (2 if O_rsi < 50 else (1 if O_rsi < 60 else 0))  # [FIX 3] was <25/<40/<55
 
     scores_L = {
         'OI':       (s1*5, 15, C_final, s1),
@@ -279,10 +279,25 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     elif session_block_type == 'CONDITIONAL_OTHER' and ADJ_L < 45:
         dec_L, code_L = 'SKIP', 'SKIP'
     
-    stoch_gate_override = ""
-    if stoch_gatekeeper_skip and code_L not in ('SKIP',):
-        dec_L, code_L = 'SKIP', 'SKIP'
-        stoch_gate_override = f"LONG skip: {stoch_gatekeeper_reason}"
+    stoch_gate_override  = ""
+    stoch_penalty_applied = False
+    stoch_penalty_pts     = 0
+    STOCH_PENALTY = 8  # [FIX 4] poin penalti jika StochRSI tidak konfirmasi
+    if stoch_gatekeeper_skip:
+        ADJ_L = round(ADJ_L - STOCH_PENALTY, 1)
+        stoch_penalty_applied = True
+        stoch_penalty_pts     = STOCH_PENALTY
+        stoch_gate_override   = f"⚠️ StochRSI penalty -{STOCH_PENALTY}pts: {stoch_gatekeeper_reason}"
+        # [FIX 4] Re-evaluate tier setelah penalti (bukan hard SKIP)
+        dec_L, code_L = get_tier(ADJ_L)
+        if gate_L['status'] == 'BLOCKED':
+            dec_L, code_L = 'SKIP', 'SKIP'
+        elif session_block:
+            dec_L, code_L = 'SKIP', 'SKIP'
+        elif session_block_type == 'CONDITIONAL_NY' and ADJ_L < 40:
+            dec_L, code_L = 'SKIP', 'SKIP'
+        elif session_block_type == 'CONDITIONAL_OTHER' and ADJ_L < 45:
+            dec_L, code_L = 'SKIP', 'SKIP'
 
     _req_score_full_L = _thr_full + 5
     _m_slope = macro_slope if macro_slope is not None else 0.0
@@ -467,8 +482,8 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         if close_price <= buy_liq_val * 1.020: return ('⚠️', f'+{j:.2f}%', 'Mendekati')
         return ('❌', f'+{j:.2f}%', 'Belum diambil')
     def _ppi_rsi_long():
-        if O_rsi < 25:  return ('✅', f'{O_rsi:.1f}', 'Oversold ekstrem')
-        if O_rsi < 40:  return ('⚠️', f'{O_rsi:.1f}', 'Mendekati oversold')
+        if O_rsi < 35:  return ('✅', f'{O_rsi:.1f}', 'Oversold')                 # [FIX 3] was <25
+        if O_rsi < 50:  return ('⚠️', f'{O_rsi:.1f}', 'Mendekati oversold')      # [FIX 3] was <40
         return ('❌', f'{O_rsi:.1f}', 'Tidak oversold')
     def _ppi_stoch_long():
         if not has_stoch: return ('⚠️', 'N/A', 'Tidak tersedia')
@@ -507,6 +522,8 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         'stoch_gatekeeper_ok': stoch_gatekeeper_ok, 'stoch_gatekeeper_skip': stoch_gatekeeper_skip,
         'stoch_gatekeeper_reason': stoch_gatekeeper_reason, 'stoch_bonus_points': stoch_bonus_points,
         'stoch_gate_override': stoch_gate_override,
+        'stoch_penalty_applied': stoch_penalty_applied,  # [FIX 4]
+        'stoch_penalty_pts': stoch_penalty_pts,           # [FIX 4]
         'liq_hunter_triggered': _liq_hunter_triggered,
         'rsi_vshaped_long': rsi_vshaped_long, 'rsi_vshaped_note': rsi_vshaped_note,
         'karet_gelang_triggered': _karet_gelang_triggered, 'karet_gelang_bonus': _karet_gelang_bonus,
