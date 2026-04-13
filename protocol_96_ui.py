@@ -11,6 +11,7 @@ import pandas as pd  # type: ignore
 import pandas_ta as ta  # type: ignore
 from datetime import datetime, timezone, timedelta
 import io
+import concurrent.futures
 from flask import Flask, render_template, jsonify, Response, request as flask_request  # type: ignore
 from binance.client import Client  # type: ignore
 from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
@@ -1540,6 +1541,48 @@ def analyze_csv():
         logger.error(f"CSV Analysis Error: {e}")
         import traceback; traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/scanner")
+def api_scanner():
+    """Market Scanner: Evaluasi skor LONG dan SHORT untuk semua koin secara paralel."""
+    results = []
+
+    def analyze_coin(pair):
+        try:
+            # Gunakan fungsi enrichment dan scoring (SSOT) tanpa mengubah logika algoritma
+            df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
+            if df_quant is not None and not df_quant.empty and len(df_quant) >= 22:
+                # Meta disiapkan kosong untuk sekadar mengambil skor netral (tanpa pengaruh AVG ENTRY lama)
+                meta = {'Symbol': pair, 'AVG_ENTRY_PRICE': None, 'ENTRY_DATE': None}
+                score_res = algo_scoring.calculate_71point_score(df_quant, meta)
+                
+                if score_res:
+                    return {
+                        "pair": pair,
+                        "close": float(df_quant.iloc[-1]["Close"]),
+                        "long_score": score_res["long"]["total"],
+                        "long_code": score_res["long"]["code"],
+                        "short_score": score_res["short"]["total"],
+                        "short_code": score_res["short"]["code"],
+                        "incomplete": data_meta.get("data_incomplete", False)
+                    }
+        except Exception as e:
+            logger.error(f"[Scanner] Error analyzing {pair}: {e}")
+        return {"pair": pair, "error": True}
+
+    # Eksekusi paralel agar tidak memblokir UI dan menghemat waktu
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(analyze_coin, pair) for pair in AVAILABLE_PAIRS]
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
+                
+    # Urutkan berdasarkan skor LONG tertinggi sebagai default
+    results.sort(key=lambda x: x.get("long_score", 0), reverse=True)
+    
+    return jsonify({"success": True, "data": results})
 
 
 # ==========================================

@@ -467,6 +467,37 @@ tbody tr:last-child td { border-bottom: none; }
         </div>
     </header>
 
+    <div class="section" id="sectionScanner">
+        <div class="section-header section-collapsible open" onclick="toggleSection('scannerContent', this)">
+            <div class="section-icon-badge icon-yellow">📡</div>
+            <div class="section-title">Market Scanner — Pantauan Seluruh Koin (4H)</div>
+            <span class="chevron">▼</span>
+        </div>
+        <div id="scannerContent" class="section-body">
+            <div class="glass data-card" style="margin-bottom: 20px;">
+                <div class="table-scroll">
+                    <table id="scannerTable">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left; width:15%">Coin Pair</th>
+                                <th style="text-align:center; width:15%">Harga Saat Ini</th>
+                                <th style="text-align:center; width:25%">Score LONG</th>
+                                <th style="text-align:center; width:25%">Score SHORT</th>
+                                <th style="text-align:center; width:20%">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scannerTableBody">
+                            <tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:30px">
+                                <div class="spinner" style="width:24px;height:24px;border-width:2px;margin:0 auto 10px;"></div>
+                                Mengumpulkan data indikator untuk semua koin...
+                            </td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- EMERGENCY -->
     <div class="emergency-bar" id="emergencyBar"><span id="emergencyMsg">⚠️ ALERT</span></div>
 

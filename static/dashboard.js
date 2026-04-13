@@ -835,11 +835,56 @@ function toggleTheme() {
     localStorage.setItem('theme', isDark ? 'light' : 'dark');
 }
 
+/* ── MARKET SCANNER (ALL COINS) ──────────────────────────────────────────── */
+async function fetchScannerData() {
+    const tbody = document.getElementById('scannerTableBody');
+    try {
+        const res = await fetch('/api/scanner');
+        const json = await res.json();
+        
+        if (!json.success) throw new Error(json.error || 'Scanner gagal memuat.');
+        if (!json.data || json.data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:24px">Tidak ada data.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = json.data.map(d => {
+            if (d.error) {
+                return `<tr><td style="text-align:left;font-weight:bold">${d.pair}</td><td colspan="4" class="val-neg" style="text-align:center">Error memuat data</td></tr>`;
+            }
+
+            const getBadge = (code) => {
+                const cls = code === 'FULL' ? 'badge-green' : code === 'HALF' ? 'badge-blue' : code === 'WAIT' ? 'badge-yellow' : 'badge-red';
+                return `<span class="badge ${cls}" style="margin-left:8px">${code}</span>`;
+            };
+
+            return `<tr>
+                <td style="text-align:left;font-weight:bold;color:var(--text-1);">${d.pair} ${d.incomplete ? '⚠️' : ''}</td>
+                <td style="text-align:center;font-family:var(--mono)">$${d.close.toFixed(5)}</td>
+                <td style="text-align:center;">
+                    <span style="font-weight:600">${d.long_score}/78</span> ${getBadge(d.long_code)}
+                </td>
+                <td style="text-align:center;">
+                    <span style="font-weight:600">${d.short_score}/78</span> ${getBadge(d.short_code)}
+                </td>
+                <td style="text-align:center;">
+                    <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior: 'smooth'});">
+                        Analisis Detail 🔍
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--accent-red);padding:24px">❌ Error Scanner: ${e.message}</td></tr>`;
+    }
+}
+
 /* ── INIT ────────────────────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
     const t = localStorage.getItem('theme') || 'dark';
     document.documentElement.setAttribute('data-theme', t);
     document.addEventListener('click', e => { if (e.target.id === 'entryModal') closeEntryModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEntryModal(); });
-    fetchData();
+    fetchData(); // Fungsi utama me-load single dashboard default
+    fetchScannerData(); // Tambahan untuk memuat scanner
 });
