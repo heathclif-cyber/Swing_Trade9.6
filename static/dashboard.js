@@ -172,30 +172,24 @@ function renderTacticalCompass(json) {
     else { vEl.textContent = '🟡 NEUTRAL'; vEl.style.cssText = 'background:rgba(251,191,36,.12);color:var(--accent-yellow)'; }
 }
 
-/* ── KILL SWITCH ─────────────────────────────────────────────────────────── */
+/* ── KILL SWITCH & MARKET STRUCTURE ──────────────────────────────────────── */
 function renderKillSwitch(json) {
-    const ind = APP_DATA?.computed?.indicators_4h || [];
     const smt = json.computed?.smt_divergence || {};
-    const last4 = ind.length ? ind[ind.length - 1] : null;
-    const items = document.querySelectorAll('#killSwitchChecklist input');
-    const spans = [document.getElementById('alertKillEma'), document.getElementById('alertKillSmt'),
-                   document.getElementById('alertKillVol'), document.getElementById('alertKillOi')];
-    let triggered = 0;
-    if (last4) { const ok = last4.close < last4.ema_21; items[0].checked = ok; if (ok) triggered++; spans[0].textContent = ok ? '⚠️ Triggered' : '✅ OK'; spans[0].className = 'panel-row-value ' + (ok ? 'val-neg' : 'val-pos'); }
-    const smtOk = smt.bearish_smt; items[1].checked = smtOk; if (smtOk) triggered++; spans[1].textContent = smtOk ? '⚠️ Triggered' : '✅ OK'; spans[1].className = 'panel-row-value ' + (smtOk ? 'val-neg' : 'val-pos');
-    if (last4) { const tvol = (last4.buy_vol||0) + (last4.sell_vol||0); const sfake = tvol > 0 && (last4.sell_vol / tvol > 0.6); items[2].checked = sfake; if (sfake) triggered++; spans[2].textContent = sfake ? '⚠️ Triggered' : '✅ OK'; spans[2].className = 'panel-row-value ' + (sfake ? 'val-neg' : 'val-pos'); }
-    items[3].checked = false; spans[3].textContent = '✅ OK'; spans[3].className = 'panel-row-value val-pos';
-    const vEl = document.getElementById('killSwitchVerdict');
-    if (triggered > 0) { vEl.style.cssText = 'background:rgba(248,113,113,.12);color:var(--accent-red);border:1px solid rgba(248,113,113,.25)'; vEl.textContent = `🚨 ${triggered} KILL CONDITION(S) ACTIVE — INITIATE ABORT PROTOCOL`; }
-    else { vEl.style.cssText = 'background:rgba(52,211,153,.08);color:var(--accent-green);border:1px solid rgba(52,211,153,.18)'; vEl.textContent = '✅ ALL CLEAR — No kill switch conditions triggered'; }
+    const smtOk = smt.bearish_smt;
+
+    // Update panel Liquidity Borders
     document.getElementById('valPDH').textContent = (json.computed?.liquidity_borders?.PDH || 0).toFixed(5);
     document.getElementById('valPDL').textContent = (json.computed?.liquidity_borders?.PDL || 0).toFixed(5);
     document.getElementById('valPWH').textContent = (json.computed?.liquidity_borders?.PWH || 0).toFixed(5);
     document.getElementById('valPWL').textContent = (json.computed?.liquidity_borders?.PWL || 0).toFixed(5);
+    
+    // Update panel SMT Divergence
     document.getElementById('valBtcTrend').textContent = smt.btc_trend_12h || '—';
     document.getElementById('valCoinTrend').textContent = smt.coin_trend_12h || '—';
     const smtEl = document.getElementById('valSMT');
     smtEl.innerHTML = smtOk ? '<span class="badge badge-red">YES ⚠️</span>' : '<span class="badge badge-green">NO ✅</span>';
+    
+    // Update panel OI Momentum
     const oiDelta = json.computed?.oi_delta_pct || 0;
     const oiEl = document.getElementById('valOIDelta');
     oiEl.textContent = (oiDelta >= 0 ? '+' : '') + oiDelta.toFixed(2) + '%';
