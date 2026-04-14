@@ -476,12 +476,12 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     def _stoch_desc() -> str:
         if not has_stoch: return "StochRSI tidak tersedia"
         sk_r, sd_r = round(stoch_k, 1), round(stoch_d, 1)
-        cross = " [CROSS UP ✅]" if ctx['stoch_cross_up'] else (" [CROSS DOWN ❌]" if stoch_cross_down else "")
+        cross = " [CROSS UP ❌]" if ctx['stoch_cross_up'] else (" [CROSS DOWN ✅]" if stoch_cross_down else "")
         return f"StochRSI K={sk_r} D={sd_r}{cross}"
 
     vol_dir = "spike" if F_final > 20 else ("normal" if F_final >= -10 else "turun")
     vol_desc = f"{vol_dir} (MA20:{ctx['F']:+.1f}% · MA100:{ctx['F2']:+.1f}% · avg:{F_final:+.1f}%)"
-    cvd_desc = "bullish divergence ✅" if ctx['cvd_div_bull'] else ("bearish divergence ❌" if cvd_div_bear else f"norm={K:+.1f}%")
+    cvd_desc = "bullish divergence ❌" if ctx['cvd_div_bull'] else ("bearish divergence ✅" if cvd_div_bear else f"norm={K:+.1f}%")
 
     narrative_S = {
         'kondisi': (
