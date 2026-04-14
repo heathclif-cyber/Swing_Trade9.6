@@ -294,8 +294,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         variables = result.get("variables", {})
 
         # [P7] Adaptive thresholds dari scoring engine
-        thr_full = variables.get("thr_full", SIGNAL_THRESHOLD_FULL)
-        thr_half = variables.get("thr_half", SIGNAL_THRESHOLD_HALF)
+        thr_full   = variables.get("thr_full",   SIGNAL_THRESHOLD_FULL)
+        thr_half   = variables.get("thr_half",   SIGNAL_THRESHOLD_HALF)
+        thr_full_S = variables.get("thr_full_S", SIGNAL_THRESHOLD_FULL)   # Threshold SHORT (bisa berbeda)
+        thr_half_S = variables.get("thr_half_S", SIGNAL_THRESHOLD_HALF)
         macro_trend      = variables.get("macro_trend", "UNKNOWN")
         threshold_regime = variables.get("threshold_regime", "UNKNOWN")
         session_block_type = variables.get("session_block_type", "NONE")
@@ -629,9 +631,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
             # ── SHORT SIGNAL ───────────────────────────────
             new_signal_S = None
-            if code_S == "FULL" and adj_S >= thr_full:
+            if code_S == "FULL" and adj_S >= thr_full_S:
                 new_signal_S = "SHORT_FULL"
-            elif code_S == "HALF" and adj_S >= thr_half:
+            elif code_S == "HALF" and adj_S >= thr_half_S:
                 new_signal_S = "SHORT_HALF"
 
             # Blokir entry baru jika sesi enrichment diblokir
@@ -805,8 +807,10 @@ def test_send_pendle_notification() -> dict:
     macro_trend      = variables.get("macro_trend", "UNKNOWN")
     macro_trend_rsn  = variables.get("macro_trend_reason", "")
     threshold_regime = variables.get("threshold_regime", "UNKNOWN")
-    thr_full         = variables.get("thr_full", SIGNAL_THRESHOLD_FULL)
-    thr_half         = variables.get("thr_half", SIGNAL_THRESHOLD_HALF)
+    thr_full         = variables.get("thr_full",   SIGNAL_THRESHOLD_FULL)
+    thr_half         = variables.get("thr_half",   SIGNAL_THRESHOLD_HALF)
+    thr_full_S       = variables.get("thr_full_S", SIGNAL_THRESHOLD_FULL)
+    thr_half_S       = variables.get("thr_half_S", SIGNAL_THRESHOLD_HALF)
     session          = variables.get("session", "N/A")
     sess_mult        = variables.get("SESSION_MULT", 1.0)
     sess_block_type  = variables.get("session_block_type", "NONE")
@@ -861,7 +865,8 @@ def test_send_pendle_notification() -> dict:
         f"━━ 📊 SKOR ━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"  LONG : <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%) → <b>{code_L}</b>\n"  # [FIX v2.0]
         f"  SHORT: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%) → <b>{code_S}</b>\n"  # [FIX v2.0]
-        f"  Threshold: FULL≥{thr_full} | HALF≥{thr_half} | Regime: {threshold_regime}\n"
+        f"  Threshold LONG : FULL≥{thr_full} | HALF≥{thr_half}\n"
+        f"  Threshold SHORT: FULL≥{thr_full_S} | HALF≥{thr_half_S} | Regime: {threshold_regime}\n"
         f"\n"
         f"━━ {macro_icon} TREN MACRO ━━━━━━━━━━━━━━━━━━━\n"
         f"  {macro_trend_rsn}\n"
