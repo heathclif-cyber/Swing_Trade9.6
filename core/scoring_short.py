@@ -50,6 +50,9 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     _thr_full      = ctx['_thr_full']
     _thr_half      = ctx['_thr_half']
     _thr_wait      = ctx['_thr_wait']
+    # [FIX 4] Threshold SHORT terpisah — lebih ketat saat UPTREND
+    _thr_full_S    = ctx.get('_thr_full_S', _thr_full)
+    _thr_half_S    = ctx.get('_thr_half_S', _thr_half)
     I_cvd          = ctx['I_cvd']
     J_cvd          = ctx['J_cvd']
     ema21          = ctx['ema21']
@@ -72,13 +75,33 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     dist_ema21_close = ctx['dist_ema21_close']
     F                = ctx['F']  # Rel Volume vs MA20
 
-    # ── [IMPR. 3] Karet Gelang: hitung bonus SEBELUM gate agar bisa bypass S1
-    _karet_gelang_triggered_s = bool(dist_ema21_close > 6.0)
-    _karet_gelang_bonus_s     = 5 if _karet_gelang_triggered_s else 0
-    _karet_gelang_note_s      = (
-        f"⚡ KARET GELANG SHORT: Close {dist_ema21_close:.2f}% di atas EMA21 (>+6%). +5 bonus darurat mean reversion."
-        if _karet_gelang_triggered_s else ""
+    # ── [IMPR. 3 + FIX 5] Karet Gelang: hitung bonus SEBELUM gate agar bisa bypass S1
+    _is_prime_session = session_label.upper() in (
+        'LONDON', 'NEW YORK', 'LONDON+NEW YORK', 'LONDON NEW YORK'
     )
+    _karet_gelang_triggered_s = bool(
+        dist_ema21_close > 6.0
+        and _is_prime_session      # [FIX 5] hanya aktif di sesi prime
+        and F > -10                # [FIX 5] volume tidak terlalu rendah
+    )
+    _karet_gelang_bonus_s     = 5 if _karet_gelang_triggered_s else 0
+    if _karet_gelang_triggered_s:
+        _karet_gelang_note_s = (
+            f"⚡ KARET GELANG SHORT: Close {dist_ema21_close:.2f}% di atas EMA21 (>+6%). "
+            f"+5 bonus darurat mean reversion. Sesi={session_label}."
+        )
+    elif dist_ema21_close > 6.0 and not _is_prime_session:
+        _karet_gelang_note_s = (
+            f"⚡ KARET GELANG SHORT tidak aktif: Close {dist_ema21_close:.2f}% di atas EMA21 (>+6%) "
+            f"tapi sesi bukan prime (sesi={session_label}). Bonus diabaikan."
+        )
+    elif dist_ema21_close > 6.0 and F <= -10:
+        _karet_gelang_note_s = (
+            f"⚡ KARET GELANG SHORT tidak aktif: Close {dist_ema21_close:.2f}% di atas EMA21 (>+6%) "
+            f"tapi volume terlalu rendah (F={F:.1f}% ≤ -10). Bonus diabaikan."
+        )
+    else:
+        _karet_gelang_note_s = ""
 
     # ── [IMPR. 2] RSI V-Shape Memory (precomputed dari ctx) ───
     rsi_vshaped_short  = (O_rsi >= 65) and (O_rsi_1 > 80 or O_rsi_2 > 80)
@@ -86,6 +109,15 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         f"V-Shape RSI SHORT: candle-1={O_rsi_1:.1f}, candle-2={O_rsi_2:.1f} (salah satu >80)"
         if rsi_vshaped_short else ""
     )
+
+    # ── [TAMBAHAN C] Rejection candle check untuk Gate S2 ──────────────
+    _open_price  = safe_float(last.get('Open', close_price))
+    _prev_high   = safe_float(df.iloc[-2].get('High', high_price)) if len(df) >= 2 else high_price
+    _rejection_candle = bool(
+        close_price < _open_price                    # candle terakhir bearish (close < open)
+        and high_price < swing_high_20 * 0.995       # high tidak menyentuh swing high baru
+        and close_price < _prev_high * 0.998         # close di bawah high candle sebelumnya
+    ) if swing_high_20 is not None else False
 
     # ── Gate SHORT ──────────────────────────────────────────────
     gate_S = {'status': 'CLEAR', 'gates': {}}
@@ -107,7 +139,15 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         if not has_sell_liq:
             gate_S['gates']['S2'] = ('PASS', 'Dynamic Sell_Liq tidak dapat dihitung (data High kurang) — skip')
         elif close_price >= sell_liq_val * 0.995:
-            gate_S['gates']['S2'] = ('PASS', f'[Statis] Harga ≥ Sell_Liq×0.995 — sweep sudah terjadi')
+            # [TAMBAHAN C] Syarat rejection candle juga untuk jalur statis
+            if _rejection_candle:
+                gate_S['gates']['S2'] = ('PASS',
+                    f'[Statis] Harga ≥ Sell_Liq×0.995 + rejection candle terkonfirmasi — sweep sudah terjadi.')
+            else:
+                gate_S['gates']['S2'] = ('WARN',
+                    f'⚠️ [Statis] Harga ≥ Sell_Liq×0.995 tapi BELUM ada rejection candle. '
+                    f'Tunggu 1 candle bearish menutup di bawah open (saat ini close={close_price:.4f} vs open={_open_price:.4f}).')
+                if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
         elif close_price >= sell_liq_val * 0.980:
             gate_S['gates']['S2'] = ('WARN', f'⚠️ [Statis] Harga dalam 2% di bawah Sell_Liq ${sell_liq_val:.4f} — mendekati sweep')
             if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
@@ -125,12 +165,22 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             )
             if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
         elif _ds <= 5.0:
-            gate_S['gates']['S2'] = (
-                'PASS',
-                f'✅ GATE S2: Sweet Spot (dist={_ds:.2f}%). '
-                f'Harga cukup dekat dengan dyn_Sell_Liq ${dyn_sell_liq:.4f} — '
-                f'likuiditas hampir/sudah diambil. SwingHigh(20): ${swing_high_20:.4f}.'
-            )
+            # [TAMBAHAN C] Wajib ada rejection candle sebelum PASS di sweet spot
+            if _rejection_candle:
+                gate_S['gates']['S2'] = (
+                    'PASS',
+                    f'✅ GATE S2: Sweet Spot (dist={_ds:.2f}%) + rejection candle terkonfirmasi. '
+                    f'Harga cukup dekat dyn_Sell_Liq ${dyn_sell_liq:.4f} dan ada penolakan bearish. '
+                    f'SwingHigh(20): ${swing_high_20:.4f}.'
+                )
+            else:
+                gate_S['gates']['S2'] = (
+                    'WARN',
+                    f'⚠️ GATE S2: Sweet Spot (dist={_ds:.2f}%) tapi BELUM ada rejection candle. '
+                    f'Harga dekat dyn_Sell_Liq ${dyn_sell_liq:.4f} namun belum ada konfirmasi penolakan bearish. '
+                    f'Tunggu 1 candle bearish menutup di bawah open. SwingHigh(20): ${swing_high_20:.4f}.'
+                )
+                if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
         elif _ds <= 10.0:
             gate_S['gates']['S2'] = (
                 'WARN',
@@ -229,6 +279,11 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     if Lp > 2 and has_bos and bos_val == 1 and not _karet_gelang_triggered_s:
         _conflict_penalties_s.append(('EMA_vs_BOS', -3,
             f'Harga {Lp:.1f}% di atas EMA21 tapi BOS=+1 bullish'))
+    # [TAMBAHAN B] Konflik 4: CVD masih naik tapi RSI baru saja turun dari overbought (false reversal risk)
+    if K > 2 and O_rsi < 70 and O_rsi_1 > 75:
+        _conflict_penalties_s.append(('CVD_vs_RSI_Drop', -5,
+            f'CVD masih naik ({K:.1f}%) tapi RSI baru turun dari OB '
+            f'({O_rsi_1:.1f}→{O_rsi:.1f}) — kemungkinan false reversal, bukan top'))
     _total_conflict_penalty_s = sum(p[1] for p in _conflict_penalties_s)
     RAW_S = RAW_S + _total_conflict_penalty_s  # [FIX v2.0] penalti ke RAW sebelum session mult
     # ── End Conflict Penalty ────────────────────────────────
@@ -238,14 +293,48 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     # [IMPR. 3] Karet Gelang bonus diterapkan ke ADJ_S
     ADJ_S = round(ADJ_S + _karet_gelang_bonus_s, 1)
 
-    # ── KEPUTUSAN
+    # [FIX 4] Gunakan threshold SHORT yang lebih ketat (_thr_full_S, _thr_half_S)
     def get_tier(adj):
-        if adj >= _thr_full: return "FULL SIZE ENTRY", "FULL"
-        if adj >= _thr_half: return "HALF SIZE ENTRY", "HALF"
-        if adj >= _thr_wait: return "WAIT & MONITOR", "WAIT"
+        if adj >= _thr_full_S: return "FULL SIZE ENTRY", "FULL"
+        if adj >= _thr_half_S: return "HALF SIZE ENTRY", "HALF"
+        if adj >= _thr_wait:   return "WAIT & MONITOR", "WAIT"
         return "SKIP", "SKIP"
 
     dec_S, code_S = get_tier(ADJ_S)
+
+    # ── [TAMBAHAN A] StochRSI Gatekeeper SHORT ─────────────────────────
+    STOCH_PENALTY_S   = 6  # lebih ringan dari LONG (-8) karena short tidak punya bonus StochRSI
+    _stoch_ok_short   = bool(has_stoch and stoch_k is not None and stoch_k > 70 and stoch_cross_down)
+    _stoch_skip_short = bool(has_stoch and not _stoch_ok_short and not cvd_div_bear)
+    stoch_gate_override_s = ""
+
+    if _stoch_skip_short:
+        ADJ_S = round(ADJ_S - STOCH_PENALTY_S, 1)
+        _stoch_k_str = f"{stoch_k:.1f}" if has_stoch and stoch_k is not None else "N/A"
+        stoch_gate_override_s = (
+            f"⚠️ StochRSI penalty -{STOCH_PENALTY_S}pts: "
+            f"K={_stoch_k_str} tidak konfirmasi bearish "
+            f"(butuh K>70 dan cross-down, tanpa CVD div bear)"
+        )
+        # Re-evaluate tier setelah penalty
+        dec_S, code_S = get_tier(ADJ_S)
+        # Terapkan ulang gate overrides
+        if gate_S['status'] == 'BLOCKED':
+            dec_S, code_S = 'SKIP', 'SKIP'
+        if session_block:
+            dec_S, code_S = 'SKIP', 'SKIP'
+        elif session_block_type == 'CONDITIONAL_NY' and ADJ_S < 40:
+            dec_S, code_S = 'SKIP', 'SKIP'
+        elif session_block_type == 'CONDITIONAL_OTHER' and ADJ_S < 45:
+            dec_S, code_S = 'SKIP', 'SKIP'
+    elif _stoch_ok_short:
+        stoch_gate_override_s = (
+            f"✅ StochRSI konfirmasi SHORT: K={stoch_k:.1f} cross-down dari >70"
+        )
+    elif cvd_div_bear:
+        stoch_gate_override_s = "StochRSI bypass: CVD divergence bear terdeteksi"
+    else:
+        stoch_gate_override_s = "StochRSI tidak tersedia — gatekeeper di-skip"
 
     if aging_status == "AGING":
         dec_S += " (⚠️ Posisi aging 8–14 hari)"
@@ -274,12 +363,12 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     if macro_trend == 'UPTREND':
         if ADJ_S >= _req_score_full_S:
             gate_S['gates']['S4'] = ('PASS', f'✅ GATE S4: Skor short sangat kuat ({ADJ_S:.1f} ≥ {_req_score_full_S}) — izinkan short melawan UPTREND secara penuh.')
-        elif ADJ_S >= _thr_half:
-            gate_S['gates']['S4'] = ('WARN', f'⚠️ GATE S4: Skor cukup untuk entry HALF SIZE melawan UPTREND ({ADJ_S:.1f} ≥ {_thr_half}, slope={_m_slope:.2f}%). Maksimal HALF SIZE ENTRY.')
+        elif ADJ_S >= _thr_half_S:
+            gate_S['gates']['S4'] = ('WARN', f'⚠️ GATE S4: Skor cukup untuk entry HALF SIZE melawan UPTREND ({ADJ_S:.1f} ≥ {_thr_half_S}, slope={_m_slope:.2f}%). Maksimal HALF SIZE ENTRY.')
             if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
             if code_S not in ('SKIP',): dec_S, code_S = 'HALF SIZE ENTRY', 'HALF'
         else:
-            gate_S['gates']['S4'] = ('FAIL', f'❌ GATE S4: Skor short terlalu lemah ({ADJ_S:.1f} < {_thr_half}) untuk short melawan UPTREND (slope={_m_slope:.2f}%). SKIP.')
+            gate_S['gates']['S4'] = ('FAIL', f'❌ GATE S4: Skor short terlalu lemah ({ADJ_S:.1f} < {_thr_half_S}) untuk short melawan UPTREND (slope={_m_slope:.2f}%). SKIP.')
             gate_S['status'] = 'BLOCKED'
             dec_S, code_S = 'SKIP', 'SKIP'
     elif macro_trend == 'SIDEWAYS':
@@ -401,15 +490,18 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             f"High ${high_price:.4f} vs "
             f"EMA21 {Lp:+.2f}% (${ema21:.4f}), EMA50 {Mp:+.2f}% (${ema50:.4f}), EMA200 {Np:+.2f}% (${ema200:.4f}). "
             f"CVD: {cvd_desc} (I={I_cvd:.0f}, J={J_cvd:.0f}). "
-            f"RSI_6={O_rsi:.1f}. {_stoch_desc()}. "
+            f"RSI_6={O_rsi:.1f} (prev={O_rsi_1:.1f}). {_stoch_desc()}. "
             f"ATR={H:.2f}% | ATR_MULT={ATR_MULT} ({atr_mult_reason}) | sweet spot {sweet_lo:.1f}%–{sweet_hi:.1f}%."
             + (f" | 🎯 {rsi_vshaped_note_s}" if rsi_vshaped_short else "")
-            + (f" | {_karet_gelang_note_s}" if _karet_gelang_triggered_s else "")
+            + (f" | {_karet_gelang_note_s}" if _karet_gelang_note_s else "")
             + (f" | 🩸 LIQUIDATION HUNTER: OI={C_final:.1f}% + Vol={F_final:.1f}% → OI MAX SCORE" if _liq_hunter_triggered_s else "")
+            + (f" | [TAMBAHAN A] {stoch_gate_override_s}" if stoch_gate_override_s else "")
+            + (f" | [TAMBAHAN C] Rejection candle: {'OK ✅' if _rejection_candle else 'BELUM ⚠️'}" )
         ),
         'keputusan': (
             f"RAW={RAW_S} → ADJ={ADJ_S} (×{SESSION_MULT}"
             + (f"+{_karet_gelang_bonus_s}pts KaretGelang" if _karet_gelang_triggered_s else "")
+            + (f"-{STOCH_PENALTY_S}pts StochGK" if _stoch_skip_short else "")
             + f") → {dec_S}"
             + (f" [GATE BLOCKED: {_gate_summary(gate_S)}]" if gate_S['status'] == 'BLOCKED' else "")
             + (f" [AGING: {aging_status}]" if aging_status in ('AGING', 'STALE') else "")
@@ -424,7 +516,8 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             f"Tier 2 butuh: {'sweep Sell_Liq $' + str(round(sell_liq_val,4)) if has_sell_liq else 'Sell_Liq N/A'}, "
             f"RSI>{'75 (saat ini '+str(round(O_rsi,1))+')' if s9s<3 else 'OK'}"
             + (f" [V-Shape RSI aktif ✅]" if rsi_vshaped_short else "")
-            + f", StochRSI cross down dari >80. "
+            + f", StochRSI K>70 + cross-down (saat ini: {'OK' if _stoch_ok_short else 'BELUM'}). "
+            f"Rejection candle {'OK ✅' if _rejection_candle else 'diperlukan ⚠️'}. "
             f"Level kunci: Close ${close_price:.4f}, EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
             f"Sesi optimal: London/NY ({session_label} saat ini)."
         ),
@@ -496,4 +589,12 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         'oi_event_score': _oi_event_score_s,                     # [FIX v2.0]
         'conflict_penalties': _conflict_penalties_s,             # [FIX v2.0]
         'total_conflict_penalty': _total_conflict_penalty_s,     # [FIX v2.0]
+        # [TAMBAHAN A] StochRSI Gatekeeper SHORT
+        'stoch_gatekeeper_ok_s':     _stoch_ok_short,
+        'stoch_gatekeeper_skip_s':   _stoch_skip_short,
+        'stoch_gate_override_s':     stoch_gate_override_s,
+        'stoch_penalty_applied_s':   _stoch_skip_short,
+        'stoch_penalty_pts_s':       STOCH_PENALTY_S if _stoch_skip_short else 0,
+        # [TAMBAHAN C] Rejection candle
+        'rejection_candle':          _rejection_candle,
     }

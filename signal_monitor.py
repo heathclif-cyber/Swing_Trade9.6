@@ -304,17 +304,32 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
         now_ts = time.time()
 
+        # ── [FIX 1] Hard block sesi Asia berbasis server time (tidak bergantung enrichment) ──
+        _utc_hour = datetime.now(timezone.utc).hour
+        _is_asia_session = (_utc_hour >= 19) or (_utc_hour < 1)  # 02:00-08:00 WITA = 19:00-01:00 UTC
+        _block_new_entry = _is_asia_session
+        if _block_new_entry:
+            logger.info(
+                f"[{symbol}] [FIX1] Sesi Asia terdeteksi (UTC={_utc_hour:02d}:xx) — "
+                "entry baru DIBLOKIR secara hard. Alert posisi aktif tetap berjalan."
+            )
+
         with _state_lock:
             state = _alert_state.setdefault(symbol, {
-                "last_signal": None,
-                "last_alert_ts": 0,
-                "exit_alerted": False,
-                "tp1_alerted": False,
-                "tp2_alerted": False,
-                "tp3_alerted": False,
+                # [FIX 2] State terpisah per arah menggantikan last_signal/last_alert_ts tunggal
+                "last_long_signal":    None,
+                "last_long_alert_ts":  0,
+                "last_short_signal":   None,
+                "last_short_alert_ts": 0,
+                # Backward compat — tetap ada agar state lama tidak crash saat load
+                "last_signal":    None,
+                "last_alert_ts":  0,
+                "exit_alerted":   False,
+                "tp1_alerted":    False,
+                "tp2_alerted":    False,
+                "tp3_alerted":    False,
             })
-            cooldown        = 4 * 3600
-            time_since_last = now_ts - state["last_alert_ts"]
+            cooldown = 4 * 3600
 
             # Helper untuk PnL dinamis
             def get_pnl():
@@ -493,6 +508,17 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif not active_tsl:
                 state["last_trailing_action"] = None
 
+            # ── [FIX 3] Volume filter: blokir sinyal saat volume rendah ─────────
+            _last_vol   = float(df.iloc[-1].get('Total_Volume', 0))
+            _avg_vol_20 = df['Total_Volume'].iloc[-21:-1].mean() if 'Total_Volume' in df.columns else _last_vol
+            _vol_ratio  = _last_vol / _avg_vol_20 if _avg_vol_20 > 0 else 1.0
+            _low_volume = _vol_ratio < 0.40
+            if _low_volume:
+                logger.info(
+                    f"[{symbol}] [FIX3] Volume rendah (ratio={_vol_ratio:.2f} < 0.40) — "
+                    "entry baru DIBLOKIR. Alert posisi aktif tetap berjalan."
+                )
+
             # ── LONG SIGNAL ────────────────────────────────
             # [FIX] Cek session_block — jangan kirim entry alert saat sesi diblokir
             _session_block     = variables.get("session_block", False)
@@ -505,15 +531,35 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif code_L == "HALF" and adj_L >= thr_half:
                 new_signal_L = "LONG_HALF"
 
-            # Blokir entry baru jika sesi diblokir total (OFF-MARKET / ASIAN)
+            # Blokir entry baru jika sesi enrichment diblokir
             if new_signal_L and _session_block:
                 logger.info(
-                    f"[{symbol}] LONG signal {new_signal_L} DIBLOKIR — "
+                    f"[{symbol}] LONG signal {new_signal_L} DIBLOKIR (enrichment session) — "
                     f"{_session_blk_type}: {_session_blk_rsn}"
                 )
                 new_signal_L = None
 
-            if new_signal_L and (new_signal_L != state["last_signal"] or time_since_last > cooldown):
+            # [FIX 1] Hard block Asia session
+            if new_signal_L and _block_new_entry:
+                logger.info(
+                    f"[{symbol}] [FIX1] LONG signal {new_signal_L} DIBLOKIR — Sesi Asia (server time)"
+                )
+                new_signal_L = None
+
+            # [FIX 3] Volume filter
+            if new_signal_L and _low_volume:
+                logger.info(
+                    f"[{symbol}] [FIX3] LONG signal {new_signal_L} DIBLOKIR — "
+                    f"Volume ratio={_vol_ratio:.2f} < 0.40"
+                )
+                new_signal_L = None
+
+            # [FIX 2] Per-direction cooldown dengan AND kondisi
+            _time_since_long = now_ts - state.get("last_long_alert_ts", 0)
+            if new_signal_L and (
+                new_signal_L != state.get("last_long_signal")
+                and _time_since_long > cooldown
+            ):
                 size_label = "FULL SIZE 🟢🟢" if new_signal_L == "LONG_FULL" else "HALF SIZE 🟡"
                 rr1        = lvl_L.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
@@ -555,6 +601,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     + f"🔬 StochRSI: {stoch_str}\n"
                     f"🕐 {wib} WIB"
                 )
+                # [FIX 2] Update state per-arah LONG
+                state["last_long_signal"]   = new_signal_L
+                state["last_long_alert_ts"] = now_ts
+                # Juga update backward-compat keys
                 state["last_signal"]   = new_signal_L
                 state["last_alert_ts"] = now_ts
                 _save_alert_state(_alert_state)
@@ -567,15 +617,35 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif code_S == "HALF" and adj_S >= thr_half:
                 new_signal_S = "SHORT_HALF"
 
-            # Blokir entry baru jika sesi diblokir total (OFF-MARKET / ASIAN)
+            # Blokir entry baru jika sesi enrichment diblokir
             if new_signal_S and _session_block:
                 logger.info(
-                    f"[{symbol}] SHORT signal {new_signal_S} DIBLOKIR — "
+                    f"[{symbol}] SHORT signal {new_signal_S} DIBLOKIR (enrichment session) — "
                     f"{_session_blk_type}: {_session_blk_rsn}"
                 )
                 new_signal_S = None
 
-            if new_signal_S and (new_signal_S != state["last_signal"] or time_since_last > cooldown):
+            # [FIX 1] Hard block Asia session
+            if new_signal_S and _block_new_entry:
+                logger.info(
+                    f"[{symbol}] [FIX1] SHORT signal {new_signal_S} DIBLOKIR — Sesi Asia (server time)"
+                )
+                new_signal_S = None
+
+            # [FIX 3] Volume filter
+            if new_signal_S and _low_volume:
+                logger.info(
+                    f"[{symbol}] [FIX3] SHORT signal {new_signal_S} DIBLOKIR — "
+                    f"Volume ratio={_vol_ratio:.2f} < 0.40"
+                )
+                new_signal_S = None
+
+            # [FIX 2] Per-direction cooldown dengan AND kondisi
+            _time_since_short = now_ts - state.get("last_short_alert_ts", 0)
+            if new_signal_S and (
+                new_signal_S != state.get("last_short_signal")
+                and _time_since_short > cooldown
+            ):
                 size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
                 rr1        = lvl_S.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
@@ -600,6 +670,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"R:R Quality: {rr_q}\n"
                     f"🕐 {wib} WIB"
                 )
+                # [FIX 2] Update state per-arah SHORT
+                state["last_short_signal"]   = new_signal_S
+                state["last_short_alert_ts"] = now_ts
+                # Juga update backward-compat keys
                 state["last_signal"]   = new_signal_S
                 state["last_alert_ts"] = now_ts
                 _save_alert_state(_alert_state)

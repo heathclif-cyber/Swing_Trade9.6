@@ -186,13 +186,16 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
 
     if macro_data['macro_trend'] == 'UPTREND':
         _thr_full, _thr_half, _thr_wait = 53, 36, 22  # [FIX v2.0] ×1.098: was 48,33,20
+        _thr_full_S, _thr_half_S = 58, 48             # [FIX 4] SHORT lebih ketat saat UPTREND
         threshold_regime = "BULL"
     else:
         _thr_full, _thr_half, _thr_wait = 64, 46, 31  # [FIX v2.0] ×1.098: was 58,42,28
+        _thr_full_S, _thr_half_S = _thr_full, _thr_half  # [FIX 4] sama saat BEAR/SIDEWAYS
         threshold_regime = "BEAR/SIDEWAYS"
 
     if _atr_extreme:
         _thr_full += 5; _thr_half += 5; _thr_wait += 5
+        _thr_full_S += 5; _thr_half_S += 5             # [FIX 4] juga naikkan SHORT threshold saat volatil
         threshold_regime += " + VOLATILITAS EKSTREM (+5)"
 
     # Fallback SL limits
@@ -222,6 +225,7 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
         'sl_atr1_L': sl_atr1_L, 'sl_atr15_L': sl_atr15_L, 'sl_atr2_L': sl_atr2_L,
         'sl_atr1_S': sl_atr1_S, 'sl_atr15_S': sl_atr15_S, 'sl_atr2_S': sl_atr2_S,
         '_thr_full': _thr_full, '_thr_half': _thr_half, '_thr_wait': _thr_wait,
+        '_thr_full_S': _thr_full_S, '_thr_half_S': _thr_half_S,  # [FIX 4] threshold SHORT terpisah
         'ema21': ema21, 'ema50': ema50, 'ema200': ema200,
         # ── Variabel baru untuk 3 improvisasi ──────────────────
         'oi_change': oi_change, 'O_rsi_1': O_rsi_1, 'O_rsi_2': O_rsi_2,
@@ -430,6 +434,7 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'macro_trend_reason': macro_data['macro_trend_reason'],
             'threshold_regime': threshold_regime,
             'thr_full': _thr_full, 'thr_half': _thr_half, 'thr_wait': _thr_wait,
+            'thr_full_S': _thr_full_S, 'thr_half_S': _thr_half_S,  # [FIX 4] SHORT thresholds
             'atr_extreme': _atr_extreme,
             'atr_avg_20': round(_atr_avg_20, 4) if _atr_avg_20 is not None else None,
         },
