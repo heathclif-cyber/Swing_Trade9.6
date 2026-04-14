@@ -75,6 +75,18 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     dist_ema21_close = ctx['dist_ema21_close']
     F                = ctx['F']  # Rel Volume vs MA20
 
+    # ── [FIX LIKUIDASI] Rejection Candle: Bearish engulfing / upper wick dominan
+    # Rejection candle = bukti bahwa perburuan likuiditas SUDAH SELESAI dan harga ditolak
+    _last_open  = safe_float(df.iloc[-1].get('Open', close_price))
+    _last_high  = safe_float(df.iloc[-1].get('High', high_price))
+    _last_low   = safe_float(df.iloc[-1].get('Low', low_price))
+    _body       = abs(close_price - _last_open)
+    _upper_wick = _last_high - max(close_price, _last_open)
+    _total_rng  = _last_high - _last_low if _last_high > _last_low else 0.001
+    _bearish_candle    = close_price < _last_open
+    _upper_wick_dom    = (_upper_wick / _total_rng) > 0.4  # wick > 40% dari range
+    _rejection_candle_liq  = bool(_bearish_candle and _upper_wick_dom)
+
     # ── [IMPR. 3 + FIX 5] Karet Gelang: hitung bonus SEBELUM gate agar bisa bypass S1
     _is_prime_session = session_label.upper() in (
         'LONDON', 'NEW YORK', 'LONDON+NEW YORK', 'LONDON NEW YORK'
@@ -207,11 +219,24 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_S['status'] = 'BLOCKED'
 
     # ── [FIX v2.0] OI SHORT — dua sub-fungsi terpisah (Fix 2) ──────────
-    def _score_oi_trend_s(v, rsi_val):
-        """Membaca momentum OI untuk setup short."""
-        if v > 30 and rsi_val > 75: return 3  # FOMO top: OI bengkak + RSI jenuh beli
-        if v > 30: return 2                   # OI bengkak tapi RSI belum konfirmasi
-        if v >= 5: return 1
+    def _score_oi_trend_s(v, rsi_val, oi_chg, rejection_candle):
+        """
+        [FIX LIKUIDASI] Pisahkan fase 'sedang berburu' vs 'sudah selesai berburu'.
+        Liquidation Hunt aktif (OI naik + RSI pucuk) HANYA diberi skor tinggi
+        jika ada rejection candle yang membuktikan perburuan SELESAI.
+        """
+        liq_hunt_active = bool(v > 20 and rsi_val > 70 and oi_chg > 5)
+
+        if liq_hunt_active and not rejection_candle:
+            # Perburuan SEDANG berlangsung — ini bukan entry, ini jebakan
+            return 1  # Turun dari 3 → hanya 1, bukan reward penuh
+        if liq_hunt_active and rejection_candle:
+            # Perburuan SELESAI dan ada penolakan — ini adalah entry ideal
+            return 3
+        if v > 30 and rsi_val > 75:
+            return 2
+        if v >= 5:
+            return 1
         return 0
 
     def _score_oi_event_s(oi_chg):
@@ -220,7 +245,7 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         if oi_chg < -5: return 1          # [FIX v2.0] OI turun — hati-hati short squeeze
         return 0
 
-    _oi_trend_score_s = _score_oi_trend_s(C_final, O_rsi)
+    _oi_trend_score_s = _score_oi_trend_s(C_final, O_rsi, oi_change, _rejection_candle_liq)
     _oi_event_score_s = _score_oi_event_s(oi_change)
     s1 = max(_oi_trend_score_s, _oi_event_score_s)  # [FIX v2.0] ambil sinyal terkuat
     _liq_hunter_triggered_s = bool((C_final > 30 and O_rsi > 75) or (-5 <= oi_change <= 0))
@@ -284,6 +309,17 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         _conflict_penalties_s.append(('CVD_vs_RSI_Drop', -5,
             f'CVD masih naik ({K:.1f}%) tapi RSI baru turun dari OB '
             f'({O_rsi_1:.1f}→{O_rsi:.1f}) — kemungkinan false reversal, bukan top'))
+    # [FIX LIKUIDASI] Konflik 5: Hollow Pump Pattern
+    # OI naik + Volume spike + CVD turun + harga belum berbalik = tanda manipulasi Market Maker
+    if (C_final > 15 and F_final > 50 and K < -1
+            and not _rejection_candle_liq
+            and oi_change > 3):
+        _conflict_penalties_s.append((
+            'HOLLOW_PUMP_PATTERN', -10,
+            f'OI={C_final:.1f}%↑ + Vol={F_final:.1f}%↑ + CVD={K:.1f}%↓ + '
+            f'OI_change={oi_change:.1f}%↑ tanpa rejection candle. '
+            f'Pola Hollow Pump terdeteksi — kemungkinan manipulasi Market Maker.'
+        ))
     _total_conflict_penalty_s = sum(p[1] for p in _conflict_penalties_s)
     RAW_S = RAW_S + _total_conflict_penalty_s  # [FIX v2.0] penalti ke RAW sebelum session mult
     # ── End Conflict Penalty ────────────────────────────────
@@ -302,10 +338,13 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
 
     dec_S, code_S = get_tier(ADJ_S)
 
-    # ── [TAMBAHAN A] StochRSI Gatekeeper SHORT ─────────────────────────
+    # ── [TAMBAHAN A + FIX LIKUIDASI] StochRSI Gatekeeper SHORT ─────────────────────────
     STOCH_PENALTY_S   = 6  # lebih ringan dari LONG (-8) karena short tidak punya bonus StochRSI
+    
+    _trend_still_bullish  = bool(O_rsi > 72 and dist_ema21_close > 3.0)
+    _cvd_bypass_valid     = bool(cvd_div_bear and not _trend_still_bullish)
     _stoch_ok_short   = bool(has_stoch and stoch_k is not None and stoch_k > 70 and stoch_cross_down)
-    _stoch_skip_short = bool(has_stoch and not _stoch_ok_short and not cvd_div_bear)
+    _stoch_skip_short = bool(has_stoch and not _stoch_ok_short and not _cvd_bypass_valid)
     stoch_gate_override_s = ""
 
     if _stoch_skip_short:
@@ -314,8 +353,10 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         stoch_gate_override_s = (
             f"⚠️ StochRSI penalty -{STOCH_PENALTY_S}pts: "
             f"K={_stoch_k_str} tidak konfirmasi bearish "
-            f"(butuh K>70 dan cross-down, tanpa CVD div bear)"
+            f"(butuh K>70 dan cross-down, tanpa valid CVD div bear)"
         )
+        if cvd_div_bear and _trend_still_bullish:
+            stoch_gate_override_s += f" [Bypass DITOLAK: tren masih bullish (RSI={O_rsi:.1f}, distEMA={dist_ema21_close:.1f}%)]"
         # Re-evaluate tier setelah penalty
         dec_S, code_S = get_tier(ADJ_S)
         # Terapkan ulang gate overrides
@@ -331,8 +372,8 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         stoch_gate_override_s = (
             f"✅ StochRSI konfirmasi SHORT: K={stoch_k:.1f} cross-down dari >70"
         )
-    elif cvd_div_bear:
-        stoch_gate_override_s = "StochRSI bypass: CVD divergence bear terdeteksi"
+    elif _cvd_bypass_valid:
+        stoch_gate_override_s = "StochRSI bypass: CVD divergence bear valid (tren tidak terlalu bullish)"
     else:
         stoch_gate_override_s = "StochRSI tidak tersedia — gatekeeper di-skip"
 
@@ -457,6 +498,28 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         dec_S, code_S = 'SKIP', 'SKIP'
         gate_S['gates']['S5_TP1'] = ('FAIL', f'❌ HYBRID Gate TP1: Jarak TP1 SHORT terlalu dekat ({_dist_tp1_S:.2f}% < 2.0%) — potensi profit tidak layak.')
         gate_S['status'] = 'BLOCKED'
+
+    # ── [FIX LIKUIDASI] Gate S5_LIQ: Hard block jika Liquidation Hunt sedang berlangsung ──
+    _liq_hunt_active_now = bool(C_final > 20 and O_rsi > 70 and oi_change > 5)
+
+    if _liq_hunt_active_now and not _rejection_candle_liq:
+        gate_S['gates']['S5_LIQ'] = (
+            'FAIL',
+            f'❌ GATE S5 [LIQ HUNT ACTIVE]: OI={C_final:.1f}% naik + RSI={O_rsi:.1f} + '
+            f'OI_change={oi_change:.1f}% — Liquidation Hunt SEDANG berlangsung. '
+            f'Wajib tunggu rejection candle sebelum SHORT. '
+            f'Entry sekarang = masuk ke mulut Market Maker.'
+        )
+        gate_S['status'] = 'BLOCKED'
+        dec_S, code_S = 'SKIP', 'SKIP'
+    elif _liq_hunt_active_now and _rejection_candle_liq:
+        gate_S['gates']['S5_LIQ'] = (
+            'PASS',
+            f'✅ GATE S5 [LIQ HUNT]: Liquidation Hunt SELESAI + rejection candle terkonfirmasi. '
+            f'Entry SHORT valid (OI={C_final:.1f}%, RSI={O_rsi:.1f}, OI_chg={oi_change:.1f}%).'
+        )
+    else:
+        gate_S['gates']['S5_LIQ'] = ('PASS', f'Kondisi Liq Hunt tidak aktif (OI={C_final:.1f}%, RSI={O_rsi:.1f}, OI_chg={oi_change:.1f}%) — skip')
 
     def _gate_summary(gate: dict) -> str:
         parts = []
@@ -597,4 +660,9 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         'stoch_penalty_pts_s':       STOCH_PENALTY_S if _stoch_skip_short else 0,
         # [TAMBAHAN C] Rejection candle
         'rejection_candle':          _rejection_candle,
+        # [FIX LIKUIDASI]
+        'rejection_candle_liq':      _rejection_candle_liq,
+        'liq_hunt_active':           _liq_hunt_active_now,
+        'cvd_bypass_valid':          _cvd_bypass_valid,
+        'trend_still_bullish':       _trend_still_bullish,
     }
