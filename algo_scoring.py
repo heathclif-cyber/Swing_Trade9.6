@@ -429,6 +429,10 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'stoch_gatekeeper_reason': res_L['stoch_gatekeeper_reason'],
             'stoch_bonus_points': res_L['stoch_bonus_points'],
             'stoch_gate_override': res_L['stoch_gate_override'],
+            # [PERBAIKAN] Tambahkan data override spesifik untuk SHORT
+            'stoch_gatekeeper_ok_s': res_S.get('stoch_gatekeeper_ok_s', True),
+            'stoch_gatekeeper_skip_s': res_S.get('stoch_gatekeeper_skip_s', False),
+            'stoch_gate_override_s': res_S.get('stoch_gate_override_s', ''),
             'macro_slope': round(macro_data['macro_slope'], 4) if macro_data['macro_slope'] is not None else None,
             'macro_trend': macro_data['macro_trend'],
             'macro_trend_reason': macro_data['macro_trend_reason'],

@@ -229,7 +229,9 @@ function renderQuantAnalysis(quant, state) {
     let blockMsg = '';
     if (data.code === 'SKIP') {
         const sBlock = state.quant_analysis?.variables?.session_override_reason || '';
-        const stGate = state.quant_analysis?.variables?.stoch_gate_override || '';
+        // [PERBAIKAN] Ambil pesan yang sesuai dengan tab yang sedang aktif
+        const stGateKey = activeQuantTab === 'long' ? 'stoch_gate_override' : 'stoch_gate_override_s';
+        const stGate = state.quant_analysis?.variables?.[stGateKey] || '';
         let gateMsg = '';
         for (const [gk, [status, msg]] of Object.entries(data.gate.gates)) {
             if (status === 'FAIL') gateMsg += `${gk}: ${msg} `;
@@ -459,7 +461,9 @@ function renderCSVResult(json) {
         let blockMsg = '';
         if (d.code === 'SKIP') {
             const sBlock = json.variables?.session_override_reason || '';
-            const stGate = json.variables?.stoch_gate_override || '';
+            // [PERBAIKAN] Ambil pesan yang sesuai dengan tab yang di-loop (LONG/SHORT)
+            const stGateKey = tab === 'long' ? 'stoch_gate_override' : 'stoch_gate_override_s';
+            const stGate = json.variables?.[stGateKey] || '';
             let gateMsg = '';
             for (const [gk, [status, msg]] of Object.entries(d.gate.gates)) {
                 if (status === 'FAIL') gateMsg += `${gk}: ${msg} `;
