@@ -74,13 +74,59 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     dist_ema21_close = ctx['dist_ema21_close']
     F                = ctx['F']  # Rel Volume vs MA20
 
-    # ── [IMPR. 3] Karet Gelang: hitung bonus SEBELUM gate agar bisa bypass L1
-    _karet_gelang_triggered = bool(dist_ema21_close < -6.0)
-    _karet_gelang_bonus     = 5 if _karet_gelang_triggered else 0
-    _karet_gelang_note      = (
-        f"⚡ KARET GELANG LONG: Close {dist_ema21_close:.2f}% di bawah EMA21 (<-6%). +5 bonus darurat mean reversion."
-        if _karet_gelang_triggered else ""
+    # ── [FIX LIKUIDASI] Confirmation Candle: Bullish + lower wick dominan
+    # Confirmation candle = bukti bahwa perburuan likuiditas beli SUDAH SELESAI dan harga ditolak naik
+    # Paralel dengan _rejection_candle_liq di SHORT (bearish + upper wick dominan)
+    _last_open  = safe_float(df.iloc[-1].get('Open', close_price))
+    _last_high  = safe_float(df.iloc[-1].get('High', close_price))
+    _last_low   = safe_float(df.iloc[-1].get('Low', low_price))
+    _prev_close = safe_float(df.iloc[-2].get('Close', close_price)) if len(df) >= 2 else close_price
+    _body       = abs(close_price - _last_open)
+    _lower_wick = min(close_price, _last_open) - _last_low
+    _total_rng  = _last_high - _last_low if _last_high > _last_low else 0.001
+    _bullish_candle    = close_price > _last_open           # candle naik
+    _lower_wick_dom    = (_lower_wick / _total_rng) > 0.4  # lower wick > 40% dari range
+    _close_above_prev  = close_price > _prev_close           # close di atas low candle sebelumnya
+    _confirmation_candle_liq = bool(_bullish_candle and _lower_wick_dom and _close_above_prev)
+
+    # ── [TAMBAHAN C] Confirmation candle check untuk Gate L2 ──────────────
+    # Paralel dengan _rejection_candle (Gate S2 SHORT)
+    _open_price  = safe_float(last.get('Open', close_price))
+    _prev_low    = safe_float(df.iloc[-2].get('Low', low_price)) if len(df) >= 2 else low_price
+    _confirmation_candle = bool(
+        close_price > _open_price                      # candle terakhir bullish (close > open)
+        and low_price > swing_low_20 * 1.005           # low tidak menyentuh swing low baru
+        and close_price > _prev_low * 1.002            # close di atas low candle sebelumnya
+    ) if swing_low_20 is not None else False
+
+    # ── [FIX 5] Karet Gelang LONG: tambah session filter + volume minimum
+    # Paralel dengan FIX 5 SHORT: hanya aktif di prime session + volume cukup
+    _is_prime_session = session_label.upper() in (
+        'LONDON', 'NEW YORK', 'LONDON+NEW YORK', 'LONDON NEW YORK'
     )
+    _karet_gelang_triggered = bool(
+        dist_ema21_close < -6.0
+        and _is_prime_session    # [FIX 5] hanya aktif di sesi prime
+        and F > -10              # [FIX 5] volume tidak terlalu rendah
+    )
+    _karet_gelang_bonus     = 5 if _karet_gelang_triggered else 0
+    if _karet_gelang_triggered:
+        _karet_gelang_note = (
+            f"⚡ KARET GELANG LONG: Close {dist_ema21_close:.2f}% di bawah EMA21 (<-6%). "
+            f"+5 bonus darurat mean reversion. Sesi={session_label}."
+        )
+    elif dist_ema21_close < -6.0 and not _is_prime_session:
+        _karet_gelang_note = (
+            f"⚡ KARET GELANG LONG tidak aktif: Close {dist_ema21_close:.2f}% di bawah EMA21 (<-6%) "
+            f"tapi sesi bukan prime (sesi={session_label}). Bonus diabaikan."
+        )
+    elif dist_ema21_close < -6.0 and F <= -10:
+        _karet_gelang_note = (
+            f"⚡ KARET GELANG LONG tidak aktif: Close {dist_ema21_close:.2f}% di bawah EMA21 (<-6%) "
+            f"tapi volume terlalu rendah (F={F:.1f}% ≤ -10). Bonus diabaikan."
+        )
+    else:
+        _karet_gelang_note = ""
 
     # ── [IMPR. 2] RSI V-Shape Memory (precomputed dari ctx) ───
     rsi_vshaped_long = (O_rsi <= 35) and (O_rsi_1 < 20 or O_rsi_2 < 20)
@@ -105,11 +151,21 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_L['gates']['L1'] = ('FAIL', '❌ GATE L1: Struktur bearish aktif (BOS=−1). Tunggu BOS flip atau konfirmasi reversal.')
         gate_L['status'] = 'BLOCKED'
 
+    # ── [TAMBAHAN C + FIX LIKUIDASI] Gate L2: wajib confirmation candle di sweet spot
+    # Paralel dengan Gate S2 SHORT yang wajib rejection candle sebelum PASS
     if not has_dyn_liq:
         if not has_buy_liq:
             gate_L['gates']['L2'] = ('PASS', 'Dynamic Buy_Liq tidak dapat dihitung (data Low kurang) — skip')
         elif close_price <= buy_liq_val * 1.005:
-            gate_L['gates']['L2'] = ('PASS', f'[Statis] Harga ≤ Buy_Liq×1.005 — sweep sudah terjadi')
+            # [TAMBAHAN C] Syarat confirmation candle juga untuk jalur statis
+            if _confirmation_candle:
+                gate_L['gates']['L2'] = ('PASS',
+                    f'[Statis] Harga ≤ Buy_Liq×1.005 + confirmation candle terkonfirmasi — sweep sudah terjadi.')
+            else:
+                gate_L['gates']['L2'] = ('WARN',
+                    f'⚠️ [Statis] Harga ≤ Buy_Liq×1.005 tapi BELUM ada confirmation candle. '
+                    f'Tunggu 1 candle bullish menutup di atas open (saat ini close={close_price:.4f} vs open={_open_price:.4f}).')
+                if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
         elif close_price <= buy_liq_val * 1.020:
             gate_L['gates']['L2'] = ('WARN', f'⚠️ [Statis] Harga +{(close_price/buy_liq_val-1)*100:.2f}% di atas Buy_Liq ${buy_liq_val:.4f}')
             if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
@@ -128,12 +184,22 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
             )
             if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
         elif _d <= 8.0:  # [FIX 2] Perlebar sweet spot: 5% → 8%
-            gate_L['gates']['L2'] = (
-                'PASS',
-                f'✅ GATE L2: Sweet Spot (dist={_d:.2f}%). '
-                f'Harga cukup dekat dengan dyn_Buy_Liq ${dyn_buy_liq:.4f} — '
-                f'likuiditas hampir/sudah diambil. SwingLow(20): ${swing_low_20:.4f}.'
-            )
+            # [TAMBAHAN C] Wajib ada confirmation candle sebelum PASS di sweet spot
+            if _confirmation_candle:
+                gate_L['gates']['L2'] = (
+                    'PASS',
+                    f'✅ GATE L2: Sweet Spot (dist={_d:.2f}%) + confirmation candle terkonfirmasi. '
+                    f'Harga cukup dekat dyn_Buy_Liq ${dyn_buy_liq:.4f} dan ada konfirmasi bullish. '
+                    f'SwingLow(20): ${swing_low_20:.4f}.'
+                )
+            else:
+                gate_L['gates']['L2'] = (
+                    'WARN',
+                    f'⚠️ GATE L2: Sweet Spot (dist={_d:.2f}%) tapi BELUM ada confirmation candle. '
+                    f'Harga dekat dyn_Buy_Liq ${dyn_buy_liq:.4f} namun belum ada konfirmasi candle bullish. '
+                    f'Tunggu 1 candle bullish menutup di atas open dengan lower wick dominan. SwingLow(20): ${swing_low_20:.4f}.'
+                )
+                if gate_L['status'] == 'CLEAR': gate_L['status'] = 'WARNING'
         elif _d <= 15.0:  # [FIX 2] Perlebar warning zone: 10% → 15%
             gate_L['gates']['L2'] = (
                 'WARN',
@@ -168,9 +234,13 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         return 0               # OI kolaps ekstrem tanpa pemulihan
 
     def _score_oi_event(oi_chg, rel_vol):
-        """Membaca event liquidasi sweep via oi_change + volume + CVD konfirmasi."""
+        """
+        [FIX LIKUIDASI] Membaca event liquidasi sweep via oi_change + volume + CVD konfirmasi.
+        OI turun + volume spike hanya diberi skor tinggi jika CVD sudah mengkonfirmasi
+        (K >= 0 = flow beli mulai dominan) — sweep selesai, bukan sedang berlangsung.
+        """
         if oi_chg < -10 and rel_vol > 50 and K >= 0: return 3   # [FIX v2.0] Serok bawah terkonfirmasi CVD
-        if oi_chg < -10 and rel_vol > 50: return 2               # [FIX v2.0] Serok bawah belum terkonfirmasi
+        if oi_chg < -10 and rel_vol > 50: return 2               # [FIX v2.0] Serok bawah belum terkonfirmasi CVD
         if oi_chg < -10: return 1                                 # [FIX v2.0] OI turun tapi volume normal
         return 0
 
@@ -219,7 +289,7 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     }  # [FIX v2.0] Total max: 12+9+6+9+12+9+9+6+6 = 78 poin (was 71)
     RAW_L = sum(v[0] for v in scores_L.values())
 
-    # ── [FIX v2.0] Conflict Penalty ────────────────────────────────────
+    # ── [FIX v2.0] Conflict Penalty (LONG) ───────────────────────────
     _conflict_penalties = []
     # Konflik 1: OI naik kuat tapi CVD negatif (bullish OI vs bearish flow)
     if C_final > 20 and K < -1:
@@ -233,6 +303,19 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     if L < -2 and has_bos and bos_val == -1 and not _karet_gelang_triggered:
         _conflict_penalties.append(('EMA_vs_BOS', -3,
             f'Harga {L:.1f}% di bawah EMA21 tapi BOS=-1 bearish'))
+    # [FIX LIKUIDASI] Konflik 4: HOLLOW DUMP PATTERN
+    # OI turun + Volume spike + CVD naik (sesaat) + tanpa confirmation candle
+    # = kemungkinan short squeeze palsu sebelum dump dilanjutkan
+    # Paralel dengan HOLLOW_PUMP_PATTERN di SHORT
+    if (C_final < -10 and F_final > 50 and K > 1
+            and not _confirmation_candle_liq
+            and oi_change < -3):
+        _conflict_penalties.append((
+            'HOLLOW_DUMP_PATTERN', -10,
+            f'OI={C_final:.1f}%↓ + Vol={F_final:.1f}%↑ + CVD={K:.1f}%↑ + '
+            f'OI_change={oi_change:.1f}%↓ tanpa confirmation candle. '
+            f'Pola Hollow Dump terdeteksi — kemungkinan short squeeze palsu sebelum dump lanjut.'
+        ))
     _total_conflict_penalty = sum(p[1] for p in _conflict_penalties)
     RAW_L = RAW_L + _total_conflict_penalty  # [FIX v2.0] penalti ke RAW sebelum session mult
     # ── End Conflict Penalty ────────────────────────────────────────
@@ -276,7 +359,23 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
 
     ADJ_L = round(ADJ_L + stoch_bonus_points, 1)
 
-    # ── KEPUTUSAN 
+    # ── [FIX 6] CVD bypass StochRSI — cek syarat tren bearish
+    # Paralel dengan SHORT: bypass ditolak jika tren masih terlalu bullish (RSI>72, distEMA>3%)
+    # LONG: bypass ditolak jika tren masih terlalu bearish (RSI<20, distEMA<-6%)
+    _trend_still_bearish = bool(O_rsi < 20 and dist_ema21_close < -6.0)
+    # Jika bypass CVD aktif tapi tren masih sangat bearish, batalkan bypass
+    if cvd_div_bull and _trend_still_bearish and stoch_gatekeeper_skip is False and not has_stoch:
+        # Hanya berlaku saat bypass karena "data tidak tersedia" + tren sangat bearish
+        stoch_gatekeeper_ok = False
+        stoch_gatekeeper_skip = True
+        stoch_gatekeeper_reason = (
+            f"❌ StochRSI bypass DITOLAK: Tren masih sangat bearish "
+            f"(RSI={O_rsi:.1f}<20, distEMA21={dist_ema21_close:.1f}%<-6%) — "
+            f"CVD div bull mungkin false signal di tengah downtrend berat. "
+            f"Tunggu konfirmasi tambahan."
+        )
+
+    # ── KEPUTUSAN
     def get_tier(adj):
         if adj >= _thr_full: return "FULL SIZE ENTRY", "FULL"
         if adj >= _thr_half: return "HALF SIZE ENTRY", "HALF"
@@ -315,6 +414,8 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         stoch_penalty_applied = True
         stoch_penalty_pts     = STOCH_PENALTY
         stoch_gate_override   = f"⚠️ StochRSI penalty -{STOCH_PENALTY}pts: {stoch_gatekeeper_reason}"
+        if cvd_div_bull and _trend_still_bearish:
+            stoch_gate_override += f" [Bypass DITOLAK: tren masih bearish (RSI={O_rsi:.1f}, distEMA={dist_ema21_close:.1f}%)]"
         # [FIX 4] Re-evaluate tier setelah penalti (bukan hard SKIP)
         dec_L, code_L = get_tier(ADJ_L)
         if gate_L['status'] == 'BLOCKED':
@@ -426,6 +527,38 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_L['gates']['L5_TP1'] = ('FAIL', f'❌ HYBRID Gate TP1: Jarak TP1 LONG terlalu dekat ({_dist_tp1_L:.2f}% < 2.0%) — potensi profit tidak layak.')
         gate_L['status'] = 'BLOCKED'
 
+    # ── [FIX LIKUIDASI] Gate L5_LIQ: Hard block jika Buy Liquidity Hunt sedang berlangsung
+    # Paralel dengan Gate S5_LIQ di SHORT
+    # Kondisi: OI turun + sweeping Buy_Liq + CVD belum naik (K < 0) + tanpa confirmation candle
+    # = sweep masih berlangsung, belum reversal
+    _buy_liq_sweep_active = bool(
+        C_final < -5          # OI turun (jangka menengah)
+        and oi_change < -5    # OI masih turun per candle (momentum sweep aktif)
+        and F_final > 50      # Volume spike = banyak stop loss sedang dieksekusi
+        and K < 0             # CVD belum naik = flow beli belum dominan
+    )
+
+    if _buy_liq_sweep_active and not _confirmation_candle_liq:
+        gate_L['gates']['L5_LIQ'] = (
+            'FAIL',
+            f'❌ GATE L5 [BUY LIQ HUNT ACTIVE]: OI={C_final:.1f}% turun + '
+            f'OI_change={oi_change:.1f}% + Vol={F_final:.1f}%↑ + CVD={K:.1f}%↓ — '
+            f'Buy Liquidity Hunt SEDANG berlangsung (stop loss masih dieksekusi). '
+            f'CVD belum konfirmasi reversal (K<0). '
+            f'Wajib tunggu confirmation candle bullish sebelum LONG. '
+            f'Entry sekarang = catch falling knife.'
+        )
+        gate_L['status'] = 'BLOCKED'
+        dec_L, code_L = 'SKIP', 'SKIP'
+    elif _buy_liq_sweep_active and _confirmation_candle_liq:
+        gate_L['gates']['L5_LIQ'] = (
+            'PASS',
+            f'✅ GATE L5 [BUY LIQ HUNT]: Sweep selesai + confirmation candle bullish terkonfirmasi. '
+            f'Entry LONG valid (OI={C_final:.1f}%, OI_chg={oi_change:.1f}%, CVD={K:.1f}%, Vol={F_final:.1f}%).'
+        )
+    else:
+        gate_L['gates']['L5_LIQ'] = ('PASS', f'Kondisi Buy Liq Hunt tidak aktif (OI={C_final:.1f}%, OI_chg={oi_change:.1f}%, CVD={K:.1f}%) — skip')
+
     def _gate_summary(gate: dict) -> str:
         parts = []
         for gk, (status, msg) in gate['gates'].items():
@@ -451,6 +584,9 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     vol_desc = f"{vol_dir} (MA20:{ctx['F']:+.1f}% · MA100:{ctx['F2']:+.1f}% · avg:{F_final:+.1f}%)"
     cvd_desc = "bullish divergence ✅" if cvd_div_bull else ("bearish divergence ❌" if ctx['cvd_div_bear'] else f"norm={K:+.1f}%")
 
+    # Deteksi konflik hollow dump untuk narasi
+    _hollow_dump_detected = any(p[0] == 'HOLLOW_DUMP_PATTERN' for p in _conflict_penalties)
+
     narrative_L = {
         'kondisi': (
             f"[GATE LONG: {gate_L['status']}] {_gate_summary(gate_L)}. "
@@ -458,15 +594,19 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
             f"Ref={'Close' if is_active else 'Low'} ${(close_price if is_active else low_price):.4f} vs "
             f"EMA21 {L:+.2f}% (${ema21:.4f}), EMA50 {M:+.2f}% (${ema50:.4f}), EMA200 {N:+.2f}% (${ema200:.4f}). "
             f"CVD: {cvd_desc} (I={I_cvd:.0f}, J={J_cvd:.0f}). "
-            f"RSI_6={O_rsi:.1f}. {_stoch_desc()}. "
+            f"RSI_6={O_rsi:.1f} (prev={O_rsi_1:.1f}). {_stoch_desc()}. "
             f"ATR={H:.2f}% | ATR_MULT={ATR_MULT} ({atr_mult_reason}) | sweet spot {sweet_lo:.1f}%–{sweet_hi:.1f}%."
             + (f" | 🎯 {rsi_vshaped_note}" if rsi_vshaped_long else "")
-            + (f" | {_karet_gelang_note}" if _karet_gelang_triggered else "")
+            + (f" | {_karet_gelang_note}" if _karet_gelang_note else "")
             + (f" | 🩸 LIQUIDATION HUNTER: OI={C_final:.1f}% + Vol={F_final:.1f}% → OI MAX SCORE" if _liq_hunter_triggered else "")
+            + (f" | [TAMBAHAN C] Confirmation candle: {'OK ✅' if _confirmation_candle else 'BELUM ⚠️'}")
+            + (f" | ⚠️ HOLLOW DUMP PATTERN: OI↓ + Vol↑ + CVD↑ tanpa konfirmasi candle" if _hollow_dump_detected else "")
+            + (f" | {stoch_gate_override}" if stoch_gate_override else "")
         ),
         'keputusan': (
             f"RAW={RAW_L} → ADJ={ADJ_L} (×{SESSION_MULT}"
             + (f"+{_karet_gelang_bonus}pts KaretGelang" if _karet_gelang_triggered else "")
+            + (f"-{STOCH_PENALTY}pts StochGK" if stoch_penalty_applied else "")
             + f") → {dec_L}"
             + (f" [GATE BLOCKED: {_gate_summary(gate_L)}]" if gate_L['status'] == 'BLOCKED' else "")
             + (f" [AGING: {aging_status}]" if aging_status in ('AGING', 'STALE') else "")
@@ -481,10 +621,11 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
             f"Tier 2 butuh: {'sweep Buy_Liq $' + str(round(buy_liq_val,4)) if has_buy_liq else 'Buy_Liq N/A'}, "
             f"RSI<{'25 (saat ini '+str(round(O_rsi,1))+')' if s9<3 else 'OK'}"
             + (f" [V-Shape RSI aktif ✅]" if rsi_vshaped_long else "")
-            + f", StochRSI cross up dari <20. "
+            + f", StochRSI cross up dari <20 (saat ini: {'OK' if stoch_gatekeeper_ok else 'BELUM'}). "
+            f"Confirmation candle {'OK ✅' if _confirmation_candle else 'diperlukan ⚠️'}. "
             f"Level kunci: Close ${close_price:.4f}, EMA21 ${ema21:.4f}, EMA50 ${ema50:.4f}. "
-            f"Sesi optimal: London ({session_label} saat ini). "
-            + (f"Posisi {aging_status}: pertimbangkan exit dan re-entry setelah kondisi Tier 1 kembali positif." if aging_status in ('AGING','STALE') else "")
+            f"Sesi optimal: London/NY ({session_label} saat ini)."
+            + (f" Posisi {aging_status}: pertimbangkan exit dan re-entry setelah kondisi Tier 1 kembali positif." if aging_status in ('AGING','STALE') else "")
         ),
     }
 
@@ -559,4 +700,11 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         'oi_event_score': _oi_event_score,                       # [FIX v2.0]
         'conflict_penalties': _conflict_penalties,               # [FIX v2.0]
         'total_conflict_penalty': _total_conflict_penalty,       # [FIX v2.0]
+        # [FIX LIKUIDASI] Confirmation candle
+        'confirmation_candle':     _confirmation_candle,
+        'confirmation_candle_liq': _confirmation_candle_liq,
+        'buy_liq_sweep_active':    _buy_liq_sweep_active,
+        # [FIX 6] CVD bypass tren
+        'cvd_bypass_valid':        bool(cvd_div_bull and not _trend_still_bearish),
+        'trend_still_bearish':     _trend_still_bearish,
     }

@@ -473,16 +473,27 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 active_tsl = trailing_S
                 tsl_side = "SHORT"
 
-            # Alert if trailing SL is recommended and not already alerted for this specific action
+            # [FIX TSL] Alert HANYA saat stage berubah (NONE→TP1_HIT atau TP1_HIT→TP2_HIT)
+            # + cooldown 4 jam untuk mencegah spam jika harga bolak-balik di sekitar TP
+            TSL_COOLDOWN = 4 * 3600
             if is_active and active_tsl:
-                action_text = active_tsl.get("action", "")
-                if state.get("last_trailing_action") != action_text:
+                # Gunakan 'stage' sebagai acuan perubahan — lebih deterministik dari action_text
+                current_stage = active_tsl.get("stage", "UNKNOWN")
+                last_stage    = state.get("last_trailing_stage", "NONE")
+                last_tsl_ts   = state.get("last_trailing_ts", 0)
+                _tsl_cooldown_ok = (now_ts - last_tsl_ts) > TSL_COOLDOWN
+
+                # Kirim hanya jika: stage benar-benar naik (TP1→TP2 atau NONE→TP1)
+                # DAN cooldown terpenuhi (anti-spam jika high candle berikutnya sama)
+                _stage_escalated = (
+                    (last_stage == "NONE"    and current_stage == "TP1_HIT") or
+                    (last_stage == "TP1_HIT" and current_stage == "TP2_HIT")
+                )
+                if _stage_escalated and _tsl_cooldown_ok:
                     pnl_str = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
-                    # For short, reverse PnL
                     if tsl_side == "SHORT" and avg_entry:
                         pnl_str = f"{((avg_entry/close_price)-1)*100:+.2f}%"
 
-                    # Tambahkan saran Momentum Hold jika harga masih kuat naik
                     hold_str = ""
                     if mom_hold.get("signal"):
                         reasons = " · ".join(mom_hold.get("reasons", [])[:3])
@@ -492,6 +503,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                             f"Detail: {reasons}"
                         )
 
+                    action_text = active_tsl.get("action", "")
                     _send_telegram(
                         f"🛡️ <b>TRAILING SL AKTIF — {symbol}</b>\n"
                         f"{'─'*28}\n"
@@ -501,12 +513,17 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"<b>{action_text}</b>\n\n"
                         f"💡 <i>{active_tsl.get('note', '')}</i>{hold_str}"
                     )
-                    state["last_trailing_action"] = action_text
-                    state["last_alert_ts"] = now_ts
-                    _save_alert_state(_alert_state)   # persist agar tidak spam setelah restart
+                    state["last_trailing_stage"] = current_stage
+                    state["last_trailing_ts"]    = now_ts
+                    state["last_alert_ts"]        = now_ts
+                    _save_alert_state(_alert_state)
                     return
+                elif current_stage != "NONE" and not _stage_escalated:
+                    # Stage sudah pernah tercapai dan tidak berubah — update stage tanpa alert
+                    state["last_trailing_stage"] = current_stage
             elif not active_tsl:
-                state["last_trailing_action"] = None
+                # Trailing tidak aktif (TP belum tercapai atau posisi ditutup) — reset stage
+                state["last_trailing_stage"] = "NONE"
 
             # ── [FIX 3] Volume filter: blokir sinyal saat volume rendah ─────────
             _last_vol   = float(df.iloc[-1].get('Total_Volume', 0))

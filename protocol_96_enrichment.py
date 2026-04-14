@@ -117,37 +117,131 @@ def _get_klines_cached(symbol: str, interval: str, limit: int = 250) -> pd.DataF
 # ============================================================
 # OPEN INTEREST & FUNDING RATE
 # ============================================================
+# Cache status fapi block agar tidak retry terus jika sudah 403
+_fapi_blocked: dict = {"blocked": False, "ts": 0.0}
+_FAPI_RETRY_COOLDOWN = 30 * 60  # retry fapi setiap 30 menit
+
+
+def _is_fapi_available() -> bool:
+    """Return False jika fapi sedang di-block (cooldown 30 menit)."""
+    now = time.time()
+    if _fapi_blocked["blocked"] and (now - _fapi_blocked["ts"]) < _FAPI_RETRY_COOLDOWN:
+        return False
+    return True
+
+
+def _mark_fapi_blocked() -> None:
+    """Tandai fapi sebagai blocked setelah menerima 403."""
+    _fapi_blocked["blocked"] = True
+    _fapi_blocked["ts"] = time.time()
+    logger.warning(
+        "  [fapi] fapi.binance.com mengembalikan 403 — kemungkinan geo/IP block. "
+        f"Akan di-retry dalam {_FAPI_RETRY_COOLDOWN//60} menit."
+    )
+
+
+def _mark_fapi_ok() -> None:
+    """Reset flag jika fapi berhasil diakses."""
+    _fapi_blocked["blocked"] = False
+    _fapi_blocked["ts"] = 0.0
+
+
 def _fetch_oi(symbol: str, limit: int = 500) -> pd.DataFrame:
+    """
+    Fetch Open Interest historis dari fapi.
+    Return: DataFrame [Open_Time, Open_Interest]
+            atau DataFrame kosong jika gagal (synthetic dihandle di caller).
+    """
+    if not _is_fapi_available():
+        logger.debug(f"[OI] fapi skip (cooldown aktif) untuk {symbol}")
+        return pd.DataFrame()
     try:
         url = "https://fapi.binance.com/futures/data/openInterestHist"
-        resp = requests.get(url, params={"symbol": symbol, "period": "15m", "limit": limit},
-                            timeout=10, verify=False)
+        resp = requests.get(
+            url,
+            params={"symbol": symbol, "period": "15m", "limit": limit},
+            timeout=10, verify=False
+        )
+        if resp.status_code == 403:
+            _mark_fapi_blocked()
+            return pd.DataFrame()
         if resp.status_code == 200:
             data = resp.json()
             if data:
-                df = pd.DataFrame(data)
-                df["Open_Time"]     = pd.to_datetime(df["timestamp"], unit="ms")
-                df["Open_Interest"] = df["sumOpenInterest"].astype(float)
-                return df[["Open_Time", "Open_Interest"]]
+                _mark_fapi_ok()
+                oi_df = pd.DataFrame(data)
+                oi_df["Open_Time"]     = pd.to_datetime(oi_df["timestamp"], unit="ms")
+                oi_df["Open_Interest"] = oi_df["sumOpenInterest"].astype(float)
+                logger.info(f"  [OI] fapi OK — {len(oi_df)} rows untuk {symbol}")
+                return oi_df[["Open_Time", "Open_Interest"]]
     except Exception as e:
-        logger.debug(f"OI fetch failed for {symbol}: {e}")
+        logger.debug(f"[OI] fetch failed untuk {symbol}: {e}")
     return pd.DataFrame()
 
 
+def _synthetic_oi(df_kline: pd.DataFrame) -> pd.DataFrame:
+    """
+    Synthetic Open Interest proxy berbasis Volume Delta.
+
+    Logika: OI naik saat kontrak baru dibuka (posisi berlawanan bertemperamen)
+    Proxy: running z-score dari Volume Delta memberikan sinyal relatif yang
+    mirip dengan perubahan OI (naik = lebih banyak kontrak baru dibuka,
+    turun = lebih banyak kontrak ditutup / liquidasi).
+
+    Nilai absolut tidak penting — yang penting perubahan RELATIF
+    (C_final = % deviation dari MA20) yang digunakan scoring.
+    """
+    if df_kline.empty or "Buy_Volume" not in df_kline.columns:
+        return pd.DataFrame()
+    try:
+        df = df_kline[["Open_Time", "Buy_Volume", "Total_Volume"]].copy()
+        df["vol_delta"] = df["Buy_Volume"] - (df["Total_Volume"] - df["Buy_Volume"])
+        # Gunakan EMA-smoothed cumsum sebagai base OI — lebih stabil dari raw cumsum
+        smooth = df["vol_delta"].ewm(span=5, adjust=False).mean()
+        base   = abs(df["Total_Volume"].mean()) * 10 or 1e6
+        df["Open_Interest"] = base + smooth.cumsum()
+        # Clip agar tidak negatif
+        df["Open_Interest"] = df["Open_Interest"].clip(lower=base * 0.1)
+        logger.info(
+            f"  [OI] Synthetic OI digunakan (fapi 403) — "
+            f"base={base:.0f}, range=[{df['Open_Interest'].min():.0f}, {df['Open_Interest'].max():.0f}]"
+        )
+        return df[["Open_Time", "Open_Interest"]]
+    except Exception as e:
+        logger.debug(f"[OI] synthetic gagal: {e}")
+        return pd.DataFrame()
+
+
 def _fetch_funding_rate(symbol: str, limit: int = 200) -> pd.DataFrame:
+    """
+    Fetch Funding Rate dari fapi.
+    Return: DataFrame [Open_Time, Funding_Rate]
+            atau DataFrame kosong jika gagal.
+    """
+    if not _is_fapi_available():
+        logger.debug(f"[FR] fapi skip (cooldown aktif) untuk {symbol}")
+        return pd.DataFrame()
     try:
         url = "https://fapi.binance.com/fapi/v1/fundingRate"
-        resp = requests.get(url, params={"symbol": symbol, "limit": limit},
-                            timeout=10, verify=False)
+        resp = requests.get(
+            url,
+            params={"symbol": symbol, "limit": limit},
+            timeout=10, verify=False
+        )
+        if resp.status_code == 403:
+            _mark_fapi_blocked()  # sudah di-mark oleh _fetch_oi, tapi tetap update ts
+            return pd.DataFrame()
         if resp.status_code == 200:
             data = resp.json()
             if data:
-                df = pd.DataFrame(data)
-                df["Open_Time"]    = pd.to_datetime(df["fundingTime"], unit="ms")
-                df["Funding_Rate"] = df["fundingRate"].astype(float)
-                return df[["Open_Time", "Funding_Rate"]]
+                _mark_fapi_ok()
+                fr_df = pd.DataFrame(data)
+                fr_df["Open_Time"]    = pd.to_datetime(fr_df["fundingTime"], unit="ms")
+                fr_df["Funding_Rate"] = fr_df["fundingRate"].astype(float)
+                logger.info(f"  [FR] fapi OK — {len(fr_df)} rows untuk {symbol}")
+                return fr_df[["Open_Time", "Funding_Rate"]]
     except Exception as e:
-        logger.debug(f"Funding Rate fetch failed for {symbol}: {e}")
+        logger.debug(f"[FR] fetch failed untuk {symbol}: {e}")
     return pd.DataFrame()
 
 
@@ -182,24 +276,51 @@ def _fetch_macro_cmc() -> dict | None:
 
 
 # ============================================================
-# LIQUIDITY WALLS — Binance Futures Orderbook
+# LIQUIDITY WALLS — Binance Orderbook (multi-endpoint fallback)
 # ============================================================
+# Endpoint prioritas (urut dari paling cepat ke fallback):
+# 1. fapi Futures (data paling relevan untuk futures trading)
+# 2. Spot endpoint — data-api.binance.vision (paling reliabel, bypass geo-block)
+# 3. Spot endpoint — api1/api2 (fallback tambahan)
+# CATATAN: fapi sering return 403 karena geo/IP restriction.
+# Spot orderbook memberikan data liquidity wall yang ekuivalen untuk deteksi level.
+_ORDERBOOK_ENDPOINTS = [
+    ("https://fapi.binance.com/fapi/v1/depth",         "limit", 500),   # Futures
+    ("https://data-api.binance.vision/api/v3/depth",   "limit", 500),   # Spot CDN — paling stable
+    ("https://api1.binance.com/api/v3/depth",           "limit", 500),   # Spot api1
+    ("https://api2.binance.com/api/v3/depth",           "limit", 500),   # Spot api2
+    ("https://api.binance.com/api/v3/depth",            "limit", 500),   # Spot main
+]
+
 def _fetch_liquidity_walls(symbol: str, close_price: float) -> dict | None:
-    try:
-        url = "https://fapi.binance.com/fapi/v1/depth"
-        r = requests.get(url, params={"symbol": symbol.upper(), "limit": 500},
-                         timeout=8, verify=False)
-        if r.status_code == 200:
+    sym = symbol.upper()
+    for url, limit_key, limit_val in _ORDERBOOK_ENDPOINTS:
+        try:
+            r = requests.get(
+                url,
+                params={"symbol": sym, limit_key: limit_val},
+                timeout=8, verify=False
+            )
+            if r.status_code != 200:
+                logger.debug(f"  [Liq] {url.split('/')[2]} → {r.status_code}, mencoba endpoint berikutnya")
+                continue
             book = r.json()
             bids = [(float(p), float(q)) for p, q in book.get("bids", []) if float(p) < close_price]
             asks = [(float(p), float(q)) for p, q in book.get("asks", []) if float(p) > close_price]
             if bids and asks:
                 buy_wall  = max(bids, key=lambda x: x[1])[0]
                 sell_wall = max(asks, key=lambda x: x[1])[0]
-                logger.info(f"  [Liq] Orderbook OK — Buy_Wall={buy_wall:.6f}, Sell_Wall={sell_wall:.6f}")
+                host = url.split('/')[2]
+                logger.info(
+                    f"  [Liq] Orderbook OK via {host} — "
+                    f"Buy_Wall={buy_wall:.6f}, Sell_Wall={sell_wall:.6f}"
+                )
                 return {"Buy_Liq": round(buy_wall, 6), "Sell_Liq": round(sell_wall, 6)}
-    except Exception as e:
-        logger.warning(f"  [Liq] Orderbook fetch failed for {symbol}: {e}")
+            else:
+                logger.debug(f"  [Liq] {url.split('/')[2]} → OK tapi bids/asks kosong setelah filter close={close_price}")
+        except Exception as e:
+            logger.debug(f"  [Liq] {url.split('/')[2]} → exception: {e}")
+    logger.warning(f"  [Liq] Semua endpoint gagal untuk {sym} — menggunakan dynamic swing levels sebagai fallback")
     return None
 
 
@@ -481,6 +602,7 @@ def get_fully_enriched_data(symbol: str, interval: str = "4h",
     # ── 3. Open Interest ───────────────────────────────────
     oi_df = _fetch_oi(symbol)
     if not oi_df.empty:
+        # OI real dari fapi — merge ke df
         try:
             df = pd.merge_asof(
                 df.sort_values("Open_Time"),
@@ -491,12 +613,29 @@ def get_fully_enriched_data(symbol: str, interval: str = "4h",
             logger.debug(f"[Enrichment] OI merge failed: {e}")
             df["Open_Interest"] = 0.0
     else:
-        df["Open_Interest"] = 0.0
-        missing.append("OpenInterest")
+        # fapi tidak tersedia → coba synthetic OI dari volume data
+        syn_oi = _synthetic_oi(df)
+        if not syn_oi.empty:
+            try:
+                df = pd.merge_asof(
+                    df.sort_values("Open_Time"),
+                    syn_oi.sort_values("Open_Time"),
+                    on="Open_Time", direction="backward"
+                )
+                # Synthetic berhasil — tidak tambah ke missing (scoring tetap berjalan)
+                logger.info(f"  [OI] Synthetic OI berhasil di-merge untuk {symbol}")
+            except Exception as e:
+                logger.debug(f"[Enrichment] Synthetic OI merge failed: {e}")
+                df["Open_Interest"] = 0.0
+                missing.append("OpenInterest")
+        else:
+            df["Open_Interest"] = 0.0
+            missing.append("OpenInterest")
 
     # ── 4. Funding Rate ────────────────────────────────────
     fr_df = _fetch_funding_rate(symbol)
     if not fr_df.empty:
+        # FR real dari fapi — merge ke df
         try:
             df = pd.merge_asof(
                 df.sort_values("Open_Time"),
@@ -507,7 +646,14 @@ def get_fully_enriched_data(symbol: str, interval: str = "4h",
             logger.debug(f"[Enrichment] FR merge failed: {e}")
             df["Funding_Rate"] = 0.0
     else:
+        # fapi tidak tersedia → gunakan 0.0 (neutral)
+        # Nilai 0.0 aman: Gate L3 (≤ +0.0003) PASS, Gate S3 (≥ -0.0003) PASS
+        # has_funding = True dengan nilai 0.0 → scoring berjalan normal (netral)
         df["Funding_Rate"] = 0.0
+        logger.info(
+            f"  [FR] Funding Rate tidak tersedia untuk {symbol} "
+            "— menggunakan 0.0 (netral). Gate funding PASS otomatis."
+        )
         missing.append("FundingRate")
 
     # ── 5. H4 Macro EMAs (EMA_200_H4, dll.) ───────────────
