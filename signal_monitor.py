@@ -573,11 +573,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 new_signal_L = None
 
-            # [FIX 2] Per-direction cooldown dengan AND kondisi
+            # [FIX 2] Per-direction cooldown dengan OR kondisi
             _time_since_long = now_ts - state.get("last_long_alert_ts", 0)
             if new_signal_L and (
                 new_signal_L != state.get("last_long_signal")
-                and _time_since_long > cooldown
+                or _time_since_long > cooldown
             ):
                 size_label = "FULL SIZE 🟢🟢" if new_signal_L == "LONG_FULL" else "HALF SIZE 🟡"
                 rr1        = lvl_L.get("rr1", 0)
@@ -659,11 +659,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 new_signal_S = None
 
-            # [FIX 2] Per-direction cooldown dengan AND kondisi
+            # [FIX 2] Per-direction cooldown dengan OR kondisi
             _time_since_short = now_ts - state.get("last_short_alert_ts", 0)
             if new_signal_S and (
                 new_signal_S != state.get("last_short_signal")
-                and _time_since_short > cooldown
+                or _time_since_short > cooldown
             ):
                 size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
                 rr1        = lvl_S.get("rr1", 0)
