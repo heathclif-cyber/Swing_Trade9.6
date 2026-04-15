@@ -670,6 +670,25 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
                 wib        = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
                 macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
+
+                # ── [IMPROVEMENT 5] Log SMT Divergence & Market Leader status sebelum kirim alert ──
+                _smt_note_log      = variables.get("smt_note", "SMT: tidak tersedia")
+                _rs_note_log       = variables.get("rs_note", "RS: tidak tersedia")
+                _smt_valid_log     = variables.get("smt_bear_valid", False)
+                _smt_caution_log   = variables.get("smt_bear_caution", False)
+                _is_leader_log     = variables.get("is_market_leader", False)
+                _rs_count_log      = variables.get("rs_extreme_count", 0)
+                logger.info(
+                    f"[{symbol}] ── SHORT SIGNAL PRE-SEND ANALYSIS ──\n"
+                    f"  • SMT Divergence : {_smt_note_log}\n"
+                    f"    → Valid (speculative pump): {_smt_valid_log} | "
+                    f"Caution (broad rally): {_smt_caution_log}\n"
+                    f"  • Market Leader  : {_rs_note_log}\n"
+                    f"    → Market Leader aktif ({_rs_count_log}/3 extreme): {_is_leader_log}\n"
+                    f"  • Signal akan dikirim ke Telegram: {new_signal_S}"
+                )
+                # ── End Improvement 5 ──────────────────────────────────────────
+
                 _send_telegram(
                     f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                     f"{'─'*28}\n"

@@ -75,6 +75,16 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     dist_ema21_close = ctx['dist_ema21_close']
     F                = ctx['F']  # Rel Volume vs MA20
 
+    # ── [IMPROVEMENT 3] SMT Divergence ──────────────────────────
+    _smt_bear_valid   = ctx.get('smt_bear_valid',   False)
+    _smt_bear_caution = ctx.get('smt_bear_caution', False)
+    _smt_note         = ctx.get('smt_note', '')
+
+    # ── [IMPROVEMENT 4] Market Leader Trap ──────────────────────
+    _is_market_leader  = ctx.get('is_market_leader', False)
+    _rs_extreme_count  = ctx.get('rs_extreme_count', 0)
+    _rs_note           = ctx.get('rs_note', '')
+
     # ── [FIX LIKUIDASI] Rejection Candle: Bearish engulfing / upper wick dominan
     # Rejection candle = bukti bahwa perburuan likuiditas SUDAH SELESAI dan harga ditolak
     _last_open  = safe_float(df.iloc[-1].get('Open', close_price))
@@ -156,10 +166,11 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
                 gate_S['gates']['S2'] = ('PASS',
                     f'[Statis] Harga ≥ Sell_Liq×0.995 + rejection candle terkonfirmasi — sweep sudah terjadi.')
             else:
-                gate_S['gates']['S2'] = ('WARN',
-                    f'⚠️ [Statis] Harga ≥ Sell_Liq×0.995 tapi BELUM ada rejection candle. '
-                    f'Tunggu 1 candle bearish menutup di bawah open (saat ini close={close_price:.4f} vs open={_open_price:.4f}).')
-                if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+                # [IMPROVEMENT 1] Ubah dari WARNING menjadi hard BLOCKED
+                gate_S['gates']['S2'] = ('FAIL',
+                    f'❌ GATE S2: Sweet Spot tapi BELUM ada rejection candle. '
+                    f'Tunggu 1 candle konfirmasi penutupan merah.')
+                gate_S['status'] = 'BLOCKED'
         elif close_price >= sell_liq_val * 0.980:
             gate_S['gates']['S2'] = ('WARN', f'⚠️ [Statis] Harga dalam 2% di bawah Sell_Liq ${sell_liq_val:.4f} — mendekati sweep')
             if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
@@ -186,13 +197,13 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
                     f'SwingHigh(20): ${swing_high_20:.4f}.'
                 )
             else:
+                # [IMPROVEMENT 1] Ubah dari WARN menjadi hard BLOCKED
                 gate_S['gates']['S2'] = (
-                    'WARN',
-                    f'⚠️ GATE S2: Sweet Spot (dist={_ds:.2f}%) tapi BELUM ada rejection candle. '
-                    f'Harga dekat dyn_Sell_Liq ${dyn_sell_liq:.4f} namun belum ada konfirmasi penolakan bearish. '
-                    f'Tunggu 1 candle bearish menutup di bawah open. SwingHigh(20): ${swing_high_20:.4f}.'
+                    'FAIL',
+                    f'❌ GATE S2: Sweet Spot tapi BELUM ada rejection candle. '
+                    f'Tunggu 1 candle konfirmasi penutupan merah.'
                 )
-                if gate_S['status'] == 'CLEAR': gate_S['status'] = 'WARNING'
+                gate_S['status'] = 'BLOCKED'
         elif _ds <= 10.0:
             gate_S['gates']['S2'] = (
                 'WARN',
@@ -218,25 +229,24 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         gate_S['gates']['S3'] = ('FAIL', f'❌ GATE S3: Funding sangat negatif ({funding_val:.5f}) — short squeeze risk.')
         gate_S['status'] = 'BLOCKED'
 
-    # ── [FIX v2.0] OI SHORT — dua sub-fungsi terpisah (Fix 2) ──────────
-    def _score_oi_trend_s(v, rsi_val, oi_chg, rejection_candle):
+    # ── [IMPROVEMENT 2] OI SHORT — Exhaustion vs Expansion (Fix Strength Trap) ───
+    def _score_oi_trend_s(v, rsi_val, oi_chg, taker_buy_ratio):
         """
-        [FIX LIKUIDASI] Pisahkan fase 'sedang berburu' vs 'sudah selesai berburu'.
-        Liquidation Hunt aktif (OI naik + RSI pucuk) HANYA diberi skor tinggi
-        jika ada rejection candle yang membuktikan perburuan SELESAI.
+        [IMPROVEMENT 2] Pisahkan OI Exhaustion vs OI Expansion.
+        Short Squeeze Risk terdeteksi bila OI naik deras + RSI OB + Taker Buy dominan.
+        Skor 0 diberikan agar conflict penalty yang menghukum.
         """
-        liq_hunt_active = bool(v > 20 and rsi_val > 70 and oi_chg > 5)
+        # Deteksi Short Squeeze Risk (Expansion)
+        _squeeze_risk = bool(v > 15 and oi_chg > 3 and rsi_val > 70 and taker_buy_ratio > 55)
+        if _squeeze_risk:
+            return 0  # Skor 0, biarkan conflict penalty yang menghukum
 
-        if liq_hunt_active and not rejection_candle:
-            # Perburuan SEDANG berlangsung — ini bukan entry, ini jebakan
-            return 1  # Turun dari 3 → hanya 1, bukan reward penuh
-        if liq_hunt_active and rejection_candle:
-            # Perburuan SELESAI dan ada penolakan — ini adalah entry ideal
-            return 3
-        if v > 30 and rsi_val > 75:
-            return 2
-        if v >= 5:
-            return 1
+        # OI Exhaustion
+        if v > 20 and -2 <= oi_chg <= 2:   return 3
+        if v > 10 and oi_chg < 0:           return 3
+        if v > 5  and oi_chg < 2:           return 2
+        if -5 <= v <= 5 and oi_chg < 0:    return 1
+        if v < -5:                          return 0
         return 0
 
     def _score_oi_event_s(oi_chg):
@@ -245,9 +255,14 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         if oi_chg < -5: return 1          # [FIX v2.0] OI turun — hati-hati short squeeze
         return 0
 
-    _oi_trend_score_s = _score_oi_trend_s(C_final, O_rsi, oi_change, _rejection_candle_liq)
+    _oi_trend_score_s = _score_oi_trend_s(C_final, O_rsi, oi_change, G)
     _oi_event_score_s = _score_oi_event_s(oi_change)
     s1 = max(_oi_trend_score_s, _oi_event_score_s)  # [FIX v2.0] ambil sinyal terkuat
+
+    # Flag squeeze risk untuk conflict penalty
+    _squeeze_risk_active = bool(
+        C_final > 15 and oi_change > 3 and O_rsi > 70 and G > 55
+    )
     _liq_hunter_triggered_s = bool((C_final > 30 and O_rsi > 75) or (-5 <= oi_change <= 0))
 
     # ── Helper scoring functions (dikembalikan setelah refactor OI)
@@ -319,6 +334,20 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             f'OI={C_final:.1f}%↑ + Vol={F_final:.1f}%↑ + CVD={K:.1f}%↓ + '
             f'OI_change={oi_change:.1f}%↑ tanpa rejection candle. '
             f'Pola Hollow Pump terdeteksi — kemungkinan manipulasi Market Maker.'
+        ))
+    # [IMPROVEMENT 2] Konflik 6: Short Squeeze Risk (OI Expansion aktif)
+    if _squeeze_risk_active:
+        _conflict_penalties_s.append((
+            'Short_Squeeze_Risk', -8,
+            f'SQUEEZE RISK aktif (OI ekspansi + RSI OB + Taker Buy dominan): '
+            f'OI={C_final:.1f}%↑ OI_chg={oi_change:.1f}% RSI={O_rsi:.1f} TakerBuy={G:.1f}%.'
+        ))
+    # [IMPROVEMENT 4] Konflik 7: Market Leader Trap
+    if _is_market_leader:
+        _conflict_penalties_s.append((
+            'Market_Leader_Trap', -10,
+            f'MARKET LEADER: Koin terkuat di sesi ini, sangat berbahaya untuk di-short. '
+            f'({_rs_extreme_count}/3 extreme — {_rs_note})'
         ))
     _total_conflict_penalty_s = sum(p[1] for p in _conflict_penalties_s)
     RAW_S = RAW_S + _total_conflict_penalty_s  # [FIX v2.0] penalti ke RAW sebelum session mult
@@ -521,6 +550,27 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     else:
         gate_S['gates']['S5_LIQ'] = ('PASS', f'Kondisi Liq Hunt tidak aktif (OI={C_final:.1f}%, RSI={O_rsi:.1f}, OI_chg={oi_change:.1f}%) — skip')
 
+    # ── [IMPROVEMENT 3] Gate S5_SMT: SMT Divergence Filter ──────────────
+    if _smt_bear_caution:
+        gate_S['gates']['S5_SMT'] = (
+            'FAIL',
+            f'❌ GATE S5_SMT: BTC juga naik kuat, bukan speculative pump. '
+            f'{_smt_note}. Short berisiko tinggi di tengah broad market rally.'
+        )
+        gate_S['status'] = 'BLOCKED'
+        dec_S, code_S = 'SKIP', 'SKIP'
+    elif _smt_bear_valid:
+        gate_S['gates']['S5_SMT'] = (
+            'PASS',
+            f'✅ GATE S5_SMT: SMT Divergence valid — koin naik tapi BTC flat/lemah. '
+            f'{_smt_note}. Sinyal speculative pump terkonfirmasi.'
+        )
+    else:
+        gate_S['gates']['S5_SMT'] = (
+            'PASS',
+            f'Gate S5_SMT tidak aktif — {_smt_note}'
+        )
+
     def _gate_summary(gate: dict) -> str:
         parts = []
         for gk, (status, msg) in gate['gates'].items():
@@ -559,7 +609,10 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
             + (f" | {_karet_gelang_note_s}" if _karet_gelang_note_s else "")
             + (f" | 🩸 LIQUIDATION HUNTER: OI={C_final:.1f}% + Vol={F_final:.1f}% → OI MAX SCORE" if _liq_hunter_triggered_s else "")
             + (f" | [TAMBAHAN A] {stoch_gate_override_s}" if stoch_gate_override_s else "")
-            + (f" | [TAMBAHAN C] Rejection candle: {'OK ✅' if _rejection_candle else 'BELUM ⚠️'}" )
+            + (f" | [TAMBAHAN C] Rejection candle: {'OK ✅' if _rejection_candle else 'BELUM ⚠️'}")
+            + (f" | [SMT] {_smt_note}" + (' ⚠️ CAUTION' if _smt_bear_caution else (' ✅ VALID' if _smt_bear_valid else '')))
+            + (f" | [RS] {'⚠️ MARKET LEADER ({_rs_extreme_count}/3)' if _is_market_leader else _rs_note}")
+            + (f" | [SQUEEZE RISK] OI Ekspansi aktif — penalti -8pts" if _squeeze_risk_active else "")
         ),
         'keputusan': (
             f"RAW={RAW_S} → ADJ={ADJ_S} (×{SESSION_MULT}"
@@ -665,4 +718,14 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         'liq_hunt_active':           _liq_hunt_active_now,
         'cvd_bypass_valid':          _cvd_bypass_valid,
         'trend_still_bullish':       _trend_still_bullish,
+        # [IMPROVEMENT 2] OI Squeeze Risk
+        'squeeze_risk_active':       _squeeze_risk_active,
+        # [IMPROVEMENT 3] SMT Divergence
+        'smt_bear_valid':            _smt_bear_valid,
+        'smt_bear_caution':          _smt_bear_caution,
+        'smt_note':                  _smt_note,
+        # [IMPROVEMENT 4] Market Leader
+        'is_market_leader':          _is_market_leader,
+        'rs_extreme_count':          _rs_extreme_count,
+        'rs_note':                   _rs_note,
     }

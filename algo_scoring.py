@@ -138,6 +138,37 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
     O_rsi_1 = safe_float(prev1.get('RSI_6', 50))
     O_rsi_2 = safe_float(prev2.get('RSI_6', 50))
 
+    # ── [IMPROVEMENT 3] SMT Divergence — korelasi BTC vs Coin 21 candle ────
+    # Semua prerequisite (close_21, O_rsi) sudah tersedia di sini
+    _btc_price_now = safe_float(last.get('BTC_Price', 0))
+    _btc_price_21  = safe_float(candle_21_ago.get('BTC_Price', 0))
+    _btc_chg_21    = ((_btc_price_now - _btc_price_21) / _btc_price_21 * 100) if _btc_price_21 else None
+    _coin_chg_21   = ((close_price - close_21) / close_21 * 100) if close_21 else None
+
+    # SMT Bear Valid: koin naik > 3% tetapi BTC hanya naik < 1% (speculative pump)
+    # SMT Bear Caution: koin naik > 3% DAN BTC juga naik >= 3% (broad market rally)
+    if _btc_chg_21 is not None and _coin_chg_21 is not None:
+        _smt_bear_valid   = bool(_coin_chg_21 > 3.0 and _btc_chg_21 < 1.0)
+        _smt_bear_caution = bool(_coin_chg_21 > 3.0 and _btc_chg_21 >= 3.0)
+        _smt_note = f"SMT: Coin{_coin_chg_21:+.1f}% BTC{_btc_chg_21:+.1f}% (21c)"
+    else:
+        _smt_bear_valid   = False
+        _smt_bear_caution = False
+        _smt_note = "SMT: Data BTC_Price tidak tersedia — gate dilewati"
+
+    # ── [IMPROVEMENT 4] Relative Strength / Market Leader Trap ──
+    # Prerequisites: O_rsi, F_final, C_final, oi_change — all defined above
+    _rs_extreme_count = sum([
+        bool(O_rsi > 78),
+        bool(F_final > 100),
+        bool(C_final > 20 and oi_change > 5),
+    ])
+    _is_market_leader = bool(_rs_extreme_count >= 2)
+    _rs_note = (
+        f"RS: {_rs_extreme_count}/3 extreme "
+        f"(RSI={O_rsi:.1f}, Vol={F_final:.1f}%, OI={C_final:.1f}%+chg={oi_change:.1f}%)"
+    )
+
     ref_long = close_price if is_active else low_price
     L = (ref_long - ema21) / ema21 * 100 if ema21 else 0.0
     M = (ref_long - ema50) / ema50 * 100 if ema50 else 0.0
@@ -230,6 +261,12 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
         # ── Variabel baru untuk 3 improvisasi ──────────────────
         'oi_change': oi_change, 'O_rsi_1': O_rsi_1, 'O_rsi_2': O_rsi_2,
         'dist_ema21_close': dist_ema21_close,
+        # ── [IMPROVEMENT 3] SMT Divergence ────────────────────
+        'smt_bear_valid': _smt_bear_valid, 'smt_bear_caution': _smt_bear_caution,
+        'smt_note': _smt_note, 'btc_chg_21': _btc_chg_21, 'coin_chg_21': _coin_chg_21,
+        # ── [IMPROVEMENT 4] Market Leader ─────────────────────
+        'is_market_leader': _is_market_leader, 'rs_extreme_count': _rs_extreme_count,
+        'rs_note': _rs_note,
     }
     ctx.update(atr_data) # Include all ATR sweet spots
 
@@ -441,6 +478,16 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'thr_full_S': _thr_full_S, 'thr_half_S': _thr_half_S,  # [FIX 4] SHORT thresholds
             'atr_extreme': _atr_extreme,
             'atr_avg_20': round(_atr_avg_20, 4) if _atr_avg_20 is not None else None,
+            # ── [IMPROVEMENT 3] SMT Divergence ─────────────────────────────
+            'smt_bear_valid':   _smt_bear_valid,
+            'smt_bear_caution': _smt_bear_caution,
+            'smt_note':         _smt_note,
+            'btc_chg_21':       round(_btc_chg_21, 2) if _btc_chg_21 is not None else None,
+            'coin_chg_21':      round(_coin_chg_21, 2) if _coin_chg_21 is not None else None,
+            # ── [IMPROVEMENT 4] Market Leader ───────────────────────────────
+            'is_market_leader':   _is_market_leader,
+            'rs_extreme_count':   _rs_extreme_count,
+            'rs_note':            _rs_note,
         },
     }
     
