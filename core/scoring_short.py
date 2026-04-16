@@ -132,14 +132,19 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
         if rsi_vshaped_short else ""
     )
 
-    # ── [TAMBAHAN C] Rejection candle check untuk Gate S2 ──────────────
+    # ── [FIX] REJECTION CANDLE BERBASIS WICK (JARUM ATAS) ──
     _open_price  = safe_float(last.get('Open', close_price))
     _prev_high   = safe_float(df.iloc[-2].get('High', high_price)) if len(df) >= 2 else high_price
+
+    # Hitung proporsi jarum atas vs body
+    _upper_wick_size = high_price - max(close_price, _open_price)
+    _body_size = abs(close_price - _open_price) + 0.0001  # Hindari div/0
+
     _rejection_candle = bool(
-        close_price < _open_price                    # candle terakhir bearish (close < open)
-        and high_price < swing_high_20 * 0.995       # high tidak menyentuh swing high baru
-        and close_price < _prev_high * 0.998         # close di bawah high candle sebelumnya
-    ) if swing_high_20 is not None else False
+        close_price < _open_price                    # 1. Wajib ditutup merah (Bearish)
+        and _upper_wick_size > (_body_size * 0.5)    # 2. Jarum atas minimal 50% body (tekanan jual)
+        and close_price < _prev_high * 0.9995        # 3. Close sedikit di bawah high sebelumnya
+    )
 
     # ── Gate SHORT ──────────────────────────────────────────────
     gate_S = {'status': 'CLEAR', 'gates': {}}
@@ -308,11 +313,11 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     # ── [FIX v2.0] Conflict Penalty (SHORT) ───────────────────────────
     _conflict_penalties_s = []
 
-    # [FIX] UPTREND Momentum Trap
-    # Menghukum setup SHORT yang dipicu oleh RSI tinggi di tengah Uptrend makro.
-    if macro_trend == 'UPTREND' and O_rsi > 70:
+    # [FIX] UPTREND Momentum Trap dengan Pengecualian Divergence
+    # Menghukum setup SHORT di Uptrend, KECUALI ada bukti nyata bandar jualan (CVD Divergence Bearish)
+    if macro_trend == 'UPTREND' and O_rsi > 70 and not cvd_div_bear:
         _conflict_penalties_s.append(('Uptrend_Momentum_Trap', -15,
-            f'RSI {O_rsi:.1f} di UPTREND adalah indikasi kekuatan tren, BUKAN pelemahan. Sangat rawan short-squeeze.'))
+            f'RSI {O_rsi:.1f} di UPTREND tanpa Divergence = Momentum Kuat. Rawan Squeeze.'))
 
     # Konflik 1: OI turun tapi CVD positif (bearish OI tapi flow masih beli)
     if C_final < -10 and K > 1:
@@ -526,12 +531,19 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     tp3_S = tp_pool_S[2] if len(tp_pool_S) >= 3 else _flat_S[2]
 
     def select_sl_short(cands, tp1_val):
+        # [FIX] Minimum jarak SL adalah 0.5x ATR dari harga close untuk menghindari noise Stop-Hunt
+        min_sl_distance = close_price + (atr * 0.5)
+
         for price, label in cands:
-            denom = price - close_price
+            # Pastikan price tidak lebih kecil dari minimum SL distance
+            safe_price = max(price, min_sl_distance)
+            denom = safe_price - close_price
+
             if denom > 0:
                 rr = (close_price - tp1_val) / denom
-                if rr >= 2.0:
-                    return price, label
+                if rr >= 1.5:  # [RELAXED] Turunkan syarat wajib RR dari 2.0 ke 1.5
+                    return safe_price, label
+
         return sl_atr1_S, "ATR ×1.0 (fallback — no structure)"
 
     sl_struct_S, sl_label_S = select_sl_short(sl_cands_S, tp1_S[0])
