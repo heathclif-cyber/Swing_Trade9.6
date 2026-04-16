@@ -533,9 +533,9 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     tp3_S = tp_pool_S[2] if len(tp_pool_S) >= 3 else _flat_S[2]
 
     def select_sl_short(cands, tp1_val):
-        # [FIX Anti Stop-Hunt] Guard minimum: SL wajib minimal 1.0x ATR di atas close
-        # agar tidak bisa lebih mepet dari volatilitas nyata satu candle
-        min_sl_distance = close_price + (atr * 1.0)
+        # [FIX Anti Stop-Hunt v2] Guard minimum: SL wajib minimal 1.5x ATR di atas close
+        # Solana memiliki wick sangat panjang — buffer 1.5x ATR melindungi dari Stop-Hunt
+        min_sl_distance = close_price + (atr * 1.5)
 
         for price, label in cands:
             safe_price = max(price, min_sl_distance)
@@ -543,7 +543,7 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
 
             if denom > 0:
                 rr = (close_price - tp1_val) / denom
-                if rr >= 1.5:  # [RELAXED] RR minimum 1.5x agar SL longgar tetap masuk
+                if rr >= 1.0:  # [FIX] Toleransi R:R 1:1 agar TP1 dinamis masih layak diambil
                     return safe_price, label
 
         return sl_atr1_S, "ATR ×1.0 (fallback — no structure)"
