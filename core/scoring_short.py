@@ -479,21 +479,23 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
 
 
     # SL CANDIDATES
+    # [FIX Anti Stop-Hunt] Buffer SL kini berbasis 1.0x ATR di atas level struktural,
+    # bukan lagi persentase flat (0.2-0.3%). ATR = volatilitas nyata saat ini.
     sl_cands_S = []
     sell_liq = _last_val(last, 'Sell_Liq')
-    if sell_liq and sell_liq > 0 and sell_liq * 1.003 > close_price: sl_cands_S.append((sell_liq * 1.003, "Likuiditas Sell"))
+    if sell_liq and sell_liq > 0 and (sell_liq + atr) > close_price: sl_cands_S.append((sell_liq + atr, "Likuiditas Sell+ATR"))
     fvg_ut = _last_val(last, 'FVG_Up_Top')
-    if fvg_ut and fvg_ut > 0 and fvg_ut * 1.002 > close_price: sl_cands_S.append((fvg_ut * 1.002, "FVG Bullish Top"))
+    if fvg_ut and fvg_ut > 0 and (fvg_ut + atr) > close_price: sl_cands_S.append((fvg_ut + atr, "FVG Bullish Top+ATR"))
     if len(df) >= 3:
-        sw3h = max(safe_float(df.iloc[-3].get('High', 0)), safe_float(df.iloc[-2].get('High', 0)), high_price) * 1.002
-        if sw3h > close_price: sl_cands_S.append((sw3h, "Swing High 3C"))
+        sw3h = max(safe_float(df.iloc[-3].get('High', 0)), safe_float(df.iloc[-2].get('High', 0)), high_price) + atr
+        if sw3h > close_price: sl_cands_S.append((sw3h, "Swing High 3C+ATR"))
     fib618 = _last_val(last, 'Fib_0.618')
-    if fib618 and fib618 > 0 and fib618 * 1.002 > close_price: sl_cands_S.append((fib618 * 1.002, "Fibonacci 0.618"))
+    if fib618 and fib618 > 0 and (fib618 + atr) > close_price: sl_cands_S.append((fib618 + atr, "Fibonacci 0.618+ATR"))
     vah_lev = _last_val(last, 'VAH')
-    if vah_lev and vah_lev > 0 and vah_lev * 1.002 > close_price: sl_cands_S.append((vah_lev * 1.002, "Value Area High"))
+    if vah_lev and vah_lev > 0 and (vah_lev + atr) > close_price: sl_cands_S.append((vah_lev + atr, "Value Area High+ATR"))
     pdh_lev = _last_val(last, 'PDH')
-    if pdh_lev and pdh_lev > 0 and pdh_lev * 1.002 > close_price: sl_cands_S.append((pdh_lev * 1.002, "Prev Day High"))
-    
+    if pdh_lev and pdh_lev > 0 and (pdh_lev + atr) > close_price: sl_cands_S.append((pdh_lev + atr, "Prev Day High+ATR"))
+
     if sl_atr1_S > close_price: sl_cands_S.append((sl_atr1_S, "ATR ×1.0 (fallback)"))
     if sl_atr15_S > close_price: sl_cands_S.append((sl_atr15_S, "ATR ×1.5 (fallback)"))
     if sl_atr2_S > close_price: sl_cands_S.append((sl_atr2_S, "ATR ×2.0 (fallback)"))
@@ -531,17 +533,17 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     tp3_S = tp_pool_S[2] if len(tp_pool_S) >= 3 else _flat_S[2]
 
     def select_sl_short(cands, tp1_val):
-        # [FIX] Minimum jarak SL adalah 0.5x ATR dari harga close untuk menghindari noise Stop-Hunt
-        min_sl_distance = close_price + (atr * 0.5)
+        # [FIX Anti Stop-Hunt] Guard minimum: SL wajib minimal 1.0x ATR di atas close
+        # agar tidak bisa lebih mepet dari volatilitas nyata satu candle
+        min_sl_distance = close_price + (atr * 1.0)
 
         for price, label in cands:
-            # Pastikan price tidak lebih kecil dari minimum SL distance
             safe_price = max(price, min_sl_distance)
             denom = safe_price - close_price
 
             if denom > 0:
                 rr = (close_price - tp1_val) / denom
-                if rr >= 1.5:  # [RELAXED] Turunkan syarat wajib RR dari 2.0 ke 1.5
+                if rr >= 1.5:  # [RELAXED] RR minimum 1.5x agar SL longgar tetap masuk
                     return safe_price, label
 
         return sl_atr1_S, "ATR ×1.0 (fallback — no structure)"
