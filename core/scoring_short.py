@@ -307,6 +307,13 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
 
     # ── [FIX v2.0] Conflict Penalty (SHORT) ───────────────────────────
     _conflict_penalties_s = []
+
+    # [FIX] UPTREND Momentum Trap
+    # Menghukum setup SHORT yang dipicu oleh RSI tinggi di tengah Uptrend makro.
+    if macro_trend == 'UPTREND' and O_rsi > 70:
+        _conflict_penalties_s.append(('Uptrend_Momentum_Trap', -15,
+            f'RSI {O_rsi:.1f} di UPTREND adalah indikasi kekuatan tren, BUKAN pelemahan. Sangat rawan short-squeeze.'))
+
     # Konflik 1: OI turun tapi CVD positif (bearish OI tapi flow masih beli)
     if C_final < -10 and K > 1:
         _conflict_penalties_s.append(('OI_vs_CVD', -5,
@@ -406,6 +413,17 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     else:
         stoch_gate_override_s = "StochRSI tidak tersedia — gatekeeper di-skip"
 
+    # ── [FIX] GLOBAL REJECTION ENFORCEMENT ──
+    # Wajib ada candle merah (Close < Open) sebelum masuk eksekusi SHORT
+    if code_S not in ('SKIP', 'WAIT') and not _rejection_candle:
+        gate_S['gates']['GLOBAL_REJECTION'] = (
+            'FAIL',
+            '❌ Tahan dulu! Belum ada Rejection Candle (Candle Merah Tertutup). '
+            'Eksekusi dibatalkan untuk menghindari impulse spike lanjutan.'
+        )
+        gate_S['status'] = 'BLOCKED'
+        dec_S, code_S = 'SKIP', 'SKIP'
+
     if aging_status == "AGING":
         dec_S += " (⚠️ Posisi aging 8–14 hari)"
     elif aging_status == "STALE":
@@ -431,7 +449,12 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
     _m_slope = macro_slope if macro_slope is not None else 0.0
 
     if macro_trend == 'UPTREND':
-        if ADJ_S >= _req_score_full_S:
+        # [FIX] Hard Block jika Uptrend sangat curam (Impulse wave)
+        if _m_slope > 1.5:
+            gate_S['gates']['S4'] = ('FAIL', f'❌ GATE S4: UPTREND makro terlalu kuat (slope={_m_slope:.2f}% > 1.5%). SHORT dilarang keras.')
+            gate_S['status'] = 'BLOCKED'
+            dec_S, code_S = 'SKIP', 'SKIP'
+        elif ADJ_S >= _req_score_full_S:
             gate_S['gates']['S4'] = ('PASS', f'✅ GATE S4: Skor short sangat kuat ({ADJ_S:.1f} ≥ {_req_score_full_S}) — izinkan short melawan UPTREND secara penuh.')
         elif ADJ_S >= _thr_half_S:
             gate_S['gates']['S4'] = ('WARN', f'⚠️ GATE S4: Skor cukup untuk entry HALF SIZE melawan UPTREND ({ADJ_S:.1f} ≥ {_thr_half_S}, slope={_m_slope:.2f}%). Maksimal HALF SIZE ENTRY.')
@@ -473,6 +496,7 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
 
     # TP CANDIDATES
     min_tp_dist = atr * (1.0 * ATR_MULT)
+    max_tp_dist = atr * 15.0  # [FIX] Maksimal pencarian struktur sejauh 15x ATR
     tp_pool_S = []
     for col, lbl in [('Buy_Liq','Likuiditas Beli'), ('FVG_Up_Top','FVG Bullish Top'),
                      ('FVG_Up_Bottom','FVG Bullish Bottom'), ('FVG_Down_Top','FVG Bearish Top'),
@@ -481,7 +505,9 @@ def calculate_short_score(df: pd.DataFrame, ctx: dict) -> dict:
                      ('POC','Point of Control'), ('VAL','Value Area Low'),
                      ('PDL','Prev Day Low'), ('PWL','Prev Week Low')]:
         v = _last_val(last, col)
-        if v and v > 0 and v < (close_price - min_tp_dist): tp_pool_S.append((v, lbl))
+        # [FIX] Cek agar TP tidak mengambil data nyangkut yang terlalu jauh
+        if v and v > 0 and (close_price - max_tp_dist) < v < (close_price - min_tp_dist):
+            tp_pool_S.append((v, lbl))
     for e_val, e_lbl in [(ema21, 'EMA 21'), (ema50, 'EMA 50'), (ema200, 'EMA 200')]:
         if e_val and e_val < (close_price - min_tp_dist): tp_pool_S.append((e_val, e_lbl))
     

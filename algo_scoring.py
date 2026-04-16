@@ -270,6 +270,25 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
     }
     ctx.update(atr_data) # Include all ATR sweet spots
 
+    # ── [FIX] DINAMISASI THRESHOLD LONG — MODE AGRESIF SAAT UPTREND ───────
+    # Saat tren makro UPTREND, turunkan hambatan entry LONG agar sistem
+    # lebih agresif mengikuti momentum (Trend Riding Mode).
+    # Pada SIDEWAYS/DOWNTREND, ctx._thr_full dan _thr_half tetap dipakai (konservatif).
+    if ctx.get('macro_trend') == 'UPTREND':
+        ctx['_thr_full_L'] = 45   # Default UPTREND sebelumnya: 53 — diturunkan agar lebih banyak FULL SIZE ENTRY
+        ctx['_thr_half_L'] = 30   # Default UPTREND sebelumnya: 36 — menangkap momentum awal
+        # Perpanjang Time Limit agar trade tidak exit prematur di tengah impulse wave
+        if 'TIME_LIMIT' in ctx:
+            ctx['TIME_LIMIT'] = 240
+        elif 'time_limit' in ctx:
+            ctx['time_limit'] = 240
+        logger.info(f"[Scoring] 🚀 MODE AGRESIF LONG AKTIF: thr_full_L={ctx['_thr_full_L']}, thr_half_L={ctx['_thr_half_L']} (UPTREND).")
+    else:
+        # Mode konservatif: gunakan threshold default dari regime
+        ctx['_thr_full_L'] = _thr_full
+        ctx['_thr_half_L'] = _thr_half
+    # ── End Dinamisasi Threshold LONG ────────────────────────────
+
     # ── Orchestrator calls ─────────────────────────────────────
     res_L = calculate_long_score(df, ctx)
     res_S = calculate_short_score(df, ctx)
@@ -476,6 +495,7 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'threshold_regime': threshold_regime,
             'thr_full': _thr_full, 'thr_half': _thr_half, 'thr_wait': _thr_wait,
             'thr_full_S': _thr_full_S, 'thr_half_S': _thr_half_S,  # [FIX 4] SHORT thresholds
+            'thr_full_L': ctx['_thr_full_L'], 'thr_half_L': ctx['_thr_half_L'],  # [FIX] LONG dynamic thresholds
             'atr_extreme': _atr_extreme,
             'atr_avg_20': round(_atr_avg_20, 4) if _atr_avg_20 is not None else None,
             # ── [IMPROVEMENT 3] SMT Divergence ─────────────────────────────

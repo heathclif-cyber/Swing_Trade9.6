@@ -52,6 +52,9 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     _thr_full      = ctx['_thr_full']
     _thr_half      = ctx['_thr_half']
     _thr_wait      = ctx['_thr_wait']
+    # [FIX] Baca threshold LONG dinamis (dari MODE AGRESIF UPTREND), fallback ke default
+    _thr_full      = ctx.get('_thr_full_L', _thr_full)
+    _thr_half      = ctx.get('_thr_half_L', _thr_half)
     I_cvd          = ctx['I_cvd']
     J_cvd          = ctx['J_cvd']
     ema21          = ctx['ema21']
