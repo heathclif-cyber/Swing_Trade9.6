@@ -312,9 +312,19 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
     # Fakeout check
     sl_wick_result = detect_sl_wick_fakeout(is_active, close_price, low_price, last, res_L['sl_struct'], K, D, E20)
 
-    # Trailing SL
-    trailing_sl_long = calculate_trailing_sl_long(is_active, high_price, res_L['tp1'][0], res_L['tp2'][0], res_L['tp1'][1], entry_val, res_L['sl_struct'], res_L['sl_label'], close_price)
-    trailing_sl_short = calculate_trailing_sl_short(is_active, low_price, res_S['tp1'][0], res_S['tp2'][0], res_S['tp1'][1], entry_val, res_S['sl_struct'], res_S['sl_label'], close_price)
+    # Trailing SL — [FIX P9.7] teruskan atr=atr dan tp3_val untuk 3-tahap trailing
+    trailing_sl_long = calculate_trailing_sl_long(
+        is_active, high_price,
+        res_L['tp1'][0], res_L['tp2'][0], res_L['tp1'][1],
+        entry_val, res_L['sl_struct'], res_L['sl_label'], close_price,
+        atr=atr, tp3_val=res_L['tp3'][0],   # [FIX P9.7]
+    )
+    trailing_sl_short = calculate_trailing_sl_short(
+        is_active, low_price,
+        res_S['tp1'][0], res_S['tp2'][0], res_S['tp1'][1],
+        entry_val, res_S['sl_struct'], res_S['sl_label'], close_price,
+        atr=atr, tp3_val=res_S['tp3'][0],   # [FIX P9.7]
+    )
 
     # Exit Signals
     exit_signals, exit_reco, exit_hard, exit_warn = evaluate_exit_signals(is_active, close_price, ema21, ema50, O_rsi, G, last, aging_status, candles_since_entry, res_L['tp1'][0])
@@ -368,6 +378,15 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'gate': res_L['gate'],
             'scores': res_L['scores'], 'narrative': res_L['narrative'],
             'ppi': res_L['ppi'],
+            # [FIX P9.7 - PERBAIKAN 2] Time Limit terkoneksi ke output
+            'time_limit': 240 if macro_data['macro_trend'] == 'UPTREND' else (180 if macro_data['macro_trend'] == 'SIDEWAYS' else 180),
+            'time_limit_reason': (
+                'LONG UPTREND: 240 candles — ride impulse wave penuh [FIX P9.7]'
+                if macro_data['macro_trend'] == 'UPTREND'
+                else ('LONG SIDEWAYS: 180 candles — tren netral, keluar lebih cepat [FIX P9.7]'
+                if macro_data['macro_trend'] == 'SIDEWAYS'
+                else 'LONG DOWNTREND: 180 candles — konservatif melawan tren [FIX P9.7]')
+            ),
             'levels': {
                 'sl_structure': round(res_L['sl_struct'], 8), 'sl_label': res_L['sl_label'],
                 'sl_ketat': round(sl_atr1_L, 8), 'sl_normal': round(sl_atr15_L, 8), 'sl_lebar': round(sl_atr2_L, 8),
@@ -379,6 +398,10 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
                 'dist_sl': dist_pct(res_L['sl_struct']),
                 'dist_sl_ketat': dist_pct(sl_atr1_L), 'dist_sl_normal': dist_pct(sl_atr15_L), 'dist_sl_lebar': dist_pct(sl_atr2_L),
                 'dist_tp1': dist_pct(res_L['tp1'][0]), 'dist_tp2': dist_pct(res_L['tp2'][0]), 'dist_tp3': dist_pct(res_L['tp3'][0]),
+                # [FIX P9.7 - PERBAIKAN 3] SL Cap monitoring
+                'sl_capped': res_L.get('sl_capped', False),
+                'leverage_mode': res_L.get('leverage_mode', False),
+                'max_sl_pct': res_L.get('max_sl_pct', None),
             },
             'sl_candidates': [(round(p, 8), l) for p, l in res_L['sl_cands']],
         },
@@ -389,6 +412,9 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'gate': res_S['gate'],
             'scores': res_S['scores'], 'narrative': res_S['narrative'],
             'ppi': res_S['ppi'],
+            # [FIX P9.7 - PERBAIKAN 2] Time Limit SHORT selalu 120 candles
+            'time_limit': 120,
+            'time_limit_reason': 'SHORT: 120 candles — SHORT tidak perlu ride lama, exit cepat [FIX P9.7]',
             'levels': {
                 'sl_structure': round(res_S['sl_struct'], 8), 'sl_label': res_S['sl_label'],
                 'sl_ketat': round(sl_atr1_S, 8), 'sl_normal': round(sl_atr15_S, 8), 'sl_lebar': round(sl_atr2_S, 8),
@@ -508,6 +534,17 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'is_market_leader':   _is_market_leader,
             'rs_extreme_count':   _rs_extreme_count,
             'rs_note':            _rs_note,
+            # [FIX P9.7 - PERBAIKAN 2] Time Limit terkoneksi ke variables
+            'time_limit_candles': (
+                240 if macro_data['macro_trend'] == 'UPTREND'
+                else (180 if macro_data['macro_trend'] == 'SIDEWAYS' else 180)
+            ),
+            'time_limit_short_candles': 120,  # [FIX P9.7] SHORT selalu 120
+            'time_limit_reason': (
+                f"UPTREND: LONG=240c SHORT=120c [FIX P9.7]"
+                if macro_data['macro_trend'] == 'UPTREND'
+                else f"{macro_data['macro_trend']}: LONG=180c SHORT=120c [FIX P9.7]"
+            ),
         },
     }
     

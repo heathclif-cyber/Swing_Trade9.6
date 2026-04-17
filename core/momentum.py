@@ -82,37 +82,73 @@ def evaluate_exit_signals(is_active, close_price, ema21, ema50, O_rsi, G, last, 
         
     return exit_signals, exit_reco, exit_hard, exit_warn
 
-def calculate_trailing_sl_long(is_active, high_price, tp1_val, tp2_val, tp1_label, entry_val, sl_struct_L, sl_label_L, close_price):
+def calculate_trailing_sl_long(
+        is_active, high_price, tp1_val, tp2_val, tp1_label,
+        entry_val, sl_struct_L, sl_label_L, close_price,
+        atr=0.0, tp3_val=None):  # [FIX P9.7] tambah atr + tp3_val untuk tahap 3
+    """
+    [FIX P9.7 - PERBAIKAN 4] Progressive 3-tahap trailing SL untuk LONG:
+      Tahap 1 (TP1 hit): SL → entry + (ATR × 0.3)  — buffer slippage, bukan entry persis
+      Tahap 2 (TP2 hit): SL → TP1 + (ATR × 0.2)   — lock profit level TP1
+      Tahap 3 (TP3 hit / close > tp2+5%): trailing = close - (ATR × 1.5)  — ride momentum
+    """
     trailing_sl = {
-        'applicable': False, 'tp1_hit': False, 'tp2_hit': False,
-        'stage': 'NONE',  # 'NONE' | 'TP1_HIT' | 'TP2_HIT'
+        'applicable': False, 'tp1_hit': False, 'tp2_hit': False, 'tp3_hit': False,
+        'stage': 'NONE',  # 'NONE' | 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT' | 'TRAILING'
         'recommended_sl': None, 'recommended_sl_label': 'N/A',
         'action': 'N/A', 'note': 'Tidak aktif (tidak ada posisi terbuka atau TP belum tersentuh)'
     }
     if is_active:
         _tp1_L_hit = bool(high_price >= tp1_val)
         _tp2_L_hit = bool(high_price >= tp2_val)
+        _tp3_L_hit = bool(tp3_val is not None and high_price >= tp3_val)
+        # [FIX P9.7] Tahap 3 juga aktif jika close > tp2 + 5% (momentum riding)
+        _tp3_momentum = bool(tp2_val > 0 and close_price > tp2_val * 1.05)
+
         trailing_sl['tp1_hit'] = _tp1_L_hit
         trailing_sl['tp2_hit'] = _tp2_L_hit
+        trailing_sl['tp3_hit'] = _tp3_L_hit or _tp3_momentum
 
-        if _tp2_L_hit:
-            # [FIX] applicable hanya True saat TP benar-benar tercapai
+        if _tp3_L_hit or _tp3_momentum:
+            # [FIX P9.7] Tahap 3: trailing dinamis = close - ATR×1.5
+            trailing_sl['applicable'] = True
+            trailing_sl['stage'] = 'TP3_HIT' if _tp3_L_hit else 'TRAILING'
+            _trail_val = round(close_price - (atr * 1.5), 8) if atr > 0 else round(tp2_val, 8)
+            trailing_sl['recommended_sl']       = _trail_val
+            trailing_sl['recommended_sl_label'] = 'Trailing SL @ Close − ATR×1.5 [FIX P9.7]'
+            trailing_sl['action'] = (
+                f'⭐⭐ TP3 tercapai → TRAILING SL aktif: SL = ${_trail_val:.4f} '
+                f'(Close ${close_price:.4f} − ATR×1.5). Ride momentum penuh.'
+            )
+            trailing_sl['note'] = 'Tahap 3 [FIX P9.7]: SL trailing dinamis — lock profit sambil ride momentum'
+
+        elif _tp2_L_hit:
+            # [FIX P9.7] Tahap 2: SL → TP1 + ATR×0.2  (lock profit di level TP1)
             trailing_sl['applicable'] = True
             trailing_sl['stage'] = 'TP2_HIT'
-            trailing_sl['recommended_sl']       = round(tp1_val, 8)
-            trailing_sl['recommended_sl_label'] = f'Trailing SL @ TP1 [{tp1_label}]'
-            trailing_sl['action'] = '⭐ TP2 tercapai → GESER SL ke TP1. Lock profit partial.'
-            trailing_sl['note'] = 'Trailing aktif: SL di TP1 — risiko closed di profit TP1 level'
+            _sl_tp2_stage = round(tp1_val + (atr * 0.2), 8) if atr > 0 else round(tp1_val, 8)
+            trailing_sl['recommended_sl']       = _sl_tp2_stage
+            trailing_sl['recommended_sl_label'] = f'Trailing SL @ TP1+ATR×0.2 [FIX P9.7] [{tp1_label}]'
+            trailing_sl['action'] = (
+                f'⭐ TP2 tercapai → GESER SL ke ${_sl_tp2_stage:.4f} '
+                f'(TP1 ${tp1_val:.4f} + ATR×0.2). Lock profit TP1 level.'
+            )
+            trailing_sl['note'] = 'Tahap 2 [FIX P9.7]: SL di atas TP1 — profit TP1 terlindungi'
+
         elif _tp1_L_hit:
-            # [FIX] applicable hanya True saat TP benar-benar tercapai
+            # [FIX P9.7] Tahap 1: SL → entry + ATR×0.3  (bukan entry persis, ada buffer slippage)
             trailing_sl['applicable'] = True
             trailing_sl['stage'] = 'TP1_HIT'
-            trailing_sl['recommended_sl']       = round(entry_val, 8)
-            trailing_sl['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry)'
-            trailing_sl['action'] = '✅ TP1 tercapai → GESER SL ke Breakeven. Trade sudah risk-free.'
-            trailing_sl['note'] = 'Trailing aktif: SL di entry — trade risk-free, tunggu TP2'
+            _sl_be_buffer = round(entry_val + (atr * 0.3), 8) if atr > 0 else round(entry_val, 8)
+            trailing_sl['recommended_sl']       = _sl_be_buffer
+            trailing_sl['recommended_sl_label'] = 'Trailing SL @ BE+ATR×0.3 [FIX P9.7]'
+            trailing_sl['action'] = (
+                f'✅ TP1 tercapai → GESER SL ke ${_sl_be_buffer:.4f} '
+                f'(Entry ${entry_val:.4f} + ATR×0.3 buffer slippage). Trade risk-free.'
+            )
+            trailing_sl['note'] = 'Tahap 1 [FIX P9.7]: SL di atas entry — trade risk-free, hindari slippage BE'
+
         else:
-            # [FIX] TP belum tercapai = trailing tidak aktif, TIDAK kirim alert
             trailing_sl['applicable'] = False
             trailing_sl['stage'] = 'NONE'
             trailing_sl['recommended_sl']       = round(sl_struct_L, 8)
@@ -121,37 +157,73 @@ def calculate_trailing_sl_long(is_active, high_price, tp1_val, tp2_val, tp1_labe
             trailing_sl['note'] = 'Trailing belum aktif — tunggu TP1 tercapai'
     return trailing_sl
 
-def calculate_trailing_sl_short(is_active, low_price, tp1_val, tp2_val, tp1_label, entry_val, sl_struct_S, sl_label_S, close_price):
+def calculate_trailing_sl_short(
+        is_active, low_price, tp1_val, tp2_val, tp1_label,
+        entry_val, sl_struct_S, sl_label_S, close_price,
+        atr=0.0, tp3_val=None):  # [FIX P9.7] tambah atr + tp3_val untuk tahap 3
+    """
+    [FIX P9.7 - PERBAIKAN 4] Progressive 3-tahap trailing SL untuk SHORT:
+      Tahap 1 (TP1 hit): SL → entry - (ATR × 0.3)  — buffer slippage
+      Tahap 2 (TP2 hit): SL → TP1 - (ATR × 0.2)   — lock profit TP1 level
+      Tahap 3 (TP3 hit / close < tp2-5%): trailing = close + (ATR × 1.5) — ride momentum
+    """
     trailing_sl = {
-        'applicable': False, 'tp1_hit': False, 'tp2_hit': False,
-        'stage': 'NONE',  # 'NONE' | 'TP1_HIT' | 'TP2_HIT'
+        'applicable': False, 'tp1_hit': False, 'tp2_hit': False, 'tp3_hit': False,
+        'stage': 'NONE',  # 'NONE' | 'TP1_HIT' | 'TP2_HIT' | 'TP3_HIT' | 'TRAILING'
         'recommended_sl': None, 'recommended_sl_label': 'N/A',
         'action': 'N/A', 'note': 'Tidak aktif (tidak ada posisi terbuka atau TP belum tersentuh)'
     }
     if is_active:
         _tp1_S_hit = bool(low_price <= tp1_val)
         _tp2_S_hit = bool(low_price <= tp2_val)
+        _tp3_S_hit = bool(tp3_val is not None and low_price <= tp3_val)
+        # [FIX P9.7] Tahap 3 juga aktif jika close < tp2 - 5% (momentum riding SHORT)
+        _tp3_momentum = bool(tp2_val > 0 and close_price < tp2_val * 0.95)
+
         trailing_sl['tp1_hit'] = _tp1_S_hit
         trailing_sl['tp2_hit'] = _tp2_S_hit
+        trailing_sl['tp3_hit'] = _tp3_S_hit or _tp3_momentum
 
-        if _tp2_S_hit:
-            # [FIX] applicable hanya True saat TP benar-benar tercapai
+        if _tp3_S_hit or _tp3_momentum:
+            # [FIX P9.7] Tahap 3: trailing dinamis = close + ATR×1.5
+            trailing_sl['applicable'] = True
+            trailing_sl['stage'] = 'TP3_HIT' if _tp3_S_hit else 'TRAILING'
+            _trail_val = round(close_price + (atr * 1.5), 8) if atr > 0 else round(tp2_val, 8)
+            trailing_sl['recommended_sl']       = _trail_val
+            trailing_sl['recommended_sl_label'] = 'Trailing SL @ Close + ATR×1.5 [FIX P9.7]'
+            trailing_sl['action'] = (
+                f'⭐⭐ TP3 tercapai → TRAILING SL aktif: SL = ${_trail_val:.4f} '
+                f'(Close ${close_price:.4f} + ATR×1.5). Ride momentum penuh.'
+            )
+            trailing_sl['note'] = 'Tahap 3 [FIX P9.7]: SL trailing dinamis — lock profit sambil ride decline'
+
+        elif _tp2_S_hit:
+            # [FIX P9.7] Tahap 2: SL → TP1 - ATR×0.2
             trailing_sl['applicable'] = True
             trailing_sl['stage'] = 'TP2_HIT'
-            trailing_sl['recommended_sl']       = round(tp1_val, 8)
-            trailing_sl['recommended_sl_label'] = f'Trailing SL @ TP1 [{tp1_label}]'
-            trailing_sl['action'] = '⭐ TP2 tercapai → GESER SL ke TP1. Lock profit partial.'
-            trailing_sl['note'] = 'Trailing aktif: SL di TP1 — risiko closed di profit TP1 level'
+            _sl_tp2_stage = round(tp1_val - (atr * 0.2), 8) if atr > 0 else round(tp1_val, 8)
+            trailing_sl['recommended_sl']       = _sl_tp2_stage
+            trailing_sl['recommended_sl_label'] = f'Trailing SL @ TP1−ATR×0.2 [FIX P9.7] [{tp1_label}]'
+            trailing_sl['action'] = (
+                f'⭐ TP2 tercapai → GESER SL ke ${_sl_tp2_stage:.4f} '
+                f'(TP1 ${tp1_val:.4f} − ATR×0.2). Lock profit TP1 level.'
+            )
+            trailing_sl['note'] = 'Tahap 2 [FIX P9.7]: SL di bawah TP1 — profit TP1 terlindungi'
+
         elif _tp1_S_hit:
-            # [FIX] applicable hanya True saat TP benar-benar tercapai
+            # [FIX P9.7] Tahap 1: SL → entry - ATR×0.3
             trailing_sl['applicable'] = True
             trailing_sl['stage'] = 'TP1_HIT'
-            trailing_sl['recommended_sl']       = round(entry_val, 8)
-            trailing_sl['recommended_sl_label'] = f'Trailing SL @ Breakeven (Entry)'
-            trailing_sl['action'] = '✅ TP1 tercapai → GESER SL ke Breakeven. Trade sudah risk-free.'
-            trailing_sl['note'] = 'Trailing aktif: SL di entry — trade risk-free, tunggu TP2'
+            _sl_be_buffer = round(entry_val - (atr * 0.3), 8) if atr > 0 else round(entry_val, 8)
+            trailing_sl['recommended_sl']       = _sl_be_buffer
+            trailing_sl['recommended_sl_label'] = 'Trailing SL @ BE−ATR×0.3 [FIX P9.7]'
+            trailing_sl['action'] = (
+                f'✅ TP1 tercapai → GESER SL ke ${_sl_be_buffer:.4f} '
+                f'(Entry ${entry_val:.4f} − ATR×0.3 buffer slippage). Trade risk-free.'
+            )
+            trailing_sl['note'] = 'Tahap 1 [FIX P9.7]: SL di bawah entry — trade risk-free SHORT'
+
         else:
-            # [FIX] TP belum tercapai = trailing tidak aktif, TIDAK kirim alert
             trailing_sl['applicable'] = False
             trailing_sl['stage'] = 'NONE'
             trailing_sl['recommended_sl']       = round(sl_struct_S, 8)

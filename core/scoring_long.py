@@ -2,6 +2,12 @@ import pandas as pd
 from core.helpers import _last_val, safe_float
 from core.levels import get_atr_projections_long
 
+# ── [FIX P9.7 - PERBAIKAN 3] Leverage Mode & SL Cap ─────────────────────────
+# Set LEVERAGE_MODE = True saat trading futures dengan leverage 3-5×
+# MAX_SL_PCT: maksimal jarak SL dari entry (3.5% = 17.5% account loss pada leverage 5×)
+LEVERAGE_MODE = True   # [FIX P9.7] Toggle proteksi modal untuk futures leverage
+MAX_SL_PCT    = 0.035  # [FIX P9.7] Hard cap SL: 3.5% dari close_price
+
 def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     # Extracted variables
     last           = ctx['last']
@@ -496,7 +502,16 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
             tp_dedup_L.append((v, l))
     tp_pool_L = tp_dedup_L
 
-    _flat_L = get_atr_projections_long(entry_val, atr, ATR_MULT)
+    # [FIX P9.7] Teruskan close_price dan macro_trend ke fallback ATR projection
+    # Sehingga TP3 berbasis harga SEKARANG (bukan entry_val statis)
+    _flat_L = get_atr_projections_long(
+        entry_val, atr, ATR_MULT,
+        close_price=close_price,    # [FIX P9.7] anchor TP3 ke harga terkini
+        macro_trend=macro_trend,    # [FIX P9.7] untuk override UPTREND 10x validation
+    )
+
+    # [FIX P9.7 - P1] Prioritaskan level struktural dulu, fallback ke ATR hanya jika tidak ada
+    # Struktural yang diprioritaskan: Sell_Liq, PWH, PDH (sudah ada di tp_pool_L yang difilter)
     tp1_L = tp_pool_L[0] if len(tp_pool_L) >= 1 else _flat_L[0]
     tp2_L = tp_pool_L[1] if len(tp_pool_L) >= 2 else _flat_L[1]
     tp3_L = tp_pool_L[2] if len(tp_pool_L) >= 3 else _flat_L[2]
@@ -514,6 +529,38 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
     if sl_struct_L > sl_atr2_L:
         sl_struct_L = sl_atr2_L
         sl_label_L  = f"{sl_label_L} → SAFE SL (ATR×2)"
+
+    # ── [FIX P9.7 - PERBAIKAN 3] Hard Cap SL untuk Leverage Mode ────────────
+    _sl_capped = False  # [FIX P9.7] tracking apakah SL sudah dicap
+    if LEVERAGE_MODE:
+        _sl_cap_price = close_price * (1 - MAX_SL_PCT)  # [FIX P9.7] 3.5% cap
+        if sl_struct_L < _sl_cap_price:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                f"[FIX P9.7] SL CAP AKTIF (LEVERAGE MODE): SL struktural ${sl_struct_L:.4f} "
+                f"({((close_price - sl_struct_L) / close_price * 100):.2f}% dari close) "
+                f"melebihi cap {MAX_SL_PCT*100:.1f}%. Dicap ke ${_sl_cap_price:.4f}."
+            )
+            sl_struct_L = _sl_cap_price
+            sl_label_L  = f"{sl_label_L} [SL-CAP {MAX_SL_PCT*100:.1f}%]"  # [FIX P9.7]
+            _sl_capped = True
+
+            # [FIX P9.7] Recalculate RR TP1 dengan SL baru
+            _rr_tp1_after_cap = (
+                (tp1_L[0] - close_price) / (close_price - sl_struct_L)
+                if (close_price - sl_struct_L) > 0 else 0.0
+            )
+            # [FIX P9.7] Downgrade ke WAIT atau SKIP jika RR TP1 < 1.5 setelah cap
+            if _rr_tp1_after_cap < 1.5 and code_L not in ('SKIP',):
+                _log.getLogger(__name__).warning(
+                    f"[FIX P9.7] RR TP1={_rr_tp1_after_cap:.2f}x < 1.5 setelah SL cap — "
+                    f"downgrade ke WAIT/SKIP."
+                )
+                if code_L == 'FULL':
+                    dec_L, code_L = 'WAIT & MONITOR', 'WAIT'
+                elif code_L == 'HALF':
+                    dec_L, code_L = 'SKIP', 'SKIP'
+    # ── End SL Cap ───────────────────────────────────────────────────────────
 
     def dist_pct(target):
         return round((target - close_price) / close_price * 100, 4) if close_price else 0.0
@@ -710,4 +757,8 @@ def calculate_long_score(df: pd.DataFrame, ctx: dict) -> dict:
         # [FIX 6] CVD bypass tren
         'cvd_bypass_valid':        bool(cvd_div_bull and not _trend_still_bearish),
         'trend_still_bearish':     _trend_still_bearish,
+        # [FIX P9.7 - PERBAIKAN 3] SL Cap monitoring
+        'sl_capped':               _sl_capped,           # [FIX P9.7] True jika SL dicap oleh leverage mode
+        'leverage_mode':           LEVERAGE_MODE,        # [FIX P9.7]
+        'max_sl_pct':              MAX_SL_PCT,           # [FIX P9.7]
     }
