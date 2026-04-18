@@ -73,18 +73,24 @@ def calc_rsi(close, period=6):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def calculate_features_realtime(
-    symbol: str,
-    df_m15: pd.DataFrame,
-    funding_rate: float = None,
-    btc_dominance: float = None,
-    fear_greed: float = None,
-) -> pd.DataFrame:
-    """
-    Hitung semua 58 fitur dari df_m15 terbaru secara incremental/rolling.
-    Caller ambil baris terakhir (LightGBM) atau 32 baris terakhir (LSTM).
-    """
+def calculate_features_realtime(symbol, df_m15, funding_rate=None, btc_dominance=None, fear_greed=None):
+    
+    # ── Normalize kolom names dari data_engine (kapital → lowercase) ──
+    col_map = {
+        'Open':           'open',
+        'High':           'high',
+        'Low':            'low',
+        'Close':          'close',
+        'Total_Volume':   'volume',
+        'Taker_Buy_Base': 'taker_buy_volume',
+        'Sell_Volume':    'taker_sell_volume',
+        'Open_Time':      'open_time',
+    }
     df = df_m15.copy()
+    df.columns = [col_map.get(c, c.lower()) for c in df.columns]
+    # ── End normalize ──
+    
+    # ... sisa kode tetap sama ...
     
     if len(df) < 200:
         warnings.warn(f"Panjang dataframe kurang dari 200 bar ({len(df)}), beberapa fitur mungkin NaN karena warm-up.")
@@ -104,7 +110,8 @@ def calculate_features_realtime(
     atr_safe = out['atr_14_m15'].replace(0, 1e-8)
     
     # Volume delta & CVD
-    buy_vol = df.get('taker_buy_volume', df.get('Taker_Buy_Base', df.get('taker_buy_base_asset_volume')))
+    _bv = df.get('taker_buy_volume', df.get('Taker_Buy_Base', df.get('taker_buy_base_asset_volume')))
+    buy_vol = _bv.iloc[:, 0] if isinstance(_bv, pd.DataFrame) else _bv
     if buy_vol is not None:
         out['buy_volume'] = buy_vol
         out['sell_volume'] = df['volume'] - buy_vol

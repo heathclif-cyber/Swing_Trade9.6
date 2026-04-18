@@ -251,6 +251,14 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         import data_engine
         try:
             df_m15 = data_engine.get_klines_rest(symbol, '15m', limit=300)
+            if df_m15 is not None:
+                col_map = {
+                    'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close',
+                    'Total_Volume': 'volume', 'Taker_Buy_Base': 'taker_buy_volume',
+                    'Buy_Volume': 'taker_buy_volume', 'Sell_Volume': 'taker_sell_volume',
+                }
+                df_m15 = df_m15.copy()
+                df_m15.columns = [col_map.get(c, c.lower()) for c in df_m15.columns]
         except Exception as e:
             logger.warning(f"Failed to fetch M15 for {symbol}: {e}")
             df_m15 = None
@@ -616,8 +624,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _send_telegram(
                     f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                     f"{'─'*28}\n"
-                    f"📊 Skor: <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%)\n"  # [FIX v2.0] was /71
-                    f"🤖 ML: <b>{result['long'].get('ml_signal','?')}</b> | conf=<b>{result['long'].get('ml_confidence',0)*100:.1f}%</b> | size={result['long'].get('ml_size','?')}\n"
+                    f"🤖 ML Signal: <b>{result['long'].get('ml_signal','?')}</b> | Confidence: <b>{result['long'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{result['long'].get('ml_size','SKIP')}</b>\n"
+                    f"📊 Proba — LONG: {result['long'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['long'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['long'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
@@ -709,8 +717,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _send_telegram(
                     f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                     f"{'─'*28}\n"
-                    f"📊 Skor: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%)\n"  # [FIX v2.0] was /71
-                    f"🤖 ML: <b>{result['short'].get('ml_signal','?')}</b> | conf=<b>{result['short'].get('ml_confidence',0)*100:.1f}%</b> | size={result['short'].get('ml_size','?')}\n"
+                    f"🤖 ML Signal: <b>{result['short'].get('ml_signal','?')}</b> | Confidence: <b>{result['short'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{result['short'].get('ml_size','SKIP')}</b>\n"
+                    f"📊 Proba — LONG: {result['short'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['short'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['short'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"

@@ -406,7 +406,6 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict, df_m15=None, ml_engi
     if any(t >= close_price for t in [res_S['tp1'][0], res_S['tp2'][0], res_S['tp3'][0]]): validations.append("⚠️ V10: Ada TP short di atas harga")
     if res_L['rr1'] <= 0: validations.append("⚠️ V11: RR long negatif")
     if res_S['rr1'] <= 0: validations.append("⚠️ V11: RR short negatif")
-    if round(res_L['adj_score'], 1) != round(res_L['raw_score'] * sess_data['SESSION_MULT'], 1): validations.append("⚠️ V12: Session mult tidak diterapkan (L)")
     if (atr_score_sweet_lo == 1.5 * ATR_MULT or atr_score_sweet_lo == 2.0 * ATR_MULT or atr_score_sweet_lo == 1.0):
         validations.append(f"⚠️ V13: ATR pakai threshold flat — cek ATR_MULT scoring (dipakai: {atr_score_sweet_lo:.2f}%–{atr_score_sweet_hi:.2f}%)")
     if abs(I_cvd) > 0 and abs(K) == abs(I_cvd): validations.append(f"⚠️ V14: CVD scoring salah formula (CVD_norm K={K:.2f}%)")

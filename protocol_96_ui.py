@@ -17,6 +17,22 @@ from binance.client import Client  # type: ignore
 from binance.exceptions import BinanceAPIException, BinanceRequestException  # type: ignore
 import protocol_96_enrichment as enrichment  # type: ignore
 import algo_scoring  # type: ignore
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ml.ml_signal import MLSignalEngine as _MLSignalEngine
+_ui_ml_engine = _MLSignalEngine()
+
+def _normalize_m15_columns(df):
+    col_map = {
+        'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close',
+        'Total_Volume': 'volume', 'Taker_Buy_Base': 'taker_buy_volume',
+        'Buy_Volume': 'taker_buy_volume', 'Sell_Volume': 'taker_sell_volume',
+        'Open_Time': 'open_time',
+    }
+    df = df.copy()
+    df.columns = [col_map.get(c, c.lower()) for c in df.columns]
+    return df
 import signal_monitor  # type: ignore
 from requests.packages import urllib3  # type: ignore
 # NOTE: data_engine.py telah dipensiun — semua fetch data melalui protocol_96_enrichment (SSOT)
@@ -568,46 +584,37 @@ def api_test_signal():
             total_qty  = sum(e["qty"] for e in entry_list)
             avg_entry  = (total_cost / total_qty) if total_qty > 0 else None
 
-            import algo_scoring as _as
-            meta   = {"Symbol": pair, "AVG_ENTRY_PRICE": avg_entry, "ENTRY_DATE": None}
-            result = _as.calculate_71point_score(df, meta)
-            close  = float(df.iloc[-1]["Close"])
+            df_m15_raw = enrichment.get_klines_rest(pair, '15m', limit=300) if hasattr(enrichment, 'get_klines_rest') else None
+            if df_m15_raw is None:
+                from data_engine import DataEngine as _DE
+                _de = _DE()
+                df_m15_raw = _de.get_klines_rest(pair, '15m', limit=300)
+            df_m15_norm = _normalize_m15_columns(df_m15_raw)
+            ml_result = _ui_ml_engine.predict(symbol=pair, df_m15=df_m15_norm)
 
-            if result:
-                adj_L  = result["long"]["total"]
-                adj_S  = result["short"]["total"]
-                code_L = result["long"]["code"]
-                code_S = result["short"]["code"]
-                lvl_L  = result["long"]["levels"]
-                lvl_S  = result["short"]["levels"]
-
-                pnl_str = ""
-                if avg_entry:
-                    pnl = (close / avg_entry - 1) * 100
-                    pnl_str = f"\n💼 Avg Entry: ${avg_entry:.4f} | PnL: {pnl:+.2f}%"
-
-                msg = (
-                    f"🧪 <b>TEST SIGNAL — {pair}</b>\n"
-                    f"{'─'*28}\n"
-                    f"💰 Harga: <b>${close:.6f}</b>{pnl_str}\n\n"
-                    f"📊 <b>LONG</b>: {adj_L:.0f}/78 pts → <b>{code_L}</b>\n"
-                    f"  SL: ${lvl_L['sl_structure']:.4f} | TP1: ${lvl_L['tp1']:.4f} (R:R {lvl_L['rr1']}×)\n\n"
-                    f"📊 <b>SHORT</b>: {adj_S:.0f}/78 pts → <b>{code_S}</b>\n"
-                    f"  SL: ${lvl_S['sl_structure']:.4f} | TP1: ${lvl_S['tp1']:.4f} (R:R {lvl_S['rr1']}×)\n\n"
-                    f"{'─'*28}\n"
-                    f"✅ Signal Monitor berjalan normal di Railway!"
-                )
-                if data_meta.get("data_incomplete"):
-                    msg += f"\n⚠️ Data tidak lengkap: {', '.join(data_meta.get('missing_data', []))}"
-                signal_monitor._send_telegram(msg)
-                return jsonify({
-                    "ok": True, "pair": pair,
-                    "long": {"score": adj_L, "code": code_L},
-                    "short": {"score": adj_S, "code": code_S},
-                    "close": close,
-                    "telegram": "sent",
-                    "data_warning": data_meta.get("missing_data", []),
-                })
+            msg = (
+                f"🧪 <b>TEST SIGNAL — {pair}</b>\n"
+                f"{'─'*28}\n"
+                f"🤖 ML Signal: <b>{ml_result['signal']}</b>\n"
+                f"📊 Confidence: <b>{ml_result['confidence']*100:.1f}%</b>\n"
+                f"📦 Size: <b>{ml_result['size']}</b>\n"
+                f"📈 Proba LONG: {ml_result['proba'].get('LONG',0)*100:.1f}% | "
+                f"SHORT: {ml_result['proba'].get('SHORT',0)*100:.1f}% | "
+                f"FLAT: {ml_result['proba'].get('FLAT',0)*100:.1f}%\n"
+                f"🔧 Model: {ml_result['model_type']}"
+            )
+            if data_meta.get("data_incomplete"):
+                msg += f"\n⚠️ Data tidak lengkap: {', '.join(data_meta.get('missing_data', []))}"
+            signal_monitor._send_telegram(msg)
+            return jsonify({
+                "ok": True,
+                "symbol": pair,
+                "ml_signal": ml_result['signal'],
+                "ml_confidence": ml_result['confidence'],
+                "ml_size": ml_result['size'],
+                "ml_proba": ml_result['proba'],
+                "model_type": ml_result['model_type'],
+            })
 
         return jsonify({"ok": False, "error": "Insufficient data", "pair": pair}), 400
 
@@ -916,6 +923,18 @@ def api_data():
                 }
                 quant_results = algo_scoring.calculate_71point_score(df_quant, meta)
 
+                # Fetch M15 untuk ML
+                try:
+                    from data_engine import DataEngine as _DE2
+                    _de2 = _DE2()
+                    _df_m15 = _de2.get_klines_rest(coin_pair, '15m', limit=300)
+                    _df_m15 = _normalize_m15_columns(_df_m15)
+                    ml_res = _ui_ml_engine.predict(symbol=coin_pair, df_m15=_df_m15)
+                except Exception as _e:
+                    import logging
+                    logging.getLogger('protocol_96_ui').warning(f'ML predict error di /api/data [{coin_pair}]: {_e}')
+                    ml_res = {'signal': 'FLAT', 'confidence': 0.0, 'size': 'SKIP', 'proba': {}, 'model_type': 'error'}
+
                 # ── Build live market context from enriched 4H data ──
                 if quant_results:
                     last_q = df_quant.iloc[-1]
@@ -967,6 +986,16 @@ def api_data():
                         "tp3_val_short":        lvl_S.get("tp3"),
                         # Kill Switch (dari emergency algo_scoring, bukan EMA manual)
                         "kill_switch_active":  em.get("sl_touched", False),
+                        "ml_signal":     ml_res['signal'],
+                        "ml_confidence": round(ml_res['confidence'] * 100, 1),
+                        "ml_size":       ml_res['size'],
+                        "ml_proba":      ml_res['proba'],
+                        "ml_model":      ml_res['model_type'],
+                        # Untuk kompatibilitas UI lama yang mungkin baca long_score:
+                        "long_score":    78 if ml_res['signal'] == 'LONG' and ml_res['size'] == 'FULL' else
+                                         40 if ml_res['signal'] == 'LONG' and ml_res['size'] == 'HALF' else 0,
+                        "short_score":   78 if ml_res['signal'] == 'SHORT' and ml_res['size'] == 'FULL' else
+                                         40 if ml_res['signal'] == 'SHORT' and ml_res['size'] == 'HALF' else 0,
                         "source": "algo_scoring_ssot",
                     }
 
@@ -1558,14 +1587,29 @@ def api_scanner():
                 score_res = algo_scoring.calculate_71point_score(df_quant, meta)
                 
                 if score_res:
+                    try:
+                        from data_engine import DataEngine as _DE3
+                        _de3 = _DE3()
+                        _df_m15_s = _de3.get_klines_rest(pair, '15m', limit=300)
+                        _df_m15_s = _normalize_m15_columns(_df_m15_s)
+                        _ml_s = _ui_ml_engine.predict(symbol=pair, df_m15=_df_m15_s)
+                    except Exception as _es:
+                        _ml_s = {'signal': 'FLAT', 'confidence': 0.0, 'size': 'SKIP', 'proba': {}, 'model_type': 'error'}
+
                     return {
                         "pair": pair,
                         "close": float(df_quant.iloc[-1]["Close"]),
-                        "long_score": score_res["long"]["total"],
                         "long_code": score_res["long"]["code"],
-                        "short_score": score_res["short"]["total"],
                         "short_code": score_res["short"]["code"],
-                        "incomplete": data_meta.get("data_incomplete", False)
+                        "incomplete": data_meta.get("data_incomplete", False),
+                        "ml_signal":     _ml_s['signal'],
+                        "ml_confidence": round(_ml_s['confidence'] * 100, 1),
+                        "ml_size":       _ml_s['size'],
+                        "ml_proba":      _ml_s['proba'],
+                        "long_score":    78 if _ml_s['signal'] == 'LONG' and _ml_s['size'] == 'FULL' else
+                                         40 if _ml_s['signal'] == 'LONG' and _ml_s['size'] == 'HALF' else 0,
+                        "short_score":   78 if _ml_s['signal'] == 'SHORT' and _ml_s['size'] == 'FULL' else
+                                         40 if _ml_s['signal'] == 'SHORT' and _ml_s['size'] == 'HALF' else 0,
                     }
         except Exception as e:
             logger.error(f"[Scanner] Error analyzing {pair}: {e}")
@@ -1580,7 +1624,7 @@ def api_scanner():
                 results.append(res)
                 
     # Urutkan berdasarkan skor LONG tertinggi sebagai default
-    results.sort(key=lambda x: x.get("long_score", 0), reverse=True)
+    results.sort(key=lambda x: x.get("ml_confidence", 0), reverse=True)
     
     return jsonify({"success": True, "data": results})
 
