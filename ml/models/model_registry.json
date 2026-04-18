@@ -1,0 +1,24 @@
+{
+    "active_model": "ensemble_v1",
+    "models": {
+        "ensemble_v1": {
+            "type": "ensemble",
+            "lgbm": "models/lgbm_baseline.pkl",
+            "lstm": "models/lstm_best.pt",
+            "scaler": "models/lstm_scaler.pkl",
+            "meta": "models/ensemble_meta.pkl",
+            "n_features": 58,
+            "seq_len": 32,
+            "trained_date": "2026-04-18",
+            "f1_macro": 0.5249,
+            "description": "LightGBM + LSTM ensemble, 5 koin training"
+        },
+        "lgbm_v2": {
+            "type": "lgbm_only",
+            "lgbm": "models/lgbm_v2.pkl",
+            "trained_date": "2026-05-01",
+            "f1_macro": 0.58,
+            "description": "LightGBM tuned, 20 koin training"
+        }
+    }
+}
