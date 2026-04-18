@@ -856,14 +856,26 @@ async function fetchScannerData() {
                 return `<span class="badge ${cls}" style="margin-left:8px">${code}</span>`;
             };
 
+            const mlSignal = d.ml_signal || 'FLAT';
+            const mlConf   = d.ml_confidence || 0;
+            const mlSize   = d.ml_size || 'SKIP';
+            const mlSignalS = d.ml_signal_s || 'FLAT';
+            const mlConfS  = d.ml_confidence_s || 0;
+            const mlSizeS  = d.ml_size_s || 'SKIP';
+
+            const signalColor = mlSignal === 'LONG' ? '#00c853' : mlSignal === 'SHORT' ? '#ff1744' : '#888';
+            const signalColorS = mlSignalS === 'SHORT' ? '#ff1744' : mlSignalS === 'LONG' ? '#00c853' : '#888';
+
             return `<tr>
                 <td style="text-align:left;font-weight:bold;color:var(--text-1);">${d.pair} ${d.incomplete ? '⚠️' : ''}</td>
                 <td style="text-align:center;font-family:var(--mono)">$${d.close.toFixed(5)}</td>
-                <td style="text-align:center;">
-                    <span style="font-weight:600">${d.long_score}/78</span> ${getBadge(d.long_code)}
+                <td style="text-align:center;color:${signalColor};font-weight:bold;">
+                    ${mlSignal} ${mlSize !== 'SKIP' ? '● ' + mlSize : ''}
+                    <br><small>${mlConf.toFixed(1)}% conf</small>
                 </td>
-                <td style="text-align:center;">
-                    <span style="font-weight:600">${d.short_score}/78</span> ${getBadge(d.short_code)}
+                <td style="text-align:center;color:${signalColorS};font-weight:bold;">
+                    ${mlSignalS} ${mlSizeS !== 'SKIP' ? '● ' + mlSizeS : ''}
+                    <br><small>${mlConfS.toFixed(1)}% conf</small>
                 </td>
                 <td style="text-align:center;">
                     <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior: 'smooth'});">

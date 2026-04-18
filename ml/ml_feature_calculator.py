@@ -74,6 +74,20 @@ def calc_rsi(close, period=6):
     return 100 - (100 / (1 + rs))
 
 def calculate_features_realtime(symbol, df_m15, funding_rate=None, btc_dominance=None, fear_greed=None):
+    # ── Pastikan index adalah DatetimeIndex UTC ──
+    import pandas as pd
+    if not isinstance(df_m15.index, pd.DatetimeIndex):
+        df_m15 = df_m15.copy()
+        if 'open_time' in df_m15.columns:
+            df_m15['open_time'] = pd.to_datetime(df_m15['open_time'], unit='ms', utc=True)
+            df_m15 = df_m15.set_index('open_time')
+            df_m15.index.name = 'timestamp'
+        elif 'Open_Time' in df_m15.columns:
+            df_m15['Open_Time'] = pd.to_datetime(df_m15['Open_Time'], unit='ms', utc=True)
+            df_m15 = df_m15.set_index('Open_Time')
+            df_m15.index.name = 'timestamp'
+    df = df_m15
+    # ── End guard ──
     
     # ── Normalize kolom names dari data_engine (kapital → lowercase) ──
     col_map = {

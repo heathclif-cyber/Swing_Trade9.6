@@ -24,14 +24,33 @@ from ml.ml_signal import MLSignalEngine as _MLSignalEngine
 _ui_ml_engine = _MLSignalEngine()
 
 def _normalize_m15_columns(df):
+    import pandas as pd
     col_map = {
-        'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close',
-        'Total_Volume': 'volume', 'Taker_Buy_Base': 'taker_buy_volume',
-        'Buy_Volume': 'taker_buy_volume', 'Sell_Volume': 'taker_sell_volume',
-        'Open_Time': 'open_time',
+        'Open':           'open',
+        'High':           'high',
+        'Low':            'low',
+        'Close':          'close',
+        'Total_Volume':   'volume',
+        'Taker_Buy_Base': 'taker_buy_volume',
+        'Sell_Volume':    'taker_sell_volume',
+        'Open_Time':      'open_time',
     }
     df = df.copy()
     df.columns = [col_map.get(c, c.lower()) for c in df.columns]
+    # Hapus kolom duplikat — pertahankan yang pertama
+    df = df.loc[:, ~df.columns.duplicated(keep='first')]
+    # Set DatetimeIndex dari open_time (Unix ms → UTC datetime)
+    if 'open_time' in df.columns:
+        df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True)
+        df = df.set_index('open_time')
+        df.index.name = 'timestamp'
+    elif not isinstance(df.index, pd.DatetimeIndex):
+        # Fallback: coba konversi index yang ada
+        try:
+            df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+            df.index.name = 'timestamp'
+        except Exception:
+            pass
     return df
 import signal_monitor  # type: ignore
 from requests.packages import urllib3  # type: ignore
@@ -921,19 +940,17 @@ def api_data():
                     'AVG_ENTRY_PRICE': entry_summary.get('rolling_avg_cost') if entry_summary.get('remaining_qty', 0) > 0 else None,
                     'ENTRY_DATE': None,
                 }
-                quant_results = algo_scoring.calculate_71point_score(df_quant, meta)
-
-                # Fetch M15 untuk ML
                 try:
-                    from data_engine import DataEngine as _DE2
-                    _de2 = _DE2()
-                    _df_m15 = _de2.get_klines_rest(coin_pair, '15m', limit=300)
-                    _df_m15 = _normalize_m15_columns(_df_m15)
-                    ml_res = _ui_ml_engine.predict(symbol=coin_pair, df_m15=_df_m15)
-                except Exception as _e:
-                    import logging
-                    logging.getLogger('protocol_96_ui').warning(f'ML predict error di /api/data [{coin_pair}]: {_e}')
-                    ml_res = {'signal': 'FLAT', 'confidence': 0.0, 'size': 'SKIP', 'proba': {}, 'model_type': 'error'}
+                    _df_m15_raw = get_klines_rest(coin_pair, '15m', limit=300)
+                    _df_m15_quant = _normalize_m15_columns(_df_m15_raw)
+                except Exception as _em15:
+                    logger.warning(f'[APEX] Gagal fetch M15 untuk ML: {_em15}')
+                    _df_m15_quant = None
+                quant_results = algo_scoring.calculate_71point_score(
+                    df_quant, meta, df_m15=_df_m15_quant, ml_engine=_ui_ml_engine
+                )
+
+
 
                 # ── Build live market context from enriched 4H data ──
                 if quant_results:
@@ -984,18 +1001,17 @@ def api_data():
                         "tp1_val_short":        lvl_S.get("tp1"),
                         "tp2_val_short":        lvl_S.get("tp2"),
                         "tp3_val_short":        lvl_S.get("tp3"),
-                        # Kill Switch (dari emergency algo_scoring, bukan EMA manual)
                         "kill_switch_active":  em.get("sl_touched", False),
-                        "ml_signal":     ml_res['signal'],
-                        "ml_confidence": round(ml_res['confidence'] * 100, 1),
-                        "ml_size":       ml_res['size'],
-                        "ml_proba":      ml_res['proba'],
-                        "ml_model":      ml_res['model_type'],
+                        "ml_signal":      quant_results['long'].get('ml_signal', 'FLAT'),
+                        "ml_confidence":  quant_results['long'].get('ml_confidence', 0.0),
+                        "ml_size":        quant_results['long'].get('ml_size', 'SKIP'),
+                        "ml_proba":       quant_results['long'].get('ml_proba', {}),
+                        "ml_signal_s":    quant_results['short'].get('ml_signal', 'FLAT'),
+                        "ml_confidence_s":quant_results['short'].get('ml_confidence', 0.0),
+                        "ml_size_s":      quant_results['short'].get('ml_size', 'SKIP'),
                         # Untuk kompatibilitas UI lama yang mungkin baca long_score:
-                        "long_score":    78 if ml_res['signal'] == 'LONG' and ml_res['size'] == 'FULL' else
-                                         40 if ml_res['signal'] == 'LONG' and ml_res['size'] == 'HALF' else 0,
-                        "short_score":   78 if ml_res['signal'] == 'SHORT' and ml_res['size'] == 'FULL' else
-                                         40 if ml_res['signal'] == 'SHORT' and ml_res['size'] == 'HALF' else 0,
+                        "long_score":     round(quant_results['long'].get('ml_confidence', 0.0) * 100, 1),
+                        "short_score":    round(quant_results['short'].get('ml_confidence', 0.0) * 100, 1),
                         "source": "algo_scoring_ssot",
                     }
 
@@ -1584,32 +1600,31 @@ def api_scanner():
             if df_quant is not None and not df_quant.empty and len(df_quant) >= 22:
                 # Meta disiapkan kosong untuk sekadar mengambil skor netral (tanpa pengaruh AVG ENTRY lama)
                 meta = {'Symbol': pair, 'AVG_ENTRY_PRICE': None, 'ENTRY_DATE': None}
-                score_res = algo_scoring.calculate_71point_score(df_quant, meta)
+                try:
+                    _df_m15_scan = get_klines_rest(pair, '15m', limit=300)
+                    _df_m15_scan = _normalize_m15_columns(_df_m15_scan)
+                except Exception as _escan:
+                    _df_m15_scan = None
+                score_res = algo_scoring.calculate_71point_score(
+                    df_quant, meta, df_m15=_df_m15_scan, ml_engine=_ui_ml_engine
+                )
                 
                 if score_res:
-                    try:
-                        from data_engine import DataEngine as _DE3
-                        _de3 = _DE3()
-                        _df_m15_s = _de3.get_klines_rest(pair, '15m', limit=300)
-                        _df_m15_s = _normalize_m15_columns(_df_m15_s)
-                        _ml_s = _ui_ml_engine.predict(symbol=pair, df_m15=_df_m15_s)
-                    except Exception as _es:
-                        _ml_s = {'signal': 'FLAT', 'confidence': 0.0, 'size': 'SKIP', 'proba': {}, 'model_type': 'error'}
-
                     return {
                         "pair": pair,
                         "close": float(df_quant.iloc[-1]["Close"]),
                         "long_code": score_res["long"]["code"],
                         "short_code": score_res["short"]["code"],
                         "incomplete": data_meta.get("data_incomplete", False),
-                        "ml_signal":     _ml_s['signal'],
-                        "ml_confidence": round(_ml_s['confidence'] * 100, 1),
-                        "ml_size":       _ml_s['size'],
-                        "ml_proba":      _ml_s['proba'],
-                        "long_score":    78 if _ml_s['signal'] == 'LONG' and _ml_s['size'] == 'FULL' else
-                                         40 if _ml_s['signal'] == 'LONG' and _ml_s['size'] == 'HALF' else 0,
-                        "short_score":   78 if _ml_s['signal'] == 'SHORT' and _ml_s['size'] == 'FULL' else
-                                         40 if _ml_s['signal'] == 'SHORT' and _ml_s['size'] == 'HALF' else 0,
+                        "ml_signal":      score_res['long'].get('ml_signal', 'FLAT'),
+                        "ml_confidence":  score_res['long'].get('ml_confidence', 0.0),
+                        "ml_size":        score_res['long'].get('ml_size', 'SKIP'),
+                        "ml_proba":       score_res['long'].get('ml_proba', {}),
+                        "ml_signal_s":    score_res['short'].get('ml_signal', 'FLAT'),
+                        "ml_confidence_s":score_res['short'].get('ml_confidence', 0.0),
+                        "ml_size_s":      score_res['short'].get('ml_size', 'SKIP'),
+                        "long_score":     round(score_res['long'].get('ml_confidence', 0.0) * 100, 1),
+                        "short_score":    round(score_res['short'].get('ml_confidence', 0.0) * 100, 1),
                     }
         except Exception as e:
             logger.error(f"[Scanner] Error analyzing {pair}: {e}")

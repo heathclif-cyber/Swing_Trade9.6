@@ -1,0 +1,32 @@
+{
+  "SOLUSDT": {
+    "_data_warn_ts": 1776530245.0803628,
+    "last_trailing_stage": "NONE"
+  },
+  "XRPUSDT": {
+    "_data_warn_ts": 1776530251.8997307,
+    "last_trailing_stage": "NONE"
+  },
+  "ADAUSDT": {
+    "_data_warn_ts": 1776530257.836044,
+    "last_trailing_stage": "NONE"
+  },
+  "PENDLEUSDT": {
+    "_data_warn_ts": 1776530266.1290529
+  },
+  "DOGEUSDT": {
+    "_data_warn_ts": 1776530272.8948386,
+    "last_trailing_stage": "NONE"
+  },
+  "LINKUSDT": {
+    "_data_warn_ts": 1776530279.5061269,
+    "last_trailing_stage": "NONE"
+  },
+  "SUIUSDT": {
+    "_data_warn_ts": 1776530285.3673103,
+    "last_trailing_stage": "NONE"
+  },
+  "ETHUSDT": {
+    "_data_warn_ts": 1776530294.984066
+  }
+}

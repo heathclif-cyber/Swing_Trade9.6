@@ -237,6 +237,36 @@ def _save_alert_state(state: dict) -> None:
 # ============================================================
 # SIGNAL EVALUATION
 # ============================================================
+def _normalize_m15_columns(df):
+    import pandas as pd
+    col_map = {
+        'Open':           'open',
+        'High':           'high',
+        'Low':            'low',
+        'Close':          'close',
+        'Total_Volume':   'volume',
+        'Taker_Buy_Base': 'taker_buy_volume',
+        'Sell_Volume':    'taker_sell_volume',
+        'Open_Time':      'open_time',
+    }
+    df = df.copy()
+    df.columns = [col_map.get(c, c.lower()) for c in df.columns]
+    # Hapus kolom duplikat — pertahankan yang pertama
+    df = df.loc[:, ~df.columns.duplicated(keep='first')]
+    # Set DatetimeIndex dari open_time (Unix ms → UTC datetime)
+    if 'open_time' in df.columns:
+        df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True)
+        df = df.set_index('open_time')
+        df.index.name = 'timestamp'
+    elif not isinstance(df.index, pd.DatetimeIndex):
+        # Fallback: coba konversi index yang ada
+        try:
+            df.index = pd.to_datetime(df.index, unit='ms', utc=True)
+            df.index.name = 'timestamp'
+        except Exception:
+            pass
+    return df
+
 def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
     try:
         import algo_scoring  # lazy import
@@ -252,13 +282,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         try:
             df_m15 = data_engine.get_klines_rest(symbol, '15m', limit=300)
             if df_m15 is not None:
-                col_map = {
-                    'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close',
-                    'Total_Volume': 'volume', 'Taker_Buy_Base': 'taker_buy_volume',
-                    'Buy_Volume': 'taker_buy_volume', 'Sell_Volume': 'taker_sell_volume',
-                }
-                df_m15 = df_m15.copy()
-                df_m15.columns = [col_map.get(c, c.lower()) for c in df_m15.columns]
+                df_m15 = _normalize_m15_columns(df_m15)
         except Exception as e:
             logger.warning(f"Failed to fetch M15 for {symbol}: {e}")
             df_m15 = None
@@ -549,17 +573,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 # Trailing tidak aktif (TP belum tercapai atau posisi ditutup) — reset stage
                 state["last_trailing_stage"] = "NONE"
 
-            # ── [FIX 3] Volume filter: blokir sinyal saat volume rendah ─────────
-            _last_vol   = float(df.iloc[-1].get('Total_Volume', 0))
-            _avg_vol_20 = df['Total_Volume'].iloc[-21:-1].mean() if 'Total_Volume' in df.columns else _last_vol
-            _vol_ratio  = _last_vol / _avg_vol_20 if _avg_vol_20 > 0 else 1.0
-            _low_volume = _vol_ratio < 0.40
-            if _low_volume:
-                logger.info(
-                    f"[{symbol}] [FIX3] Volume rendah (ratio={_vol_ratio:.2f} < 0.40) — "
-                    "entry baru DIBLOKIR. Alert posisi aktif tetap berjalan."
-                )
-
             # ── LONG SIGNAL ────────────────────────────────
             # [FIX] Cek session_block — jangan kirim entry alert saat sesi diblokir
             _session_block     = variables.get("session_block", False)
@@ -585,14 +598,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             if new_signal_L and _block_new_entry:
                 logger.info(
                     f"[{symbol}] [FIX1] LONG signal {new_signal_L} DIBLOKIR — Sesi Asia (server time)"
-                )
-                new_signal_L = None
-
-            # [FIX 3] Volume filter
-            if new_signal_L and _low_volume:
-                logger.info(
-                    f"[{symbol}] [FIX3] LONG signal {new_signal_L} DIBLOKIR — "
-                    f"Volume ratio={_vol_ratio:.2f} < 0.40"
                 )
                 new_signal_L = None
 
@@ -673,14 +678,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             if new_signal_S and _block_new_entry:
                 logger.info(
                     f"[{symbol}] [FIX1] SHORT signal {new_signal_S} DIBLOKIR — Sesi Asia (server time)"
-                )
-                new_signal_S = None
-
-            # [FIX 3] Volume filter
-            if new_signal_S and _low_volume:
-                logger.info(
-                    f"[{symbol}] [FIX3] SHORT signal {new_signal_S} DIBLOKIR — "
-                    f"Volume ratio={_vol_ratio:.2f} < 0.40"
                 )
                 new_signal_S = None
 
