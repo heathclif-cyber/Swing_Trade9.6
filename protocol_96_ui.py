@@ -1604,6 +1604,7 @@ def api_scanner():
                     _df_m15_scan = get_klines_rest(pair, '15m', limit=300)
                     _df_m15_scan = _normalize_m15_columns(_df_m15_scan)
                 except Exception as _escan:
+                    logger.warning(f'[Scanner] Gagal fetch M15 untuk ML [{pair}]: {_escan}')
                     _df_m15_scan = None
                 score_res = algo_scoring.calculate_71point_score(
                     df_quant, meta, df_m15=_df_m15_scan, ml_engine=_ui_ml_engine
