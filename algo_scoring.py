@@ -21,15 +21,15 @@ from core.momentum import (
 from core.scoring_long import calculate_long_score
 from core.scoring_short import calculate_short_score
 
-def calculate_71point_score(df: pd.DataFrame, meta: dict) -> dict | None:
+def calculate_71point_score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
     """78-point scoring engine (was 71-point, upgraded v2.0)."""
     try:
-        return _calculate_score_internal(df, meta)
+        return _calculate_score_internal(df, meta, df_m15=df_m15, ml_engine=ml_engine)
     except Exception as e:
         logger.error(f"[Scoring] Crash saat kalkulasi skor: {e}", exc_info=True)
         return None
 
-def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
+def _calculate_score_internal(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
     if len(df) < 22:
         return None
 
@@ -293,6 +293,65 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
     res_L = calculate_long_score(df, ctx)
     res_S = calculate_short_score(df, ctx)
 
+    # ── ML Override (Pendekatan B) ────────────────────────────────
+    _ml_signal    = 'FLAT'
+    _ml_size      = 'SKIP'
+    _ml_conf      = 0.0
+    _ml_proba     = {}
+
+    if ml_engine is not None and df_m15 is not None:
+        gate_L_status = res_L.get('gate', {}).get('status', 'BLOCKED')
+        gate_S_status = res_S.get('gate', {}).get('status', 'BLOCKED')
+
+        # Hanya panggil ML jika minimal satu gate tidak BLOCKED
+        if gate_L_status != 'BLOCKED' or gate_S_status != 'BLOCKED':
+            try:
+                symbol    = meta.get('Symbol', meta.get('symbol', ''))
+                ml_result = ml_engine.predict(symbol=symbol, df_m15=df_m15)
+                _ml_signal = ml_result.get('signal', 'FLAT')
+                _ml_size   = ml_result.get('size', 'SKIP')
+                _ml_conf   = ml_result.get('confidence', 0.0)
+                _ml_proba  = ml_result.get('proba', {})
+            except Exception as e:
+                import logging
+                logging.getLogger('algo_scoring').warning(f'ML predict error: {e}')
+                # Fallback: semua SKIP, tidak ada sinyal
+
+    # Inject ML result ke res_L dan res_S
+    # LONG
+    if res_L.get('gate', {}).get('status') != 'BLOCKED' and _ml_signal == 'LONG':
+        res_L['ml_signal']     = _ml_signal
+        res_L['ml_size']       = _ml_size
+        res_L['ml_confidence'] = _ml_conf
+        res_L['ml_proba']      = _ml_proba
+        # Override adj_score agar kompatibel dengan downstream logic
+        res_L['adj_score'] = 78 if _ml_size == 'FULL' else 40 if _ml_size == 'HALF' else 0
+        res_L['code']      = _ml_size  # 'FULL' / 'HALF' / 'SKIP'
+    else:
+        res_L['ml_signal']     = _ml_signal
+        res_L['ml_size']       = 'SKIP'
+        res_L['ml_confidence'] = _ml_conf
+        res_L['ml_proba']      = _ml_proba
+        res_L['adj_score']     = 0
+        res_L['code']          = 'SKIP'
+
+    # SHORT
+    if res_S.get('gate', {}).get('status') != 'BLOCKED' and _ml_signal == 'SHORT':
+        res_S['ml_signal']     = _ml_signal
+        res_S['ml_size']       = _ml_size
+        res_S['ml_confidence'] = _ml_conf
+        res_S['ml_proba']      = _ml_proba
+        res_S['adj_score'] = 78 if _ml_size == 'FULL' else 40 if _ml_size == 'HALF' else 0
+        res_S['code']      = _ml_size
+    else:
+        res_S['ml_signal']     = _ml_signal
+        res_S['ml_size']       = 'SKIP'
+        res_S['ml_confidence'] = _ml_conf
+        res_S['ml_proba']      = _ml_proba
+        res_S['adj_score']     = 0
+        res_S['code']          = 'SKIP'
+    # ── End ML Override ───────────────────────────────────────────
+
     def dist_pct(target):
         return round((target - close_price) / close_price * 100, 4) if close_price else 0.0
 
@@ -378,6 +437,10 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'gate': res_L['gate'],
             'scores': res_L['scores'], 'narrative': res_L['narrative'],
             'ppi': res_L['ppi'],
+            'ml_signal':     res_L.get('ml_signal', 'FLAT'),
+            'ml_confidence': res_L.get('ml_confidence', 0.0),
+            'ml_size':       res_L.get('ml_size', 'SKIP'),
+            'ml_proba':      res_L.get('ml_proba', {}),
             # [FIX P9.7 - PERBAIKAN 2] Time Limit terkoneksi ke output
             'time_limit': 240 if macro_data['macro_trend'] == 'UPTREND' else (180 if macro_data['macro_trend'] == 'SIDEWAYS' else 180),
             'time_limit_reason': (
@@ -412,6 +475,10 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict) -> dict | None:
             'gate': res_S['gate'],
             'scores': res_S['scores'], 'narrative': res_S['narrative'],
             'ppi': res_S['ppi'],
+            'ml_signal':     res_S.get('ml_signal', 'FLAT'),
+            'ml_confidence': res_S.get('ml_confidence', 0.0),
+            'ml_size':       res_S.get('ml_size', 'SKIP'),
+            'ml_proba':      res_S.get('ml_proba', {}),
             # [FIX P9.7 - PERBAIKAN 2] Time Limit SHORT selalu 120 candles
             'time_limit': 120,
             'time_limit_reason': 'SHORT: 120 candles — SHORT tidak perlu ride lama, exit cepat [FIX P9.7]',

@@ -18,6 +18,12 @@ import protocol_96_enrichment as enrichment
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
+# ML Signal Engine
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ml.ml_signal import MLSignalEngine
+_ml_engine = MLSignalEngine()
+
 logger = logging.getLogger("SignalMonitor")
 
 # ============================================================
@@ -241,6 +247,14 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             logger.warning(f"[{symbol}] Insufficient data")
             return
 
+        # Fetch M15 untuk ML engine
+        import data_engine
+        try:
+            df_m15 = data_engine.get_klines_rest(symbol, '15m', limit=300)
+        except Exception as e:
+            logger.warning(f"Failed to fetch M15 for {symbol}: {e}")
+            df_m15 = None
+
         # ── [FAIL-SAFE] Peringatan data tidak lengkap (1×) ──
         if data_meta.get("data_incomplete"):
             missing = data_meta.get("missing_data", [])
@@ -275,7 +289,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             "AVG_ENTRY_PRICE": avg_entry if is_active else None,
             "ENTRY_DATE":      entry_list[-1].get("date") if entry_list else None,
         }
-        result = algo_scoring.calculate_71point_score(df, meta)
+        result = algo_scoring.calculate_71point_score(df, meta, df_m15=df_m15, ml_engine=_ml_engine)
         if result is None:
             logger.warning(f"[{symbol}] Scoring returned None")
             return
@@ -545,9 +559,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             _session_blk_rsn   = variables.get("session_block_reason", "")
 
             new_signal_L = None
-            if code_L == "FULL" and adj_L >= thr_full:
+            ml_size_L = result['long'].get('ml_size', 'SKIP')
+            if ml_size_L == 'FULL' and result['long'].get('ml_signal') == 'LONG':
                 new_signal_L = "LONG_FULL"
-            elif code_L == "HALF" and adj_L >= thr_half:
+            elif ml_size_L == 'HALF' and result['long'].get('ml_signal') == 'LONG':
                 new_signal_L = "LONG_HALF"
 
             # Blokir entry baru jika sesi enrichment diblokir
@@ -602,6 +617,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                     f"{'─'*28}\n"
                     f"📊 Skor: <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%)\n"  # [FIX v2.0] was /71
+                    f"🤖 ML: <b>{result['long'].get('ml_signal','?')}</b> | conf=<b>{result['long'].get('ml_confidence',0)*100:.1f}%</b> | size={result['long'].get('ml_size','?')}\n"
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
@@ -631,9 +647,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
             # ── SHORT SIGNAL ───────────────────────────────
             new_signal_S = None
-            if code_S == "FULL" and adj_S >= thr_full_S:
+            ml_size_S = result['short'].get('ml_size', 'SKIP')
+            if ml_size_S == 'FULL' and result['short'].get('ml_signal') == 'SHORT':
                 new_signal_S = "SHORT_FULL"
-            elif code_S == "HALF" and adj_S >= thr_half_S:
+            elif ml_size_S == 'HALF' and result['short'].get('ml_signal') == 'SHORT':
                 new_signal_S = "SHORT_HALF"
 
             # Blokir entry baru jika sesi enrichment diblokir
@@ -693,6 +710,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                     f"{'─'*28}\n"
                     f"📊 Skor: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%)\n"  # [FIX v2.0] was /71
+                    f"🤖 ML: <b>{result['short'].get('ml_signal','?')}</b> | conf=<b>{result['short'].get('ml_confidence',0)*100:.1f}%</b> | size={result['short'].get('ml_size','?')}\n"
                     f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
