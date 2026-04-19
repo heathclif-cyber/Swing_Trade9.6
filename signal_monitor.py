@@ -269,6 +269,98 @@ def _normalize_m15_columns(df):
             pass
     return df
 
+# ============================================================
+# SIGNAL STABILITY — Anti-flip & Confirmation Buffer
+# ============================================================
+# Threshold confidence minimum untuk mengirim sinyal baru / flip.
+# Sinyal < threshold → SKIP, tidak dikirim ke Telegram.
+SIGNAL_CONF_MIN      = 0.55   # 55% — minimum entry signal pertama
+SIGNAL_FLIP_CONF_MIN = 0.65   # 65% — minimum untuk flip arah (lebih ketat)
+
+# Jumlah bar M15 berurutan yang harus konsisten sebelum flip diterima.
+# 1 bar = 15 menit. Default 2 bar = 30 menit lock-in.
+FLIP_CONFIRM_BARS    = 2
+
+# Cooldown setelah flip expired — minimal 1 jam sebelum entry baru
+FLIP_COOLDOWN_SECS   = 3600
+
+
+def _check_signal_stability(state: dict, new_direction: str, confidence: float, now_ts: float) -> str:
+    """
+    Gate sebelum sinyal dikirim ke Telegram.
+    Mengembalikan:
+      'SEND'    — sinyal stabil, boleh dikirim
+      'SKIP'    — confidence terlalu rendah, abaikan
+      'HOLD'    — belum cukup bar konfirmasi, tahan dulu
+      'COOLDOWN'— baru saja flip, tunggu cooldown
+
+    State keys yang digunakan/diubah:
+      pending_direction, pending_conf_count, last_flip_ts
+    """
+    last_direction = state.get("last_signal_direction")  # LONG / SHORT / None
+
+    # --- Case 1: Tidak ada perubahan arah → langsung SEND (update strength)
+    if last_direction == new_direction:
+        state["pending_direction"]  = None
+        state["pending_conf_count"] = 0
+        return "SEND"
+
+    # --- Case 2: Arah baru (flip atau entry pertama)
+    is_flip = last_direction is not None
+
+    # Cek confidence minimum
+    min_conf = SIGNAL_FLIP_CONF_MIN if is_flip else SIGNAL_CONF_MIN
+    if confidence < min_conf:
+        logger.info(
+            f"  [StabilityGate] SKIP — conf {confidence*100:.1f}% < {min_conf*100:.0f}% "
+            f"({'flip' if is_flip else 'entry'})"
+        )
+        state["pending_direction"]  = None
+        state["pending_conf_count"] = 0
+        return "SKIP"
+
+    # Cek cooldown setelah flip
+    last_flip_ts = state.get("last_flip_ts")
+    if is_flip and last_flip_ts and (now_ts - last_flip_ts) < FLIP_COOLDOWN_SECS:
+        remaining = int((FLIP_COOLDOWN_SECS - (now_ts - last_flip_ts)) / 60)
+        logger.info(f"  [StabilityGate] COOLDOWN — {remaining} mnt tersisa setelah flip terakhir")
+        return "COOLDOWN"
+
+    # Cek confirmation buffer (hanya untuk flip)
+    if is_flip and FLIP_CONFIRM_BARS > 1:
+        pending = state.get("pending_direction")
+        if pending != new_direction:
+            # Reset counter — arah baru mulai akumulasi
+            state["pending_direction"]  = new_direction
+            state["pending_conf_count"] = 1
+            logger.info(
+                f"  [StabilityGate] HOLD — flip {last_direction}→{new_direction} "
+                f"bar 1/{FLIP_CONFIRM_BARS} (conf {confidence*100:.1f}%)"
+            )
+            return "HOLD"
+        else:
+            count = state.get("pending_conf_count", 0) + 1
+            state["pending_conf_count"] = count
+            if count < FLIP_CONFIRM_BARS:
+                logger.info(
+                    f"  [StabilityGate] HOLD — flip {last_direction}→{new_direction} "
+                    f"bar {count}/{FLIP_CONFIRM_BARS}"
+                )
+                return "HOLD"
+            # Cukup bar konfirmasi → izinkan SEND
+            logger.info(
+                f"  [StabilityGate] SEND — flip {last_direction}→{new_direction} "
+                f"CONFIRMED setelah {count} bar, conf {confidence*100:.1f}%"
+            )
+            state["pending_direction"]  = None
+            state["pending_conf_count"] = 0
+            state["last_flip_ts"]       = now_ts
+            return "SEND"
+
+    # Entry pertama (no flip) → langsung SEND
+    return "SEND"
+
+
 def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
     try:
         import algo_scoring  # lazy import
@@ -357,17 +449,21 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
         with _state_lock:
             state = _alert_state.setdefault(symbol, {
-                "last_long_signal":   None,
-                "last_short_signal":  None,
-                "last_signal":        None,
-                "exit_alerted":       False,
-                "tp1_alerted":        False,
-                "tp2_alerted":        False,
-                "tp3_alerted":        False,
-                "entry_recorded_ts":  None,   # Unix ts saat user catat entry posisi
-                "entry_reminder_12h": False,  # Sudah kirim reminder 12 jam pertama?
-                "entry_expired_sent": False,  # Sudah kirim notif expired?
-                "entry_pos_side":     None,   # Sisi posisi yang dicatat user (LONG/SHORT)
+                "last_long_signal":    None,
+                "last_short_signal":   None,
+                "last_signal":         None,
+                "last_signal_direction": None,  # [StabilityGate] arah terakhir yang DIKIRIM
+                "pending_direction":   None,    # [StabilityGate] arah yang sedang diakumulasi
+                "pending_conf_count":  0,       # [StabilityGate] jumlah bar konfirmasi
+                "last_flip_ts":        None,    # [StabilityGate] ts terakhir flip berhasil
+                "exit_alerted":        False,
+                "tp1_alerted":         False,
+                "tp2_alerted":         False,
+                "tp3_alerted":         False,
+                "entry_recorded_ts":   None,
+                "entry_reminder_12h":  False,
+                "entry_expired_sent":  False,
+                "entry_pos_side":      None,
             })
 
             # Helper untuk PnL dinamis
@@ -622,110 +718,109 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["last_trailing_stage"] = "NONE"
 
             # ── LONG SIGNAL ────────────────────────────────
-            # ATURAN: Kirim hanya jika tipe sinyal BERUBAH (misal FLAT→LONG_FULL)
-            # Tidak ada cooldown / Asian session block — sinyal murni dari model
             new_signal_L = None
-            ml_size_L = result['long'].get('ml_size', 'SKIP')
-            if ml_size_L == 'FULL' and result['long'].get('ml_signal') == 'LONG':
-                new_signal_L = "LONG_FULL"
-            elif ml_size_L == 'HALF' and result['long'].get('ml_signal') == 'LONG':
-                new_signal_L = "LONG_HALF"
+            ml_size_L    = result['long'].get('ml_size', 'SKIP')
+            ml_conf_L    = result['long'].get('ml_confidence', 0.0)
+            if ml_size_L in ('FULL', 'HALF') and result['long'].get('ml_signal') == 'LONG':
+                new_signal_L = f"LONG_{ml_size_L}"
 
             if new_signal_L and new_signal_L != state.get("last_long_signal"):
-                size_label = "FULL SIZE 🟢🟢" if new_signal_L == "LONG_FULL" else "HALF SIZE 🟡"
-                rr1        = lvl_L.get("rr1", 0)
-                rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
-                wib        = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
-                # Momentum Hold advisory
-                hold_str = ""
-                if mom_hold.get("signal"):
-                    reasons = " · ".join(mom_hold.get("reasons", [])[:3])
-                    hold_str = (
-                        f"\n💡 <b>MOMENTUM {mom_hold['strength']}</b> — Pertimbangkan TAHAN TP1\n"
-                        f"   {reasons}\n"
+                gate = _check_signal_stability(state, "LONG", ml_conf_L, now_ts)
+                if gate != "SEND":
+                    _save_alert_state(_alert_state)
+                else:
+                    size_label = "FULL SIZE 🟢🟢" if new_signal_L == "LONG_FULL" else "HALF SIZE 🟡"
+                    rr1        = lvl_L.get("rr1", 0)
+                    rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
+                    hold_str   = ""
+                    if mom_hold.get("signal"):
+                        reasons  = " · ".join(mom_hold.get("reasons", [])[:3])
+                        hold_str = (
+                            f"\n💡 <b>MOMENTUM {mom_hold['strength']}</b> — Pertimbangkan TAHAN TP1\n"
+                            f"   {reasons}\n"
+                        )
+                    macro_icon   = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
+                    stoch_str    = f"✅ {stoch_gk_reason[:60]}" if stoch_gk_ok else f"⚠️ {stoch_gk_reason[:60]}"
+                    trailing_long = trailing.get("long", {})
+                    trailing_str  = trailing_long.get("action", "") if trailing_long.get("applicable") else ""
+                    wib = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y — %H:%M:%S WITA")
+                    _send_telegram(
+                        f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
+                        f"{'─'*28}\n"
+                        f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
+                        f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
+                        f"{'─'*28}\n"
+                        f"🤖 ML: <b>{result['long'].get('ml_signal','?')}</b> | Conf: <b>{ml_conf_L*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
+                        f"📊 Proba — LONG: {result['long'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['long'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['long'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
+                        f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
+                        f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
+                        f"{'─'*28}\n"
+                        f"🛡️ <b>Stop Loss</b>: ${lvl_L['sl_structure']:.6f} ({lvl_L['dist_sl']:+.2f}%) [{lvl_L['sl_label']}]\n\n"
+                        f"🎯 <b>Take Profit:</b>\n"
+                        f"  TP1: ${lvl_L['tp1']:.6f} (+{lvl_L['dist_tp1']:.2f}%) | R:R {lvl_L['rr1']}× [{lvl_L['tp1_label']}]\n"
+                        f"  TP2: ${lvl_L['tp2']:.6f} (+{lvl_L['dist_tp2']:.2f}%) | R:R {lvl_L['rr2']}×\n"
+                        f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
+                        f"{hold_str}"
+                        f"R:R Quality: {rr_q}\n"
+                        + (f"📊 Trailing SL: {trailing_str}\n" if trailing_str else "")
+                        + f"🔬 StochRSI: {stoch_str}\n"
+                        f"{'─'*28}\n"
+                        f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
+                        f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
                     )
-                # [P6] Macro trend label
-                macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
-                # [P4] StochRSI gatekeeper label
-                stoch_str = f"✅ {stoch_gk_reason[:60]}" if stoch_gk_ok else f"⚠️ {stoch_gk_reason[:60]}"
-                # [P5] Trailing SL hint
-                trailing_long  = trailing.get("long", {})
-                trailing_str   = trailing_long.get("action", "") if trailing_long.get("applicable") else ""
-                wib = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y — %H:%M:%S WITA")
-                _send_telegram(
-                    f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
-                    f"{'─'*28}\n"
-                    f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
-                    f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
-                    f"{'─'*28}\n"
-                    f"🤖 ML: <b>{result['long'].get('ml_signal','?')}</b> | Conf: <b>{result['long'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
-                    f"📊 Proba — LONG: {result['long'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['long'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['long'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
-                    f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
-                    f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
-                    f"{'─'*28}\n"
-                    f"🛡️ <b>Stop Loss</b>: ${lvl_L['sl_structure']:.6f} "
-                    f"({lvl_L['dist_sl']:+.2f}%) [{lvl_L['sl_label']}]\n\n"
-                    f"🎯 <b>Take Profit:</b>\n"
-                    f"  TP1: ${lvl_L['tp1']:.6f} (+{lvl_L['dist_tp1']:.2f}%) | R:R {lvl_L['rr1']}× [{lvl_L['tp1_label']}]\n"
-                    f"  TP2: ${lvl_L['tp2']:.6f} (+{lvl_L['dist_tp2']:.2f}%) | R:R {lvl_L['rr2']}×\n"
-                    f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
-                    f"{hold_str}"
-                    f"R:R Quality: {rr_q}\n"
-                    + (f"📊 Trailing SL: {trailing_str}\n" if trailing_str else "")
-                    + f"🔬 StochRSI: {stoch_str}\n"
-                    f"{'─'*28}\n"
-                    f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
-                    f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
-                )
-                state["last_long_signal"] = new_signal_L
-                state["last_signal"]      = new_signal_L
-                state["last_signal_ts"]   = time.time()         # ⏱️ Unix timestamp sinyal masuk
-                state["last_signal_conf"] = result['long'].get('ml_confidence', 0.0)
-                _save_alert_state(_alert_state)
-                return
+                    state["last_long_signal"]      = new_signal_L
+                    state["last_signal"]           = new_signal_L
+                    state["last_signal_direction"] = "LONG"
+                    state["last_signal_ts"]        = time.time()
+                    state["last_signal_conf"]      = ml_conf_L
+                    _save_alert_state(_alert_state)
+                    return
 
             # ── SHORT SIGNAL ───────────────────────────────
-            # ATURAN: Kirim hanya jika tipe sinyal BERUBAH
             new_signal_S = None
-            ml_size_S = result['short'].get('ml_size', 'SKIP')
-            if ml_size_S == 'FULL' and result['short'].get('ml_signal') == 'SHORT':
-                new_signal_S = "SHORT_FULL"
-            elif ml_size_S == 'HALF' and result['short'].get('ml_signal') == 'SHORT':
-                new_signal_S = "SHORT_HALF"
+            ml_size_S    = result['short'].get('ml_size', 'SKIP')
+            ml_conf_S    = result['short'].get('ml_confidence', 0.0)
+            if ml_size_S in ('FULL', 'HALF') and result['short'].get('ml_signal') == 'SHORT':
+                new_signal_S = f"SHORT_{ml_size_S}"
 
             if new_signal_S and new_signal_S != state.get("last_short_signal"):
-                size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
-                rr1        = lvl_S.get("rr1", 0)
-                rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
-                wib = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y — %H:%M:%S WITA")
-                _send_telegram(
-                    f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
-                    f"{'─'*28}\n"
-                    f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
-                    f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
-                    f"{'─'*28}\n"
-                    f"🤖 ML: <b>{result['short'].get('ml_signal','?')}</b> | Conf: <b>{result['short'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
-                    f"📊 Proba — LONG: {result['short'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['short'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['short'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
-                    f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
-                    f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
-                    f"{'─'*28}\n"
-                    f"🛡️ <b>Stop Loss</b>: ${lvl_S['sl_structure']:.6f} "
-                    f"({lvl_S['dist_sl']:+.2f}%) [{lvl_S['sl_label']}]\n\n"
-                    f"🎯 <b>Take Profit:</b>\n"
-                    f"  TP1: ${lvl_S['tp1']:.6f} ({lvl_S['dist_tp1']:+.2f}%) | R:R {lvl_S['rr1']}× [{lvl_S['tp1_label']}]\n"
-                    f"  TP2: ${lvl_S['tp2']:.6f} ({lvl_S['dist_tp2']:+.2f}%) | R:R {lvl_S['rr2']}×\n"
-                    f"  TP3: ${lvl_S['tp3']:.6f} ({lvl_S['dist_tp3']:+.2f}%) | R:R {lvl_S['rr3']}×\n\n"
-                    f"R:R Quality: {rr_q}\n"
-                    f"{'─'*28}\n"
-                    f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
-                    f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
-                )
-                state["last_short_signal"] = new_signal_S
-                state["last_signal"]       = new_signal_S
-                state["last_signal_ts"]    = time.time()        # ⏱️ Unix timestamp sinyal masuk
-                state["last_signal_conf"]  = result['short'].get('ml_confidence', 0.0)
-                _save_alert_state(_alert_state)
-                return
+                gate = _check_signal_stability(state, "SHORT", ml_conf_S, now_ts)
+                if gate != "SEND":
+                    _save_alert_state(_alert_state)
+                else:
+                    size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
+                    rr1        = lvl_S.get("rr1", 0)
+                    rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
+                    macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
+                    wib = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y — %H:%M:%S WITA")
+                    _send_telegram(
+                        f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
+                        f"{'─'*28}\n"
+                        f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
+                        f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
+                        f"{'─'*28}\n"
+                        f"🤖 ML: <b>{result['short'].get('ml_signal','?')}</b> | Conf: <b>{ml_conf_S*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
+                        f"📊 Proba — LONG: {result['short'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['short'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['short'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
+                        f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
+                        f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
+                        f"{'─'*28}\n"
+                        f"🛡️ <b>Stop Loss</b>: ${lvl_S['sl_structure']:.6f} ({lvl_S['dist_sl']:+.2f}%) [{lvl_S['sl_label']}]\n\n"
+                        f"🎯 <b>Take Profit:</b>\n"
+                        f"  TP1: ${lvl_S['tp1']:.6f} ({lvl_S['dist_tp1']:+.2f}%) | R:R {lvl_S['rr1']}× [{lvl_S['tp1_label']}]\n"
+                        f"  TP2: ${lvl_S['tp2']:.6f} ({lvl_S['dist_tp2']:+.2f}%) | R:R {lvl_S['rr2']}×\n"
+                        f"  TP3: ${lvl_S['tp3']:.6f} ({lvl_S['dist_tp3']:+.2f}%) | R:R {lvl_S['rr3']}×\n\n"
+                        f"R:R Quality: {rr_q}\n"
+                        f"{'─'*28}\n"
+                        f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
+                        f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
+                    )
+                    state["last_short_signal"]     = new_signal_S
+                    state["last_signal"]           = new_signal_S
+                    state["last_signal_direction"] = "SHORT"
+                    state["last_signal_ts"]        = time.time()
+                    state["last_signal_conf"]      = ml_conf_S
+                    _save_alert_state(_alert_state)
+                    return
 
             # ── [CONFIDENCE HISTORY] Catat confidence score tiap siklus ──
             # Simpan hanya 12 jam (48 titik @ 15 menit). Auto-purge data lama.
