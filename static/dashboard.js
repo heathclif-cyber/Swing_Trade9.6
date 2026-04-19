@@ -865,46 +865,67 @@ async function fetchScannerData() {
 
         if (!json.success) throw new Error(json.error || 'Scanner gagal memuat.');
         if (!json.data || json.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:24px">Tidak ada data.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-3);padding:24px">Tidak ada data.</td></tr>';
             return;
         }
 
         tbody.innerHTML = json.data.map(d => {
             if (d.error) {
-                return `<tr><td style="text-align:left;font-weight:bold">${d.pair}</td><td colspan="4" class="val-neg" style="text-align:center">Error memuat data</td></tr>`;
+                return `<tr><td style="text-align:left;font-weight:bold">${d.pair}</td><td colspan="3" class="val-neg" style="text-align:center">Error memuat data</td></tr>`;
             }
 
-            const getBadge = (code) => {
-                const cls = code === 'FULL' ? 'badge-green' : code === 'HALF' ? 'badge-blue' : code === 'WAIT' ? 'badge-yellow' : 'badge-red';
-                return `<span class="badge ${cls}" style="margin-left:8px">${code}</span>`;
-            };
-
-            // ── LIVE ML SIGNAL (dari evaluasi sekarang) ──
-            const mlSignal  = d.ml_signal  || 'FLAT';
+            // ── Raw ML data dari backend ──
+            const mlSignal  = d.ml_signal  || 'FLAT';   // dari evaluasi LONG
             const mlConf    = d.ml_confidence || 0;
             const mlSize    = d.ml_size    || 'SKIP';
-            const mlSignalS = d.ml_signal_s || 'FLAT';
+            const mlSignalS = d.ml_signal_s || 'FLAT';  // dari evaluasi SHORT
             const mlConfS   = d.ml_confidence_s || 0;
             const mlSizeS   = d.ml_size_s  || 'SKIP';
 
-            // Warna: hijau=LONG, merah=SHORT, abu=FLAT
-            const signalColor  = mlSignal  === 'LONG'  ? '#34d399' : mlSignal  === 'SHORT' ? '#f87171' : 'var(--text-3)';
-            const signalColorS = mlSignalS === 'SHORT' ? '#f87171' : mlSignalS === 'LONG'  ? '#34d399' : 'var(--text-3)';
-            const liveIcon     = mlSignal  === 'LONG'  ? '🟢' : mlSignal  === 'SHORT' ? '🔴' : '⚪';
-            const liveIconS    = mlSignalS === 'SHORT' ? '🔴' : mlSignalS === 'LONG'  ? '🟢' : '⚪';
+            // ── SARAN KEPUTUSAN: Gabungkan LONG + SHORT jadi 1 rekomendasi ──
+            // Prioritas: LONG aktif > SHORT aktif > WAIT
+            const longActive  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
+            const shortActive = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
 
-            // ── HISTORICAL ENTRY SIGNAL — Baris 2 (singkat, no-block) ──
-            // Diambil dari state signal_monitor: last_signal_type, last_signal_conf, last_signal_ts
+            let decIcon, decLabel, decColor, decConf, decSize, decBg;
+            if (longActive) {
+                decIcon  = '🟢';
+                decLabel = 'LONG';
+                decColor = '#34d399';
+                decConf  = mlConf;
+                decSize  = mlSize;
+                decBg    = 'rgba(52,211,153,.06)';
+            } else if (shortActive) {
+                decIcon  = '🔴';
+                decLabel = 'SHORT';
+                decColor = '#f87171';
+                decConf  = mlConfS;
+                decSize  = mlSizeS;
+                decBg    = 'rgba(248,113,113,.06)';
+            } else {
+                decIcon  = '⚪';
+                decLabel = 'WAIT';
+                decColor = 'var(--text-3)';
+                decConf  = Math.max(mlConf, mlConfS);  // tampilkan conf tertinggi sebagai info
+                decSize  = null;
+                decBg    = 'rgba(255,255,255,.02)';
+            }
+
+            // ── Pill ukuran posisi ──
+            const sizePill = decSize ? `<span style="font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;
+                background:${decLabel==='LONG'?'rgba(52,211,153,.15)':'rgba(248,113,113,.15)'};
+                color:${decColor};border:1px solid ${decColor}40;margin-left:6px">${decSize}</span>` : '';
+
+            // ── HISTORICAL ENTRY SIGNAL — Baris 2 ──
             const histType = d.last_signal_type;
             const histConf = d.last_signal_conf;
             const histTs   = d.last_signal_ts;
-            let entryRow   = '';   // baris entry historis untuk kolom LONG
+            let entryRow   = '';
             if (histType) {
-                const isLong     = histType.startsWith('LONG');
-                const histClr    = isLong ? '#34d399' : '#f87171';
-                const histC100   = histConf != null ? (histConf * 100).toFixed(1) : '—';
-                // Format jam WITA singkat (HH:MM WITA) dari unix timestamp
-                let timeShort = '—';
+                const isLong   = histType.startsWith('LONG');
+                const histClr  = isLong ? '#34d399' : '#f87171';
+                const histC100 = histConf != null ? (histConf * 100).toFixed(1) : '—';
+                let timeShort  = '—';
                 if (histTs) {
                     timeShort = new Intl.DateTimeFormat('en-GB', {
                         timeZone: 'Asia/Makassar',
@@ -912,36 +933,40 @@ async function fetchScannerData() {
                         hour: '2-digit', minute: '2-digit', hour12: false
                     }).format(new Date(histTs * 1000)).replace(',', '') + ' WITA';
                 }
-                entryRow = `<div style="margin-top:5px;padding:4px 7px;background:rgba(167,139,250,.07);border-left:2px solid #a78bfa;border-radius:0 5px 5px 0">
-                    <div style="font-size:9px;color:#a78bfa;font-weight:700;letter-spacing:.4px">⏳ ENTRY</div>
+                entryRow = `<div style="margin-top:6px;padding:4px 8px;background:rgba(167,139,250,.07);border-left:2px solid #a78bfa;border-radius:0 5px 5px 0">
+                    <div style="font-size:9px;color:#a78bfa;font-weight:700;letter-spacing:.4px">⏳ ENTRY TERAKHIR</div>
                     <div style="color:${histClr};font-weight:700;font-size:11px">${histType} <span style="color:var(--text-3);font-weight:400">(${histC100}%)</span></div>
                     <div style="font-size:9.5px;color:#64748b;font-family:var(--mono)">@ ${timeShort}</div>
                 </div>`;
             }
 
             return `<tr>
-                <td style="text-align:left;font-weight:bold;color:var(--text-1);">${d.pair} ${d.incomplete ? '⚠️' : ''}</td>
-                <td style="text-align:center;font-family:var(--mono)">$${d.close.toFixed(5)}</td>
+                <td style="text-align:left;font-weight:bold;color:var(--text-1);vertical-align:top;padding-top:10px">
+                    ${d.pair} ${d.incomplete ? '⚠️' : ''}
+                </td>
+                <td style="text-align:center;font-family:var(--mono);vertical-align:top;padding-top:10px">
+                    $${d.close.toFixed(5)}
+                </td>
                 <td style="text-align:left;padding:8px 10px;vertical-align:top">
-                    <!-- Baris 1: LIVE — probabilitas saat ini -->
-                    <div style="display:flex;align-items:center;gap:5px">
-                        <span>${liveIcon}</span>
-                        <span style="color:${signalColor};font-weight:700;font-size:12px">LIVE: ${mlSignal}${mlSize !== 'SKIP' ? ' &#x25CF; ' + mlSize : ''}</span>
-                        <span style="color:var(--text-3);font-size:10.5px;font-family:var(--mono)">${(mlConf*100).toFixed(1)}%</span>
+                    <!-- Baris 1: Saran Keputusan — rekomendasi kombinasi LONG+SHORT -->
+                    <div style="display:inline-flex;align-items:center;padding:5px 10px;background:${decBg};border-radius:8px;border:1px solid ${decColor}30">
+                        <span style="font-size:15px;margin-right:6px">${decIcon}</span>
+                        <div>
+                            <div style="display:flex;align-items:center">
+                                <span style="color:${decColor};font-weight:800;font-size:13px;letter-spacing:.3px">${decLabel}</span>
+                                ${sizePill}
+                            </div>
+                            <div style="font-size:10px;color:var(--text-3);font-family:var(--mono);margin-top:1px">
+                                Conf: ${(decConf*100).toFixed(1)}%
+                            </div>
+                        </div>
                     </div>
-                    <!-- Baris 2: ENTRY — sinyal historis Telegram terakhir -->
+                    <!-- Baris 2: Entry historis dari Telegram alert terakhir -->
                     ${entryRow}
                 </td>
-                <td style="text-align:left;padding:8px 10px;vertical-align:top">
-                    <!-- Baris 1: LIVE SHORT -->
-                    <div style="display:flex;align-items:center;gap:5px">
-                        <span>${liveIconS}</span>
-                        <span style="color:${signalColorS};font-weight:700;font-size:12px">LIVE: ${mlSignalS}${mlSizeS !== 'SKIP' ? ' &#x25CF; ' + mlSizeS : ''}</span>
-                        <span style="color:var(--text-3);font-size:10.5px;font-family:var(--mono)">${(mlConfS*100).toFixed(1)}%</span>
-                    </div>
-                </td>
-                <td style="text-align:center;vertical-align:middle">
-                    <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior:'smooth'});">
+                <td style="text-align:center;vertical-align:top;padding-top:10px">
+                    <button class="btn btn-primary" style="padding:4px 12px;font-size:11px"
+                        onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior:'smooth'});">
                         Analisis &#x1F50D;
                     </button>
                 </td>
@@ -949,9 +974,10 @@ async function fetchScannerData() {
 
         }).join('');
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--accent-red);padding:24px">❌ Error Scanner: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--accent-red);padding:24px">❌ Error Scanner: ${e.message}</td></tr>`;
     }
 }
+
 
 /* ── INIT ────────────────────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
