@@ -60,7 +60,12 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ==========================================
 # ⚙️ USER CONFIGURATION
 # ==========================================
-AVAILABLE_PAIRS = ["SUIUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "PENDLEUSDT", "DOGEUSDT", "LINKUSDT", "WLFIUSDT", "ETHUSDT"]
+AVAILABLE_PAIRS = [
+    'SOLUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT',
+    'TONUSDT', 'ADAUSDT', 'TRXUSDT', 'SHIBUSDT', 'AVAXUSDT',
+    'LINKUSDT', 'DOTUSDT', 'SUIUSDT', 'POLUSDT', 'NEARUSDT',
+    'PEPEUSDT', 'TAOUSDT', 'APTOSUSDT', 'ARBUSDT', 'WLFIUSDT'
+]
 COIN_PAIR = AVAILABLE_PAIRS[0]
 ALLOCATED_CAPITAL = 200
 

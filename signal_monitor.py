@@ -36,8 +36,10 @@ SIGNAL_THRESHOLD_FULL = 48        # ADJ score default FULL SIZE ENTRY (bull mode
 SIGNAL_THRESHOLD_HALF = 33        # ADJ score default HALF SIZE ENTRY (bull mode)
 
 MONITOR_PAIRS = [
-    "SUIUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
-    "PENDLEUSDT", "DOGEUSDT", "LINKUSDT", "ETHUSDT"
+    'SOLUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT',
+    'TONUSDT', 'ADAUSDT', 'TRXUSDT', 'SHIBUSDT', 'AVAXUSDT',
+    'LINKUSDT', 'DOTUSDT', 'SUIUSDT', 'POLUSDT', 'NEARUSDT',
+    'PEPEUSDT', 'TAOUSDT', 'APTOSUSDT', 'ARBUSDT', 'WLFIUSDT'
 ]
 
 # ── Thread safety ──────────────────────────────────────────

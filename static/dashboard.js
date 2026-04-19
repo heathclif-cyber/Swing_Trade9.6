@@ -867,11 +867,11 @@ async function fetchScannerData() {
                 <td style="text-align:center;font-family:var(--mono)">$${d.close.toFixed(5)}</td>
                 <td style="text-align:center;color:${signalColor};font-weight:bold;">
                     ${mlSignal} ${mlSize !== 'SKIP' ? '● ' + mlSize : ''}
-                    <br><small>${mlConf.toFixed(1)}% conf</small>
+                    <br><small>${(mlConf * 100).toFixed(1)}% conf</small>
                 </td>
                 <td style="text-align:center;color:${signalColorS};font-weight:bold;">
                     ${mlSignalS} ${mlSizeS !== 'SKIP' ? '● ' + mlSizeS : ''}
-                    <br><small>${mlConfS.toFixed(1)}% conf</small>
+                    <br><small>${(mlConfS * 100).toFixed(1)}% conf</small>
                 </td>
                 <td style="text-align:center;">
                     <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior: 'smooth'});">
