@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore")
 logger = logging.getLogger("ml_signal")
 
 # ── Constants ──
-ML_DIR   = Path(r"D:\Apps-Dev\Pemodelan_swingtrade\models")
+ML_DIR   = Path(__file__).parent / "models"
 SEQ_LEN  = 32
 
 SYMBOL_MAP = {
