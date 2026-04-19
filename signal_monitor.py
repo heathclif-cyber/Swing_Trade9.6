@@ -545,17 +545,18 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 # [P5] Trailing SL hint
                 trailing_long  = trailing.get("long", {})
                 trailing_str   = trailing_long.get("action", "") if trailing_long.get("applicable") else ""
+                wib = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y — %H:%M:%S WITA")
                 _send_telegram(
                     f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                     f"{'─'*28}\n"
-                    f"🤖 ML Signal: <b>{result['long'].get('ml_signal','?')}</b> | Confidence: <b>{result['long'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{result['long'].get('ml_size','SKIP')}</b>\n"
+                    f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
+                    f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
+                    f"{'─'*28}\n"
+                    f"🤖 ML: <b>{result['long'].get('ml_signal','?')}</b> | Conf: <b>{result['long'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
                     f"📊 Proba — LONG: {result['long'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['long'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['long'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
-                    f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
                     f"{'─'*28}\n"
-                    f"💰 <b>ENTRY</b>: ${close_price:.6f}\n"
-                    f"✅ <b>Status Entry: BOLEH ENTRY SEKARANG</b>\n"
                     f"🛡️ <b>Stop Loss</b>: ${lvl_L['sl_structure']:.6f} "
                     f"({lvl_L['dist_sl']:+.2f}%) [{lvl_L['sl_label']}]\n\n"
                     f"🎯 <b>Take Profit:</b>\n"
@@ -566,7 +567,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"R:R Quality: {rr_q}\n"
                     + (f"📊 Trailing SL: {trailing_str}\n" if trailing_str else "")
                     + f"🔬 StochRSI: {stoch_str}\n"
-                    f"🕐 {wib} WIB"
+                    f"{'─'*28}\n"
+                    f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
+                    f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
                 )
                 state["last_long_signal"] = new_signal_L
                 state["last_signal"]      = new_signal_L
@@ -588,38 +591,18 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
                 rr1        = lvl_S.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
-                wib        = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
-                macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
-
-                # ── [IMPROVEMENT 5] Log SMT Divergence & Market Leader status sebelum kirim alert ──
-                _smt_note_log      = variables.get("smt_note", "SMT: tidak tersedia")
-                _rs_note_log       = variables.get("rs_note", "RS: tidak tersedia")
-                _smt_valid_log     = variables.get("smt_bear_valid", False)
-                _smt_caution_log   = variables.get("smt_bear_caution", False)
-                _is_leader_log     = variables.get("is_market_leader", False)
-                _rs_count_log      = variables.get("rs_extreme_count", 0)
-                logger.info(
-                    f"[{symbol}] ── SHORT SIGNAL PRE-SEND ANALYSIS ──\n"
-                    f"  • SMT Divergence : {_smt_note_log}\n"
-                    f"    → Valid (speculative pump): {_smt_valid_log} | "
-                    f"Caution (broad rally): {_smt_caution_log}\n"
-                    f"  • Market Leader  : {_rs_note_log}\n"
-                    f"    → Market Leader aktif ({_rs_count_log}/3 extreme): {_is_leader_log}\n"
-                    f"  • Signal akan dikirim ke Telegram: {new_signal_S}"
-                )
-                # ── End Improvement 5 ──────────────────────────────────────────
-
+                wib = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y — %H:%M:%S WITA")
                 _send_telegram(
                     f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                     f"{'─'*28}\n"
-                    f"🤖 ML Signal: <b>{result['short'].get('ml_signal','?')}</b> | Confidence: <b>{result['short'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{result['short'].get('ml_size','SKIP')}</b>\n"
+                    f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
+                    f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
+                    f"{'─'*28}\n"
+                    f"🤖 ML: <b>{result['short'].get('ml_signal','?')}</b> | Conf: <b>{result['short'].get('ml_confidence',0)*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
                     f"📊 Proba — LONG: {result['short'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['short'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['short'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
-                    f"🎯 Posisi: <b>{size_label}</b>\n"
                     f"{macro_icon} Tren Macro: <b>{macro_trend}</b> | Regime: {threshold_regime}\n"
                     f"🕐 Sesi: {variables.get('session', 'N/A')} (×{variables.get('SESSION_MULT',1.0):.2f})\n"
                     f"{'─'*28}\n"
-                    f"💰 <b>ENTRY</b>: ${close_price:.6f}\n"
-                    f"✅ <b>Status Entry: BOLEH ENTRY SEKARANG</b>\n"
                     f"🛡️ <b>Stop Loss</b>: ${lvl_S['sl_structure']:.6f} "
                     f"({lvl_S['dist_sl']:+.2f}%) [{lvl_S['sl_label']}]\n\n"
                     f"🎯 <b>Take Profit:</b>\n"
@@ -627,7 +610,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"  TP2: ${lvl_S['tp2']:.6f} ({lvl_S['dist_tp2']:+.2f}%) | R:R {lvl_S['rr2']}×\n"
                     f"  TP3: ${lvl_S['tp3']:.6f} ({lvl_S['dist_tp3']:+.2f}%) | R:R {lvl_S['rr3']}×\n\n"
                     f"R:R Quality: {rr_q}\n"
-                    f"🕐 {wib} WIB"
+                    f"{'─'*28}\n"
+                    f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
+                    f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
                 )
                 state["last_short_signal"] = new_signal_S
                 state["last_signal"]       = new_signal_S
