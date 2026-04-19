@@ -858,69 +858,67 @@ function toggleTheme() {
 
 /* ── MARKET SCANNER (ALL COINS) ──────────────────────────────────────────── */
 async function fetchScannerData() {
-    const tbody = document.getElementById('scannerTableBody');
+    const grid = document.getElementById('scannerGrid');
     try {
-        const res = await fetch('/api/scanner');
+        const res  = await fetch('/api/scanner');
         const json = await res.json();
 
         if (!json.success) throw new Error(json.error || 'Scanner gagal memuat.');
         if (!json.data || json.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-3);padding:24px">Tidak ada data.</td></tr>';
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px">Tidak ada data.</div>';
             return;
         }
 
-        tbody.innerHTML = json.data.map(d => {
+        grid.innerHTML = json.data.map(d => {
+            // ── Error state ──
             if (d.error) {
-                return `<tr><td style="text-align:left;font-weight:bold">${d.pair}</td><td colspan="3" class="val-neg" style="text-align:center">Error memuat data</td></tr>`;
+                return `<div class="scanner-card dec-wait">
+                    <div class="sc-header">
+                        <span class="sc-pair">${d.pair}</span>
+                        <span style="color:var(--accent-red);font-size:11px">⚠️ Error memuat data</span>
+                    </div>
+                </div>`;
             }
 
-            // ── Raw ML data dari backend ──
-            const mlSignal  = d.ml_signal  || 'FLAT';   // dari evaluasi LONG
+            // ── Raw ML data ──
+            const mlSignal  = d.ml_signal  || 'FLAT';
             const mlConf    = d.ml_confidence || 0;
             const mlSize    = d.ml_size    || 'SKIP';
-            const mlSignalS = d.ml_signal_s || 'FLAT';  // dari evaluasi SHORT
+            const mlSignalS = d.ml_signal_s || 'FLAT';
             const mlConfS   = d.ml_confidence_s || 0;
             const mlSizeS   = d.ml_size_s  || 'SKIP';
 
-            // ── SARAN KEPUTUSAN: Gabungkan LONG + SHORT jadi 1 rekomendasi ──
-            // Prioritas: LONG aktif > SHORT aktif > WAIT
+            // ── Logika Saran Keputusan ──
             const longActive  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
             const shortActive = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
 
-            let decIcon, decLabel, decColor, decConf, decSize, decBg;
+            let decIcon, decLabel, decColor, decConf, decSize, decBg, decBorder, cardClass;
             if (longActive) {
-                decIcon  = '🟢';
-                decLabel = 'LONG';
-                decColor = '#34d399';
-                decConf  = mlConf;
-                decSize  = mlSize;
-                decBg    = 'rgba(52,211,153,.06)';
+                decIcon   = '🟢'; decLabel = 'LONG';  decColor = '#34d399';
+                decConf   = mlConf; decSize = mlSize;
+                decBg     = 'rgba(52,211,153,.08)'; decBorder = 'rgba(52,211,153,.25)';
+                cardClass = 'dec-long';
             } else if (shortActive) {
-                decIcon  = '🔴';
-                decLabel = 'SHORT';
-                decColor = '#f87171';
-                decConf  = mlConfS;
-                decSize  = mlSizeS;
-                decBg    = 'rgba(248,113,113,.06)';
+                decIcon   = '🔴'; decLabel = 'SHORT'; decColor = '#f87171';
+                decConf   = mlConfS; decSize = mlSizeS;
+                decBg     = 'rgba(248,113,113,.08)'; decBorder = 'rgba(248,113,113,.25)';
+                cardClass = 'dec-short';
             } else {
-                decIcon  = '⚪';
-                decLabel = 'WAIT';
-                decColor = 'var(--text-3)';
-                decConf  = Math.max(mlConf, mlConfS);  // tampilkan conf tertinggi sebagai info
-                decSize  = null;
-                decBg    = 'rgba(255,255,255,.02)';
+                decIcon   = '⚪'; decLabel = 'WAIT';  decColor = 'var(--text-3)';
+                decConf   = Math.max(mlConf, mlConfS); decSize = null;
+                decBg     = 'rgba(255,255,255,.03)'; decBorder = 'var(--glass-border)';
+                cardClass = 'dec-wait';
             }
 
             // ── Pill ukuran posisi ──
-            const sizePill = decSize ? `<span style="font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;
-                background:${decLabel==='LONG'?'rgba(52,211,153,.15)':'rgba(248,113,113,.15)'};
-                color:${decColor};border:1px solid ${decColor}40;margin-left:6px">${decSize}</span>` : '';
+            const sizePill = decSize
+                ? `<span class="sc-size-pill" style="color:${decColor}">${decSize}</span>` : '';
 
-            // ── HISTORICAL ENTRY SIGNAL — Baris 2 ──
+            // ── Historical Entry Signal ──
             const histType = d.last_signal_type;
             const histConf = d.last_signal_conf;
             const histTs   = d.last_signal_ts;
-            let entryRow   = '';
+            let entryHtml  = '';
             if (histType) {
                 const isLong   = histType.startsWith('LONG');
                 const histClr  = isLong ? '#34d399' : '#f87171';
@@ -933,48 +931,50 @@ async function fetchScannerData() {
                         hour: '2-digit', minute: '2-digit', hour12: false
                     }).format(new Date(histTs * 1000)).replace(',', '') + ' WITA';
                 }
-                entryRow = `<div style="margin-top:6px;padding:4px 8px;background:rgba(167,139,250,.07);border-left:2px solid #a78bfa;border-radius:0 5px 5px 0">
-                    <div style="font-size:9px;color:#a78bfa;font-weight:700;letter-spacing:.4px">⏳ ENTRY TERAKHIR</div>
-                    <div style="color:${histClr};font-weight:700;font-size:11px">${histType} <span style="color:var(--text-3);font-weight:400">(${histC100}%)</span></div>
-                    <div style="font-size:9.5px;color:#64748b;font-family:var(--mono)">@ ${timeShort}</div>
+                entryHtml = `<div class="sc-entry">
+                    <div class="sc-entry-body">
+                        <div class="sc-entry-label">⏳ Entry Terakhir (Telegram)</div>
+                        <div class="sc-entry-signal" style="color:${histClr}">${histType}
+                            <span style="color:var(--text-3);font-weight:400;font-size:10.5px">&nbsp;${histC100}% conf</span>
+                        </div>
+                        <div class="sc-entry-time">@ ${timeShort}</div>
+                    </div>
                 </div>`;
             }
 
-            return `<tr>
-                <td style="text-align:left;font-weight:bold;color:var(--text-1);vertical-align:top;padding-top:10px">
-                    ${d.pair} ${d.incomplete ? '⚠️' : ''}
-                </td>
-                <td style="text-align:center;font-family:var(--mono);vertical-align:top;padding-top:10px">
-                    $${d.close.toFixed(5)}
-                </td>
-                <td style="text-align:left;padding:8px 10px;vertical-align:top">
-                    <!-- Baris 1: Saran Keputusan — rekomendasi kombinasi LONG+SHORT -->
-                    <div style="display:inline-flex;align-items:center;padding:5px 10px;background:${decBg};border-radius:8px;border:1px solid ${decColor}30">
-                        <span style="font-size:15px;margin-right:6px">${decIcon}</span>
+            return `<div class="scanner-card ${cardClass}">
+                <!-- Header: Pair + Harga -->
+                <div class="sc-header">
+                    <div>
+                        <div class="sc-pair">${d.pair} ${d.incomplete ? '<span style="color:var(--accent-yellow);font-size:11px">⚠️</span>' : ''}</div>
+                        <div class="sc-price">$${d.close.toFixed(5)}</div>
+                    </div>
+                    <!-- Decision chip -->
+                    <div class="sc-decision" style="background:${decBg};border-color:${decBorder}">
+                        <span class="sc-dec-icon">${decIcon}</span>
                         <div>
-                            <div style="display:flex;align-items:center">
-                                <span style="color:${decColor};font-weight:800;font-size:13px;letter-spacing:.3px">${decLabel}</span>
+                            <div style="display:flex;align-items:center;gap:6px">
+                                <span class="sc-dec-label" style="color:${decColor}">${decLabel}</span>
                                 ${sizePill}
                             </div>
-                            <div style="font-size:10px;color:var(--text-3);font-family:var(--mono);margin-top:1px">
-                                Conf: ${(decConf*100).toFixed(1)}%
-                            </div>
+                            <div class="sc-dec-sub" style="color:${decColor}">${(decConf*100).toFixed(1)}% conf</div>
                         </div>
                     </div>
-                    <!-- Baris 2: Entry historis dari Telegram alert terakhir -->
-                    ${entryRow}
-                </td>
-                <td style="text-align:center;vertical-align:top;padding-top:10px">
-                    <button class="btn btn-primary" style="padding:4px 12px;font-size:11px"
+                </div>
+                <!-- Historical entry -->
+                ${entryHtml}
+                <!-- Footer: Aksi -->
+                <div class="sc-footer">
+                    <button class="btn btn-primary" style="padding:5px 16px;font-size:11px;border-radius:18px"
                         onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior:'smooth'});">
-                        Analisis &#x1F50D;
+                        Analisis Detail &#x1F50D;
                     </button>
-                </td>
-            </tr>`;
-
+                </div>
+            </div>`;
         }).join('');
+
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--accent-red);padding:24px">❌ Error Scanner: ${e.message}</td></tr>`;
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--accent-red);padding:40px">❌ Error Scanner: ${e.message}</div>`;
     }
 }
 

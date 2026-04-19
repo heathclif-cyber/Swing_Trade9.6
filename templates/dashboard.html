@@ -439,6 +439,88 @@ tbody tr:last-child td { border-bottom: none; }
     .status-value { font-size: 18px; }
     .decision-name { font-size: 22px; }
 }
+/* ── SCANNER CARD GRID ───────────────────────────────────────────────────── */
+#scannerGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px;
+    padding: 4px 2px;
+}
+.scanner-card {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all var(--transition);
+    position: relative;
+    overflow: hidden;
+}
+.scanner-card::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: linear-gradient(135deg, rgba(255,255,255,.025) 0%, transparent 60%);
+    pointer-events: none;
+}
+.scanner-card:hover {
+    background: var(--glass-hover);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
+}
+.scanner-card.dec-long  { border-left: 3px solid var(--accent-green); }
+.scanner-card.dec-short { border-left: 3px solid var(--accent-red); }
+.scanner-card.dec-wait  { border-left: 3px solid var(--text-3); }
+/* Card header row */
+.sc-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.sc-pair {
+    font-weight: 700; font-size: 14px; color: var(--text-1); letter-spacing: -.3px;
+}
+.sc-price {
+    font-family: var(--mono); font-size: 12px; color: var(--text-2);
+}
+/* Decision chip */
+.sc-decision {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 10px;
+    border: 1px solid transparent;
+}
+.sc-dec-icon { font-size: 18px; line-height: 1; }
+.sc-dec-label {
+    font-weight: 800; font-size: 15px; letter-spacing: .3px;
+}
+.sc-dec-sub {
+    font-size: 10.5px; font-family: var(--mono); opacity: .7; margin-top: 1px;
+}
+.sc-size-pill {
+    font-size: 9.5px; font-weight: 700; padding: 2px 8px;
+    border-radius: 8px; border: 1px solid currentColor; opacity: .85;
+    letter-spacing: .4px; text-transform: uppercase;
+}
+/* Entry historical row */
+.sc-entry {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 8px 10px;
+    background: rgba(167,139,250,.06);
+    border-left: 2px solid var(--accent-purple);
+    border-radius: 0 8px 8px 0;
+}
+.sc-entry-icon { font-size: 12px; margin-top: 1px; }
+.sc-entry-body { flex: 1; min-width: 0; }
+.sc-entry-label {
+    font-size: 9px; font-weight: 700; color: var(--accent-purple);
+    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px;
+}
+.sc-entry-signal { font-size: 11.5px; font-weight: 700; }
+.sc-entry-time {
+    font-size: 9.5px; color: var(--text-3); font-family: var(--mono); margin-top: 1px;
+}
+/* Footer */
+.sc-footer {
+    display: flex; justify-content: flex-end;
+}
 @media print { .btn, .tabs, .loading-overlay, .alert-banner, .modal-overlay { display: none !important; } }
 </style>
 </head>
@@ -491,24 +573,10 @@ tbody tr:last-child td { border-bottom: none; }
             <span class="chevron">▼</span>
         </div>
         <div id="scannerContent" class="section-body">
-            <div class="glass data-card" style="margin-bottom: 20px;">
-                <div class="table-scroll">
-                    <table id="scannerTable">
-                        <thead>
-                            <tr>
-                                <th style="text-align:left; width:18%">Coin Pair</th>
-                                <th style="text-align:center; width:15%">Harga Saat Ini</th>
-                                <th style="text-align:left; width:42%">Saran Keputusan</th>
-                                <th style="text-align:center; width:25%">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody id="scannerTableBody">
-                            <tr><td colspan="4" style="text-align:center;color:var(--text-3);padding:30px">
-                                <div class="spinner" style="width:24px;height:24px;border-width:2px;margin:0 auto 10px;"></div>
-                                Mengumpulkan data indikator untuk semua koin...
-                            </td></tr>
-                        </tbody>
-                    </table>
+            <div id="scannerGrid">
+                <div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px">
+                    <div class="spinner" style="width:28px;height:28px;border-width:2px;margin:0 auto 14px;"></div>
+                    Mengumpulkan data indikator untuk semua koin...
                 </div>
             </div>
         </div>
