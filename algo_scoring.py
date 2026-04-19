@@ -192,7 +192,24 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
 
     if ml_engine is not None and df_m15 is not None:
         try:
-            r         = ml_engine.predict(symbol=symbol, df_m15=df_m15)
+            # Inject derivatives into df_m15 from df (4H base) to prevent NaN/zeros
+            if _has_col(df, 'Open_Interest'):
+                df_m15['open_interest'] = float(last['Open_Interest'])
+            if _has_col(df, 'Long_Short_Ratio'):
+                df_m15['long_short_ratio'] = float(last['Long_Short_Ratio'])
+            
+            # Extract macro
+            fr = safe_float(last.get('Funding_Rate')) if _has_col(df, 'Funding_Rate') else None
+            btcd = safe_float(last.get('BTC_Dominance')) if _has_col(df, 'BTC_Dominance') else None
+            fg = safe_float(last.get('Fear_Greed')) if _has_col(df, 'Fear_Greed') else None
+
+            r = ml_engine.predict(
+                symbol=symbol, 
+                df_m15=df_m15, 
+                funding_rate=fr, 
+                btc_dominance=btcd, 
+                fear_greed=fg
+            )
             ml_signal = r.get('signal',     'FLAT')
             ml_size   = r.get('size',       'SKIP')
             ml_conf   = r.get('confidence', 0.0)
