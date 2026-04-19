@@ -39,6 +39,8 @@ async function fetchData() {
         renderKillSwitch(json);
         renderQuantAnalysis(json.state?.quant_analysis, json.state);
         renderEmergency(json.state?.quant_analysis, json.state);
+        // [INTEGRASI] Update confidence chart di panel detail
+        loadDetailConfidenceChart(currentBackendPair);
     } catch (e) {
         showAlert('danger', '❌ ' + e.message);
         console.error(e);
@@ -284,6 +286,10 @@ function renderQuantAnalysis(quant, state) {
             <div class="feature-bar-bg" style="width:60px; margin-left:10px"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
             </div>`;
     }
+
+    // [INTEGRASI] Placeholder untuk Confidence History Chart di panel detail
+    html += `<div id="detailConfChart" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.05); padding-top:16px;"></div>`;
+
     document.getElementById('featureGrid').innerHTML = html;
     // SL/TP Levels
     const lv = data.levels;
@@ -869,114 +875,87 @@ async function fetchScannerData() {
             return;
         }
 
-        grid.innerHTML = json.data.map(d => {
-            // ── Error state ──
-            if (d.error) {
-                return `<div class="scanner-card dec-wait">
-                    <div class="sc-header">
-                        <span class="sc-pair">${d.pair}</span>
-                        <span style="color:var(--accent-red);font-size:11px">⚠️ Error memuat data</span>
-                    </div>
-                </div>`;
-            }
-
-            // ── Raw ML data ──
+        // Grouping data
+        const groups = { LONG: [], SHORT: [], WAIT: [] };
+        json.data.forEach(d => {
+            if (d.error) { groups.WAIT.push(d); return; }
             const mlSignal  = d.ml_signal  || 'FLAT';
-            const mlConf    = d.ml_confidence || 0;
             const mlSize    = d.ml_size    || 'SKIP';
             const mlSignalS = d.ml_signal_s || 'FLAT';
-            const mlConfS   = d.ml_confidence_s || 0;
             const mlSizeS   = d.ml_size_s  || 'SKIP';
 
-            // ── Logika Saran Keputusan ──
-            const longActive  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
-            const shortActive = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
+            const isLong  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
+            const isShort = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
 
-            let decIcon, decLabel, decColor, decConf, decSize, decBg, decBorder, cardClass;
-            if (longActive) {
-                decIcon   = '🟢'; decLabel = 'LONG';  decColor = '#34d399';
-                decConf   = mlConf; decSize = mlSize;
-                decBg     = 'rgba(52,211,153,.08)'; decBorder = 'rgba(52,211,153,.25)';
-                cardClass = 'dec-long';
-            } else if (shortActive) {
-                decIcon   = '🔴'; decLabel = 'SHORT'; decColor = '#f87171';
-                decConf   = mlConfS; decSize = mlSizeS;
-                decBg     = 'rgba(248,113,113,.08)'; decBorder = 'rgba(248,113,113,.25)';
-                cardClass = 'dec-short';
-            } else {
-                decIcon   = '⚪'; decLabel = 'WAIT';  decColor = 'var(--text-3)';
-                decConf   = Math.max(mlConf, mlConfS); decSize = null;
-                decBg     = 'rgba(255,255,255,.03)'; decBorder = 'var(--glass-border)';
-                cardClass = 'dec-wait';
-            }
+            if (isLong) groups.LONG.push(d);
+            else if (isShort) groups.SHORT.push(d);
+            else groups.WAIT.push(d);
+        });
 
-            // ── Pill ukuran posisi ──
-            const sizePill = decSize
-                ? `<span class="sc-size-pill" style="color:${decColor}">${decSize}</span>` : '';
-
-            // ── Historical Entry Signal ──
-            const histType = d.last_signal_type;
-            const histConf = d.last_signal_conf;
-            const histTs   = d.last_signal_ts;
-            let entryHtml  = '';
-            if (histType) {
-                const isLong   = histType.startsWith('LONG');
-                const histClr  = isLong ? '#34d399' : '#f87171';
-                const histC100 = histConf != null ? (histConf * 100).toFixed(1) : '—';
-                let timeShort  = '—';
-                if (histTs) {
-                    timeShort = new Intl.DateTimeFormat('en-GB', {
-                        timeZone: 'Asia/Makassar',
-                        day: '2-digit', month: '2-digit',
-                        hour: '2-digit', minute: '2-digit', hour12: false
-                    }).format(new Date(histTs * 1000)).replace(',', '') + ' WITA';
+        const renderGroup = (label, coins, color) => {
+            if (!coins.length) return '';
+            const coinHtml = coins.map(d => {
+                if (d.error) {
+                    return `<div class="scanner-card dec-wait">
+                        <div class="sc-header"><span class="sc-pair">${d.pair}</span><span style="color:var(--accent-red);font-size:11px">⚠️ Error</span></div>
+                    </div>`;
                 }
-                entryHtml = `<div class="sc-entry">
-                    <div class="sc-entry-body">
-                        <div class="sc-entry-label">⏳ Entry Terakhir (Telegram)</div>
-                        <div class="sc-entry-signal" style="color:${histClr}">${histType}
-                            <span style="color:var(--text-3);font-weight:400;font-size:10.5px">&nbsp;${histC100}% conf</span>
+                const mlSignal  = d.ml_signal  || 'FLAT';
+                const mlConf    = d.ml_confidence || 0;
+                const mlSize    = d.ml_size    || 'SKIP';
+                const mlSignalS = d.ml_signal_s || 'FLAT';
+                const mlConfS   = d.ml_confidence_s || 0;
+                const mlSizeS   = d.ml_size_s  || 'SKIP';
+
+                const longActive  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
+                const shortActive = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
+
+                let decIcon, decLabel, decColor, decConf, decSize, decBg, decBorder, cardClass;
+                if (longActive) {
+                    decIcon = '🟢'; decLabel = 'LONG'; decColor = '#34d399'; decConf = mlConf; decSize = mlSize;
+                    decBg = 'rgba(52,211,153,.08)'; decBorder = 'rgba(52,211,153,.25)'; cardClass = 'dec-long';
+                } else if (shortActive) {
+                    decIcon = '🔴'; decLabel = 'SHORT'; decColor = '#f87171'; decConf = mlConfS; decSize = mlSizeS;
+                    decBg = 'rgba(248,113,113,.08)'; decBorder = 'rgba(248,113,113,.25)'; cardClass = 'dec-short';
+                } else {
+                    decIcon = '⚪'; decLabel = 'WAIT'; decColor = 'var(--text-3)'; decConf = Math.max(mlConf, mlConfS); decSize = null;
+                    decBg = 'rgba(255,255,255,.03)'; decBorder = 'var(--glass-border)'; cardClass = 'dec-wait';
+                }
+
+                const sizePill = decSize ? `<span class="sc-size-pill" style="color:${decColor}">${decSize}</span>` : '';
+                const histTs = d.last_signal_ts;
+                let entryHtml = '';
+                if (d.last_signal_type) {
+                    const isL = d.last_signal_type.startsWith('LONG');
+                    const hClr = isL ? '#34d399' : '#f87171';
+                    const hTs = histTs ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Makassar', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(histTs * 1000)).replace(',', '') + ' WITA' : '—';
+                    entryHtml = `<div class="sc-entry"><div class="sc-entry-body"><div class="sc-entry-label">⏳ Entry Terakhir</div><div class="sc-entry-signal" style="color:${hClr}">${d.last_signal_type}</div><div class="sc-entry-time">@ ${hTs}</div></div></div>`;
+                }
+
+                return `<div class="scanner-card ${cardClass}">
+                    <div class="sc-header">
+                        <div><div class="sc-pair">${d.pair}</div><div class="sc-price">$${d.close.toFixed(5)}</div></div>
+                        <div class="sc-decision" style="background:${decBg};border-color:${decBorder}">
+                            <span class="sc-dec-icon">${decIcon}</span>
+                            <div><div style="display:flex;align-items:center;gap:6px"><span class="sc-dec-label" style="color:${decColor}">${decLabel}</span>${sizePill}</div><div class="sc-dec-sub" style="color:${decColor}">${(decConf*100).toFixed(1)}% conf</div></div>
                         </div>
-                        <div class="sc-entry-time">@ ${timeShort}</div>
+                    </div>
+                    ${entryHtml}
+                    <div class="sc-footer">
+                        <button class="btn btn-primary" style="padding:5px 16px;font-size:11px;border-radius:18px" onclick="openDetailWithHistory('${d.pair}')">Analisis Detail &#x1F50D;</button>
                     </div>
                 </div>`;
-            }
+            }).join('');
 
-            return `<div class="scanner-card ${cardClass}">
-                <!-- Header: Pair + Harga -->
-                <div class="sc-header">
-                    <div>
-                        <div class="sc-pair">${d.pair} ${d.incomplete ? '<span style="color:var(--accent-yellow);font-size:11px">⚠️</span>' : ''}</div>
-                        <div class="sc-price">$${d.close.toFixed(5)}</div>
-                    </div>
-                    <!-- Decision chip -->
-                    <div class="sc-decision" style="background:${decBg};border-color:${decBorder}">
-                        <span class="sc-dec-icon">${decIcon}</span>
-                        <div>
-                            <div style="display:flex;align-items:center;gap:6px">
-                                <span class="sc-dec-label" style="color:${decColor}">${decLabel}</span>
-                                ${sizePill}
-                            </div>
-                            <div class="sc-dec-sub" style="color:${decColor}">${(decConf*100).toFixed(1)}% conf</div>
-                        </div>
-                    </div>
-                </div>
-                <!-- Historical entry -->
-                ${entryHtml}
-                <!-- Footer: Aksi -->
-                <div class="sc-footer">
-                    <button class="btn btn-primary" style="padding:5px 16px;font-size:11px;border-radius:18px"
-                        onclick="openDetailWithHistory('${d.pair}')">
-                        Analisis Detail &#x1F50D;
-                    </button>
-                    <button class="btn" style="padding:5px 10px;font-size:11px;border-radius:18px;background:rgba(99,125,255,.12);border:1px solid rgba(99,125,255,.25);color:var(--accent-blue)"
-                        onclick="toggleConfChart('${d.pair}')" id="conf-btn-${d.pair}">
-                        📈 History
-                    </button>
-                </div>
-                <div id="conf-chart-${d.pair}" style="display:none;margin-top:8px"></div>
-            </div>`;
-        }).join('');
+            return `<div style="grid-column:1/-1;margin-top:20px;margin-bottom:10px;display:flex;align-items:center;gap:12px">
+                <div style="width:4px;height:24px;background:${color};border-radius:2px"></div>
+                <h3 style="font-size:16px;margin:0;color:var(--text-1);letter-spacing:.5px">${label} <span style="font-size:12px;color:var(--text-3);font-weight:400">(${coins.length})</span></h3>
+            </div>${coinHtml}`;
+        };
+
+        grid.innerHTML = renderGroup('🟢 SETUPS LONG', groups.LONG, '#34d399') +
+                         renderGroup('🔴 SETUPS SHORT', groups.SHORT, '#f87171') +
+                         renderGroup('⚪ WATCHLIST / WAIT', groups.WAIT, 'var(--text-3)');
 
     } catch (e) {
         grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--accent-red);padding:40px">❌ Error Scanner: ${e.message}</div>`;
@@ -994,7 +973,27 @@ function openDetailWithHistory(pair) {
     setTimeout(() => {
         const sec = document.getElementById('sectionScanner') || document.getElementById('quantPanel');
         if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+        // Muat history confidence untuk panel detail
+        loadDetailConfidenceChart(pair);
     }, 400);
+}
+
+async function loadDetailConfidenceChart(pair) {
+    const container = document.getElementById('detailConfChart');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;color:var(--text-3);font-size:11px;padding:10px">⏳ Memuat history...</div>';
+    try {
+        const res = await fetch(`/api/confidence-history/${pair}`);
+        const json = await res.json();
+        if (json.success && json.data.length) {
+            container.innerHTML = renderConfidenceChart(pair, json.data, 340); // Ukuran lebih lebar untuk panel detail
+        } else {
+            container.innerHTML = ''; // Sembunyikan jika tidak ada data
+        }
+    } catch (e) {
+        console.error("Detail chart error:", e);
+        container.innerHTML = '';
+    }
 }
 
 const _confChartOpen = {};   // track open state per pair
@@ -1036,10 +1035,10 @@ async function toggleConfChart(pair) {
     }
 }
 
-function renderConfidenceChart(pair, data) {
+function renderConfidenceChart(pair, data, customWidth = 280) {
     if (!data || !data.length) return '<div style="color:var(--text-3);font-size:11px;padding:8px">Tidak ada data</div>';
 
-    const W = 280, H = 80, PAD = 12;
+    const W = customWidth, H = 80, PAD = 12;
     const n = data.length;
     const confs = data.map(d => d.ml_conf * 100);
     const minC = Math.max(0,  Math.min(...confs) - 5);
