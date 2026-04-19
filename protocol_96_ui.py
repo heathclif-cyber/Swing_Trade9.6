@@ -92,6 +92,28 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Protocol_9.6_UI")
 
+# ── Shared enrichment cache (TTL 5 menit) — scanner & detail pakai snapshot yang sama ──
+_enrichment_cache: dict = {}   # {pair: {"df": df_quant, "meta": data_meta, "ts": float, "m15": df_m15}}
+_CACHE_TTL = 300               # detik (5 menit)
+
+def _get_enriched_data(pair: str, force_refresh: bool = False):
+    """Return (df_quant, data_meta, df_m15) dari cache atau fetch baru.
+    Menjamin scanner dan detail selalu pakai snapshot yang sama."""
+    now = time.time()
+    cached = _enrichment_cache.get(pair)
+    if not force_refresh and cached and (now - cached["ts"]) < _CACHE_TTL:
+        return cached["df"], cached["meta"], cached["m15"]
+    # Fetch baru
+    df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
+    df_m15 = None
+    try:
+        _raw = get_klines_rest(pair, '15m', limit=300)
+        df_m15 = _normalize_m15_columns(_raw)
+    except Exception as _em:
+        logger.warning(f'[Cache] Gagal fetch M15 untuk {pair}: {_em}')
+    _enrichment_cache[pair] = {"df": df_quant, "meta": data_meta, "m15": df_m15, "ts": now}
+    return df_quant, data_meta, df_m15
+
 # ── Auto-start Signal Monitor on first request ──────────────
 # Teknik ini lebih andal daripada Gunicorn post_fork hook karena
 # berjalan di dalam worker process setelah fork selesai.
@@ -928,7 +950,7 @@ def api_data():
         logger.info("  [APEX] Executing 71-Point Quantitative Algorithm (SSOT)...")
         _data_warning: dict = {}
         try:
-            df_quant, data_meta = enrichment.get_fully_enriched_data(coin_pair, interval="4h", limit=250)
+            df_quant, data_meta, _df_m15_quant = _get_enriched_data(coin_pair)
 
             # Ekspos data warning ke response JSON agar UI bisa menampilkannya
             if data_meta.get("data_incomplete"):
@@ -945,12 +967,6 @@ def api_data():
                     'AVG_ENTRY_PRICE': entry_summary.get('rolling_avg_cost') if entry_summary.get('remaining_qty', 0) > 0 else None,
                     'ENTRY_DATE': None,
                 }
-                try:
-                    _df_m15_raw = get_klines_rest(coin_pair, '15m', limit=300)
-                    _df_m15_quant = _normalize_m15_columns(_df_m15_raw)
-                except Exception as _em15:
-                    logger.warning(f'[APEX] Gagal fetch M15 untuk ML: {_em15}')
-                    _df_m15_quant = None
                 quant_results = algo_scoring.calculate_71point_score(
                     df_quant, meta, df_m15=_df_m15_quant, ml_engine=_ui_ml_engine
                 )
@@ -1623,41 +1639,35 @@ def api_scanner():
 
     def analyze_coin(pair):
         try:
-            # Gunakan fungsi enrichment dan scoring (SSOT) tanpa mengubah logika algoritma
-            df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
+            # Gunakan shared cache agar data konsisten dengan /api/data (detail view)
+            df_quant, data_meta, _df_m15_scan = _get_enriched_data(pair)
             if df_quant is not None and not df_quant.empty and len(df_quant) >= 22:
-                # Meta disiapkan kosong untuk sekadar mengambil skor netral (tanpa pengaruh AVG ENTRY lama)
-                meta = {'Symbol': pair, 'AVG_ENTRY_PRICE': None, 'ENTRY_DATE': None}
-                try:
-                    _df_m15_scan = get_klines_rest(pair, '15m', limit=300)
-                    _df_m15_scan = _normalize_m15_columns(_df_m15_scan)
-                except Exception as _escan:
-                    logger.warning(f'[Scanner] Gagal fetch M15 untuk ML [{pair}]: {_escan}')
-                    _df_m15_scan = None
+                # Sertakan entry price aktif jika ada posisi — konsisten dengan detail view
+                _entry_sum = get_entry_summary(pair)
+                _avg_cost  = _entry_sum.get('rolling_avg_cost') if _entry_sum.get('remaining_qty', 0) > 0 else None
+                meta = {'Symbol': pair, 'AVG_ENTRY_PRICE': _avg_cost, 'ENTRY_DATE': None}
                 score_res = algo_scoring.calculate_71point_score(
                     df_quant, meta, df_m15=_df_m15_scan, ml_engine=_ui_ml_engine
                 )
-                
                 if score_res:
-                    # Ambil state historis sinyal dari signal_monitor (in-memory)
                     with signal_monitor._state_lock:
                         pair_state = signal_monitor._alert_state.get(pair, {})
                     return {
-                        "pair": pair,
-                        "close": float(df_quant.iloc[-1]["Close"]),
-                        "long_code": score_res["long"]["code"],
-                        "short_code": score_res["short"]["code"],
-                        "incomplete": data_meta.get("data_incomplete", False),
-                        "ml_signal":      score_res['long'].get('ml_signal', 'FLAT'),
-                        "ml_confidence":  score_res['long'].get('ml_confidence', 0.0),
-                        "ml_size":        score_res['long'].get('ml_size', 'SKIP'),
-                        "ml_proba":       score_res['long'].get('ml_proba', {}),
-                        "ml_signal_s":    score_res['short'].get('ml_signal', 'FLAT'),
-                        "ml_confidence_s":score_res['short'].get('ml_confidence', 0.0),
-                        "ml_size_s":      score_res['short'].get('ml_size', 'SKIP'),
-                        "long_score":     round(score_res['long'].get('total', 0.0), 1),
-                        "short_score":    round(score_res['short'].get('total', 0.0), 1),
-                        # ── Historical Signal State (dari Telegram alert terakhir) ──
+                        "pair":             pair,
+                        "close":            float(df_quant.iloc[-1]["Close"]),
+                        "long_code":        score_res["long"]["code"],
+                        "short_code":       score_res["short"]["code"],
+                        "incomplete":       data_meta.get("data_incomplete", False),
+                        "ml_signal":        score_res['long'].get('ml_signal', 'FLAT'),
+                        "ml_confidence":    score_res['long'].get('ml_confidence', 0.0),
+                        "ml_size":          score_res['long'].get('ml_size', 'SKIP'),
+                        "ml_proba":         score_res['long'].get('ml_proba', {}),
+                        "ml_signal_s":      score_res['short'].get('ml_signal', 'FLAT'),
+                        "ml_confidence_s":  score_res['short'].get('ml_confidence', 0.0),
+                        "ml_size_s":        score_res['short'].get('ml_size', 'SKIP'),
+                        "long_score":       round(score_res['long'].get('total', 0.0), 1),
+                        "short_score":      round(score_res['short'].get('total', 0.0), 1),
+                        # Historical Signal State (dari Telegram alert terakhir)
                         "last_signal_type": pair_state.get("last_signal", None),
                         "last_signal_ts":   pair_state.get("last_signal_ts", None),
                         "last_signal_conf": pair_state.get("last_signal_conf", None),
@@ -1665,6 +1675,7 @@ def api_scanner():
         except Exception as e:
             logger.error(f"[Scanner] Error analyzing {pair}: {e}")
         return {"pair": pair, "error": True}
+
 
     # Eksekusi paralel agar tidak memblokir UI dan menghemat waktu
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
