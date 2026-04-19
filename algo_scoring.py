@@ -19,7 +19,7 @@ from core.momentum import (
     calculate_trailing_sl_long, calculate_trailing_sl_short,
     detect_sl_wick_fakeout
 )
-from core.levels import get_atr_projections_long, get_atr_projections_short
+from core.levels import get_atr_projections_long, get_atr_projections_short, get_entry_based_sl
 
 
 def calculate_71point_score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
@@ -169,10 +169,20 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
     sl_atr15_S = close_price + atr * 1.5
     sl_atr2_S  = close_price + atr * 2.0
 
-    sl_struct_L = dyn_buy_liq  if dyn_buy_liq  is not None else sl_atr15_L
-    sl_struct_S = dyn_sell_liq if dyn_sell_liq is not None else sl_atr15_S
-    sl_label_L  = "Dynamic Buy Liq"  if dyn_buy_liq  is not None else "ATR×1.5"
-    sl_label_S  = "Dynamic Sell Liq" if dyn_sell_liq is not None else "ATR×1.5"
+    # [UPDATE] Saat posisi aktif: gunakan SL berbasis entry (entry ± 1×ATR).
+    # Saat tidak ada posisi: gunakan dynamic buy/sell liq sebagai SL struktural.
+    if is_active:
+        _sl_entry_L, _sl_entry_label_L = get_entry_based_sl(entry_val, atr, ATR_MULT, direction='LONG')
+        _sl_entry_S, _sl_entry_label_S = get_entry_based_sl(entry_val, atr, ATR_MULT, direction='SHORT')
+        sl_struct_L = _sl_entry_L
+        sl_struct_S = _sl_entry_S
+        sl_label_L  = _sl_entry_label_L
+        sl_label_S  = _sl_entry_label_S
+    else:
+        sl_struct_L = dyn_buy_liq  if dyn_buy_liq  is not None else sl_atr15_L
+        sl_struct_S = dyn_sell_liq if dyn_sell_liq is not None else sl_atr15_S
+        sl_label_L  = "Dynamic Buy Liq"  if dyn_buy_liq  is not None else "ATR×1.5"
+        sl_label_S  = "Dynamic Sell Liq" if dyn_sell_liq is not None else "ATR×1.5"
 
     # ── TP levels ───────────────────────────────────────────────────────────
     tp_long  = get_atr_projections_long(

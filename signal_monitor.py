@@ -357,13 +357,17 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
         with _state_lock:
             state = _alert_state.setdefault(symbol, {
-                "last_long_signal":  None,
-                "last_short_signal": None,
-                "last_signal":       None,
-                "exit_alerted":      False,
-                "tp1_alerted":       False,
-                "tp2_alerted":       False,
-                "tp3_alerted":       False,
+                "last_long_signal":   None,
+                "last_short_signal":  None,
+                "last_signal":        None,
+                "exit_alerted":       False,
+                "tp1_alerted":        False,
+                "tp2_alerted":        False,
+                "tp3_alerted":        False,
+                "entry_recorded_ts":  None,   # Unix ts saat user catat entry posisi
+                "entry_reminder_12h": False,  # Sudah kirim reminder 12 jam pertama?
+                "entry_expired_sent": False,  # Sudah kirim notif expired?
+                "entry_pos_side":     None,   # Sisi posisi yang dicatat user (LONG/SHORT)
             })
 
             # Helper untuk PnL dinamis
@@ -372,6 +376,108 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 if pos_side == "SHORT":
                     return f"{((avg_entry/close_price)-1)*100:+.2f}%"
                 return f"{((close_price/avg_entry)-1)*100:+.2f}%"
+
+            # ── [ENTRY TRACKER] Deteksi posisi baru / reset saat posisi tutup ──
+            #  Saat user mencatat entry (is_active baru menjadi True), catat timestamp.
+            if is_active and state.get("entry_recorded_ts") is None:
+                # Gunakan tanggal entry terbaru dari data aktual user (lebih akurat dari now_ts)
+                _last_entry_date = entry_list[-1].get("date") if entry_list else None
+                try:
+                    from datetime import datetime as _dt
+                    _entry_ts = _dt.strptime(_last_entry_date, "%Y-%m-%d %H:%M:%S").timestamp() \
+                        if _last_entry_date else now_ts
+                except Exception:
+                    _entry_ts = now_ts
+                state["entry_recorded_ts"]  = _entry_ts
+                state["entry_reminder_12h"] = False
+                state["entry_expired_sent"] = False
+                state["entry_pos_side"]     = pos_side
+                _save_alert_state(_alert_state)
+                logger.info(f"[{symbol}] Entry dicatat — pos_side={pos_side} entry_ts={_entry_ts}")
+            elif not is_active and state.get("entry_recorded_ts") is not None:
+                # Posisi ditutup — reset tracker
+                state["entry_recorded_ts"]  = None
+                state["entry_reminder_12h"] = False
+                state["entry_expired_sent"] = False
+                state["entry_pos_side"]     = None
+                _save_alert_state(_alert_state)
+
+            # ── [12-JAM REMINDER] Kirim update status 12 jam setelah entry ──
+            ENTRY_REMINDER_HOURS = 12
+            ENTRY_REMINDER_SECS  = ENTRY_REMINDER_HOURS * 3600
+            entry_ts = state.get("entry_recorded_ts")
+            if (is_active and entry_ts is not None
+                    and not state.get("entry_expired_sent")
+                    and (now_ts - entry_ts) >= ENTRY_REMINDER_SECS):
+
+                # Tentukan current ML signal berdasarkan posisi user
+                cur_ml_signal = variables.get("ml_signal", "FLAT")
+                cur_ml_size   = variables.get("ml_size",   "SKIP")
+
+                # Deteksi apakah sinyal berbalik arah dari posisi user
+                recorded_side  = state.get("entry_pos_side", pos_side)
+                signal_reversed = (
+                    (recorded_side == "LONG"  and cur_ml_signal == "SHORT") or
+                    (recorded_side == "SHORT" and cur_ml_signal == "LONG")
+                )
+
+                elapsed_h = (now_ts - entry_ts) / 3600
+                wib_now   = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y %H:%M WITA")
+
+                if signal_reversed:
+                    # === SIGNAL EXPIRED ===
+                    lvl_pos = lvl_S if recorded_side == "SHORT" else lvl_L
+                    _send_telegram(
+                        f"🔄 <b>SIGNAL EXPIRED — {symbol}</b>\n"
+                        f"{'─'*30}\n"
+                        f"⏱️ {wib_now}\n"
+                        f"⌛ Posisi dibuka <b>{elapsed_h:.1f} jam</b> lalu\n"
+                        f"{'─'*30}\n"
+                        f"📌 Posisi Anda : <b>{recorded_side}</b>\n"
+                        f"🤖 Signal ML kini: <b>{cur_ml_signal}</b> ({cur_ml_size}) — BERLAWANAN ARAH\n\n"
+                        f"⚠️ <b>Signal dinyatakan EXPIRED</b>\n"
+                        f"Harga saat ini : <b>${close_price:.6f}</b>\n"
+                        f"PnL Floating   : <b>{get_pnl()}</b>\n"
+                        f"SL : ${lvl_pos['sl_structure']:.6f} [{lvl_pos['sl_label']}]\n\n"
+                        f"📋 <b>Rekomendasi:</b> Tinjau ulang posisi. "
+                        f"Pertimbangkan close atau cut loss jika SL sudah tersentuh."
+                    )
+                    state["entry_expired_sent"] = True
+                    _save_alert_state(_alert_state)
+
+                elif not state.get("entry_reminder_12h"):
+                    # === REMINDER 12 JAM — Sinyal masih searah (HALF/FULL) ===
+                    lvl_pos    = lvl_S if pos_side == "SHORT" else lvl_L
+                    signal_ok  = cur_ml_signal in ("LONG", "SHORT") and cur_ml_size in ("HALF", "FULL")
+                    status_str = (
+                        f"✅ <b>Signal MASIH AKTIF</b> — {cur_ml_signal} {cur_ml_size}"
+                        if signal_ok else
+                        f"⚠️ <b>Signal MELEMAH</b> — ML: {cur_ml_signal} ({cur_ml_size})"
+                    )
+                    tp1 = lvl_pos['tp1']
+                    sl  = lvl_pos['sl_structure']
+                    _send_telegram(
+                        f"⏰ <b>REMINDER 12 JAM — {symbol} ({pos_side})</b>\n"
+                        f"{'─'*30}\n"
+                        f"📅 {wib_now}\n"
+                        f"⌛ Posisi dibuka <b>{elapsed_h:.1f} jam</b> lalu\n"
+                        f"{'─'*30}\n"
+                        f"💲 Harga saat ini: <b>${close_price:.6f}</b>\n"
+                        f"💰 PnL Floating  : <b>{get_pnl()}</b>\n"
+                        f"{'─'*30}\n"
+                        f"{status_str}\n\n"
+                        f"🎯 TP1 : ${tp1:.6f} (+{lvl_pos['dist_tp1']:.2f}%)\n"
+                        f"🛡️ SL  : ${sl:.6f} | R:R {lvl_pos['rr1']:.2f}×\n\n"
+                        f"📊 ML Conf: {variables.get('ml_confidence', 0)*100:.1f}% "
+                        f"| Size: {cur_ml_size}\n"
+                        f"{'─'*30}\n"
+                        f"<i>Cek kembali posisi dan pertimbangkan management risiko.</i>"
+                    )
+                    state["entry_reminder_12h"] = True
+                    # Geser window ke 12 jam berikutnya — reset flag agar siklus 12h berulang
+                    state["entry_recorded_ts"]  = now_ts
+                    state["entry_reminder_12h"] = False  # reset agar 12 jam berikutnya bisa kirim lagi
+                    _save_alert_state(_alert_state)
 
             # ── SL WICK FAKEOUT ALERT ──
             if is_active and sl_wick.get("sl_touched_wick") and not state.get("wick_alerted"):
@@ -621,6 +727,23 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _save_alert_state(_alert_state)
                 return
 
+            # ── [CONFIDENCE HISTORY] Catat confidence score tiap siklus ──
+            # Simpan hanya 12 jam (48 titik @ 15 menit). Auto-purge data lama.
+            _HIST_TTL_SECS = 12 * 3600  # 12 jam
+            _hist_all = _alert_state.setdefault("confidence_history", {})
+            _hist_sym = _hist_all.setdefault(symbol, [])
+            _hist_sym.append({
+                "ts":         now_ts,
+                "ml_signal":  variables.get("ml_signal",     "FLAT"),
+                "ml_conf":    variables.get("ml_confidence", 0.0),
+                "ml_size":    variables.get("ml_size",       "SKIP"),
+                "close":      close_price,
+            })
+            # Purge data yang lebih lama dari 24 jam
+            cutoff = now_ts - _HIST_TTL_SECS
+            _hist_all[symbol] = [p for p in _hist_sym if p["ts"] >= cutoff]
+            _save_alert_state(_alert_state)
+
             logger.info(
                 f"[{symbol}] L={adj_L:.0f} ({code_L}) | S={adj_S:.0f} ({code_S})"
                 f" | ${close_price:.4f} — no signal"
@@ -687,6 +810,19 @@ def start_background_monitor() -> threading.Thread | None:
     t.start()
     logger.info(f"✅ SignalMonitor thread started (id={t.ident})")
     return t
+
+
+def get_confidence_history(symbol: str, hours: int = 12) -> list:
+    """
+    Kembalikan history confidence score untuk symbol tertentu.
+    Data sudah otomatis dipurge tiap siklus — hanya 12 jam terakhir.
+    hours: window waktu yang diminta (default 12, max 12).
+    """
+    cutoff = time.time() - (min(hours, 12) * 3600)
+    with _state_lock:
+        hist_all = _alert_state.get("confidence_history", {})
+        hist = hist_all.get(symbol.upper(), [])
+        return [p for p in hist if p.get("ts", 0) >= cutoff]
 
 
 # ============================================================

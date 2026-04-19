@@ -1,4 +1,5 @@
 # core/levels.py
+# [UPDATE] TP1 = Entry ± 2×ATR | SL = Entry ∓ 1×ATR
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ def get_atr_projections_long(entry_val, atr, atr_mult, close_price=None, macro_t
     _tp3_anchor = close_price if (close_price is not None and close_price > 0) else entry_val
     _used_fallback = (close_price is None or close_price <= 0)
 
-    tp1 = entry_val + (atr * 1.5 * atr_mult)
+    tp1 = entry_val + (atr * 2.0 * atr_mult)  # [UPDATE] was 1.5×, kini 2×ATR
     tp2 = entry_val + (atr * 3.0 * atr_mult)
     tp3 = _tp3_anchor + (atr * 8.0 * atr_mult)  # [FIX P9.7] was entry_val + atr*5.0
 
@@ -49,7 +50,7 @@ def get_atr_projections_long(entry_val, atr, atr_mult, close_price=None, macro_t
         )
 
     return [
-        (tp1, "ATR Projection (+1.5x)"),
+        (tp1, "ATR Projection (+2.0x)"),
         (tp2, "ATR Projection (+3.0x)"),
         (tp3, f"ATR Projection (+8.0x){' [OVERRIDE 10x UPTREND]' if _tp3_overridden else ''} [FIX P9.7]"),
     ]
@@ -63,7 +64,7 @@ def get_atr_projections_short(entry_val, atr, atr_mult, close_price=None):
     _tp3_anchor = close_price if (close_price is not None and close_price > 0) else entry_val
     _used_fallback = (close_price is None or close_price <= 0)
 
-    tp1 = entry_val - (atr * 1.5 * atr_mult)
+    tp1 = entry_val - (atr * 2.0 * atr_mult)  # [UPDATE] was 1.5×, kini 2×ATR
     tp2 = entry_val - (atr * 3.0 * atr_mult)
     tp3 = _tp3_anchor - (atr * 8.0 * atr_mult)  # [FIX P9.7] was entry_val - atr*5.0
 
@@ -75,7 +76,24 @@ def get_atr_projections_short(entry_val, atr, atr_mult, close_price=None):
         )
 
     return [
-        (tp1, "ATR Projection (-1.5x)"),
+        (tp1, "ATR Projection (-2.0x)"),
         (tp2, "ATR Projection (-3.0x)"),
         (tp3, "ATR Projection (-8.0x) [FIX P9.7]"),
     ]
+
+
+def get_entry_based_sl(entry_val: float, atr: float, atr_mult: float, direction: str = 'LONG') -> tuple:
+    """
+    Hitung SL awal berbasis entry price:
+      LONG : SL = entry - 1×ATR   (harga turun 1×ATR dari entry)
+      SHORT: SL = entry + 1×ATR   (harga naik 1×ATR dari entry)
+    Return (sl_value, label)
+    """
+    raw_atr = atr * atr_mult
+    if direction == 'SHORT':
+        sl = entry_val + (raw_atr * 1.0)
+        label = "Entry + 1×ATR (SL SHORT)"
+    else:
+        sl = entry_val - (raw_atr * 1.0)
+        label = "Entry − 1×ATR (SL LONG)"
+    return (round(sl, 8), label)

@@ -520,9 +520,9 @@ function renderCSVResult(json) {
                 <div class="level-pill"><span>Ketat</span><span class="val-neg">$${lv.sl_ketat.toFixed(5)}</span></div>
                 <div class="level-pill"><span>Normal</span><span class="val-neg">$${lv.sl_normal.toFixed(5)}</span></div>
                 <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:10px 0 6px">Take Profit</div>
-                <div class="level-pill"><span>TP1 ${tab === 'long' ? '+' : '−'}2.5%</span><span class="val-pos">$${lv.tp1.toFixed(5)}</span></div>
-                <div class="level-pill"><span>TP2 ${tab === 'long' ? '+' : '−'}4.6%</span><span class="val-pos">$${lv.tp2.toFixed(5)}</span></div>
-                <div class="level-pill"><span>TP3 ${tab === 'long' ? '+' : '−'}7.0%</span><span class="val-pos">$${lv.tp3.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP1 <span style="font-size:10px;color:var(--text-3)">${lv.tp1_label || (tab === 'long' ? '+2.0×ATR' : '−2.0×ATR')}</span></span><span class="val-pos">$${lv.tp1.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP2 <span style="font-size:10px;color:var(--text-3)">${lv.tp2_label || (tab === 'long' ? '+3.0×ATR' : '−3.0×ATR')}</span></span><span class="val-pos">$${lv.tp2.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP3 <span style="font-size:10px;color:var(--text-3)">${lv.tp3_label || (tab === 'long' ? '+8.0×ATR' : '−8.0×ATR')}</span></span><span class="val-pos">$${lv.tp3.toFixed(5)}</span></div>
                 ${rrHtml ? `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:10px 0 6px">R:R Matrix</div>${rrHtml}` : ''}</div>
             ${json.exit?.signals?.length > 0 && isActive ? `<div style="margin-top:12px;border-top:1px solid var(--glass-border);padding-top:12px"><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:8px">Exit Signals</div>${json.exit.signals.map(([icon, name, val, thr]) => `<div class="exit-row"><span>${icon}</span><span style="flex:1;font-size:12px">${name}</span><span style="font-size:11px;color:var(--text-3)">${typeof val === 'number' ? val.toFixed(2) : val} (${thr})</span></div>`).join('')}<div class="exit-mandate ${json.exit.hard_count > 0 ? 'mandate-exit' : json.exit.warn_count > 0 ? 'mandate-watch' : 'mandate-hold'}">${json.exit.recommendation}</div></div>` : ''}
             <div class="narrative-box ${narCls}" style="margin-top:14px;font-size:12px">
@@ -966,10 +966,15 @@ async function fetchScannerData() {
                 <!-- Footer: Aksi -->
                 <div class="sc-footer">
                     <button class="btn btn-primary" style="padding:5px 16px;font-size:11px;border-radius:18px"
-                        onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior:'smooth'});">
+                        onclick="openDetailWithHistory('${d.pair}')">
                         Analisis Detail &#x1F50D;
                     </button>
+                    <button class="btn" style="padding:5px 10px;font-size:11px;border-radius:18px;background:rgba(99,125,255,.12);border:1px solid rgba(99,125,255,.25);color:var(--accent-blue)"
+                        onclick="toggleConfChart('${d.pair}')" id="conf-btn-${d.pair}">
+                        📈 History
+                    </button>
                 </div>
+                <div id="conf-chart-${d.pair}" style="display:none;margin-top:8px"></div>
             </div>`;
         }).join('');
 
@@ -980,6 +985,145 @@ async function fetchScannerData() {
 
 
 /* ── INIT ────────────────────────────────────────────────────────────────── */
+
+/* ── CONFIDENCE HISTORY CHART ───────────────────────────────────────────── */
+function openDetailWithHistory(pair) {
+    document.getElementById('pairSelect').value = pair;
+    changePair();
+    // Scroll ke section analisis detail setelah data dimuat
+    setTimeout(() => {
+        const sec = document.getElementById('sectionScanner') || document.getElementById('quantPanel');
+        if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+    }, 400);
+}
+
+const _confChartOpen = {};   // track open state per pair
+
+async function toggleConfChart(pair) {
+    const container = document.getElementById(`conf-chart-${pair}`);
+    const btn       = document.getElementById(`conf-btn-${pair}`);
+    if (!container) return;
+
+    if (_confChartOpen[pair]) {
+        container.style.display = 'none';
+        _confChartOpen[pair] = false;
+        if (btn) btn.textContent = '📈 History';
+        return;
+    }
+
+    // Fetch data
+    container.style.display = 'block';
+    container.innerHTML = '<div style="text-align:center;color:var(--text-3);font-size:11px;padding:10px">⏳ Memuat history...</div>';
+    if (btn) btn.textContent = '⏳';
+    _confChartOpen[pair] = true;
+
+    try {
+        const res  = await fetch(`/api/confidence-history/${pair}`);
+        const json = await res.json();
+        if (!json.success || !json.data.length) {
+            container.innerHTML = `<div style="text-align:center;color:var(--text-3);font-size:11px;padding:10px">
+                📊 Belum ada data history.<br><span style="font-size:10px">Data terekam setiap 15 menit oleh signal monitor.</span>
+            </div>`;
+            if (btn) btn.textContent = '📈 History';
+            return;
+        }
+        container.innerHTML = renderConfidenceChart(pair, json.data);
+        if (btn) btn.textContent = '📉 Tutup';
+    } catch (e) {
+        container.innerHTML = `<div style="color:var(--accent-red);font-size:11px;padding:8px">❌ Error: ${e.message}</div>`;
+        if (btn) btn.textContent = '📈 History';
+        _confChartOpen[pair] = false;
+    }
+}
+
+function renderConfidenceChart(pair, data) {
+    if (!data || !data.length) return '<div style="color:var(--text-3);font-size:11px;padding:8px">Tidak ada data</div>';
+
+    const W = 280, H = 80, PAD = 12;
+    const n = data.length;
+    const confs = data.map(d => d.ml_conf * 100);
+    const minC = Math.max(0,  Math.min(...confs) - 5);
+    const maxC = Math.min(100, Math.max(...confs) + 5);
+    const range = maxC - minC || 1;
+
+    const toX = i   => PAD + (i / Math.max(n - 1, 1)) * (W - 2 * PAD);
+    const toY = val => H - PAD - ((val - minC) / range) * (H - 2 * PAD);
+
+    // Build polyline points
+    const pts = data.map((d, i) => `${toX(i).toFixed(1)},${toY(d.ml_conf * 100).toFixed(1)}`).join(' ');
+
+    // Build signal-colored dots
+    const dots = data.map((d, i) => {
+        const sig = d.ml_signal;
+        const col = sig === 'LONG' ? '#34d399' : sig === 'SHORT' ? '#f87171' : '#94a3b8';
+        const r = i === n - 1 ? 4 : 2.5;
+        const x = toX(i).toFixed(1), y = toY(d.ml_conf * 100).toFixed(1);
+        const ts = new Date(d.ts * 1000);
+        const wita = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Makassar', hour: '2-digit', minute: '2-digit', hour12: false
+        }).format(ts);
+        return `<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" opacity="0.85">
+            <title>${sig} ${(d.ml_conf * 100).toFixed(1)}% @ ${wita}</title>
+        </circle>`;
+    }).join('');
+
+    // Latest point annotation
+    const last = data[n - 1];
+    const lastX = toX(n - 1).toFixed(1);
+    const lastY = toY(last.ml_conf * 100).toFixed(1);
+    const lastCol = last.ml_signal === 'LONG' ? '#34d399' : last.ml_signal === 'SHORT' ? '#f87171' : '#94a3b8';
+    const lastTs = new Date(last.ts * 1000);
+    const firstTs = new Date(data[0].ts * 1000);
+    const fmtTime = d => new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Makassar', hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(d);
+
+    // Area fill gradient path
+    const areaPath = `M${toX(0).toFixed(1)},${H - PAD} ` +
+        data.map((d, i) => `L${toX(i).toFixed(1)},${toY(d.ml_conf * 100).toFixed(1)}`).join(' ') +
+        ` L${toX(n - 1).toFixed(1)},${H - PAD} Z`;
+
+    return `
+    <div style="background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">📊 ML Confidence — 12 Jam Terakhir</span>
+            <span style="font-size:10px;color:var(--text-3)">${n} titik data</span>
+        </div>
+        <svg width="${W}" height="${H}" style="overflow:visible;display:block">
+            <defs>
+                <linearGradient id="cgrad-${pair}" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="${lastCol}" stop-opacity="0.25"/>
+                    <stop offset="100%" stop-color="${lastCol}" stop-opacity="0"/>
+                </linearGradient>
+            </defs>
+            <!-- Grid lines -->
+            <line x1="${PAD}" y1="${toY(50).toFixed(1)}" x2="${W - PAD}" y2="${toY(50).toFixed(1)}"
+                stroke="rgba(255,255,255,.06)" stroke-width="1" stroke-dasharray="3,3"/>
+            <text x="${PAD - 2}" y="${toY(50).toFixed(1)}" fill="rgba(255,255,255,.2)"
+                font-size="8" text-anchor="end" dominant-baseline="middle">50%</text>
+            <!-- Area fill -->
+            <path d="${areaPath}" fill="url(#cgrad-${pair})"/>
+            <!-- Line -->
+            <polyline points="${pts}" fill="none" stroke="${lastCol}" stroke-width="1.5" stroke-linejoin="round"/>
+            <!-- Dots -->
+            ${dots}
+            <!-- Latest label -->
+            <text x="${lastX}" y="${parseFloat(lastY) - 8}" fill="${lastCol}"
+                font-size="9" text-anchor="middle" font-weight="bold">${(last.ml_conf * 100).toFixed(1)}%</text>
+        </svg>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-3);margin-top:2px">
+            <span>${fmtTime(firstTs)} WITA</span>
+            <span style="color:${lastCol};font-weight:700">${last.ml_signal} ${(last.ml_conf*100).toFixed(1)}%</span>
+            <span>${fmtTime(lastTs)} WITA</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+            <span style="font-size:9px;color:#34d399">● LONG</span>
+            <span style="font-size:9px;color:#f87171">● SHORT</span>
+            <span style="font-size:9px;color:#94a3b8">● FLAT</span>
+        </div>
+    </div>`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const t = localStorage.getItem('theme') || 'dark';
     document.documentElement.setAttribute('data-theme', t);

@@ -1691,6 +1691,29 @@ def api_scanner():
     return jsonify({"success": True, "data": results})
 
 
+@app.route("/api/confidence-history/<path:pair>")
+def api_confidence_history(pair: str):
+    """
+    Kembalikan history confidence score ML 24 jam terakhir untuk pair tertentu.
+    Data dicatat setiap siklus signal monitor (15 menit).
+    Format: [{ts, ml_signal, ml_conf, ml_size, close}, ...]
+    """
+    pair = pair.upper()
+    hours = int(flask_request.args.get("hours", 12))
+    try:
+        hist = signal_monitor.get_confidence_history(pair, hours=hours)
+        return jsonify({
+            "success": True,
+            "pair":    pair,
+            "hours":   hours,
+            "count":   len(hist),
+            "data":    hist,
+        })
+    except Exception as e:
+        logger.exception(f"confidence-history error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ==========================================
 # 🚀 MAIN
 # ==========================================
