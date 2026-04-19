@@ -880,52 +880,73 @@ async function fetchScannerData() {
             };
 
             // ── LIVE ML SIGNAL (dari evaluasi sekarang) ──
-            const mlSignal = d.ml_signal || 'FLAT';
-            const mlConf = d.ml_confidence || 0;
-            const mlSize = d.ml_size || 'SKIP';
+            const mlSignal  = d.ml_signal  || 'FLAT';
+            const mlConf    = d.ml_confidence || 0;
+            const mlSize    = d.ml_size    || 'SKIP';
             const mlSignalS = d.ml_signal_s || 'FLAT';
-            const mlConfS = d.ml_confidence_s || 0;
-            const mlSizeS = d.ml_size_s || 'SKIP';
-            const signalColor = mlSignal === 'LONG' ? '#34d399' : mlSignal === 'SHORT' ? '#f87171' : 'var(--text-3)';
-            const signalColorS = mlSignalS === 'SHORT' ? '#f87171' : mlSignalS === 'LONG' ? '#34d399' : 'var(--text-3)';
+            const mlConfS   = d.ml_confidence_s || 0;
+            const mlSizeS   = d.ml_size_s  || 'SKIP';
 
-            // ── HISTORICAL ENTRY SIGNAL (dari Telegram alert terakhir) ──
+            // Warna: hijau=LONG, merah=SHORT, abu=FLAT
+            const signalColor  = mlSignal  === 'LONG'  ? '#34d399' : mlSignal  === 'SHORT' ? '#f87171' : 'var(--text-3)';
+            const signalColorS = mlSignalS === 'SHORT' ? '#f87171' : mlSignalS === 'LONG'  ? '#34d399' : 'var(--text-3)';
+            const liveIcon     = mlSignal  === 'LONG'  ? '🟢' : mlSignal  === 'SHORT' ? '🔴' : '⚪';
+            const liveIconS    = mlSignalS === 'SHORT' ? '🔴' : mlSignalS === 'LONG'  ? '🟢' : '⚪';
+
+            // ── HISTORICAL ENTRY SIGNAL — Baris 2 (singkat, no-block) ──
+            // Diambil dari state signal_monitor: last_signal_type, last_signal_conf, last_signal_ts
             const histType = d.last_signal_type;
             const histConf = d.last_signal_conf;
-            const histTs = d.last_signal_ts;
-            let histHtml = '';
+            const histTs   = d.last_signal_ts;
+            let entryRow   = '';   // baris entry historis untuk kolom LONG
             if (histType) {
-                const isLong = histType.startsWith('LONG');
-                const histClr = isLong ? '#34d399' : '#f87171';
-                const histConf100 = histConf != null ? (histConf * 100).toFixed(1) : '—';
-                histHtml = `
-                    <div style="margin-top:6px;padding:5px 8px;background:rgba(99,125,255,.06);border:1px solid rgba(99,125,255,.18);border-radius:6px">
-                        <div style="font-size:9px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.5px">[ Historical Entry Signal ]</div>
-                        <div style="color:${histClr};font-weight:700;font-size:11px;margin-top:2px">
-                            ${histType} <span style="color:var(--text-3);font-weight:400">&bull; ${histConf100}% conf</span>
-                        </div>
-                        ${formatSignalTimestamp(histTs)}
-                    </div>`;
+                const isLong     = histType.startsWith('LONG');
+                const histClr    = isLong ? '#34d399' : '#f87171';
+                const histC100   = histConf != null ? (histConf * 100).toFixed(1) : '—';
+                // Format jam WITA singkat (HH:MM WITA) dari unix timestamp
+                let timeShort = '—';
+                if (histTs) {
+                    timeShort = new Intl.DateTimeFormat('en-GB', {
+                        timeZone: 'Asia/Makassar',
+                        day: '2-digit', month: '2-digit',
+                        hour: '2-digit', minute: '2-digit', hour12: false
+                    }).format(new Date(histTs * 1000)).replace(',', '') + ' WITA';
+                }
+                entryRow = `<div style="margin-top:5px;padding:4px 7px;background:rgba(167,139,250,.07);border-left:2px solid #a78bfa;border-radius:0 5px 5px 0">
+                    <div style="font-size:9px;color:#a78bfa;font-weight:700;letter-spacing:.4px">⏳ ENTRY</div>
+                    <div style="color:${histClr};font-weight:700;font-size:11px">${histType} <span style="color:var(--text-3);font-weight:400">(${histC100}%)</span></div>
+                    <div style="font-size:9.5px;color:#64748b;font-family:var(--mono)">@ ${timeShort}</div>
+                </div>`;
             }
 
             return `<tr>
                 <td style="text-align:left;font-weight:bold;color:var(--text-1);">${d.pair} ${d.incomplete ? '⚠️' : ''}</td>
                 <td style="text-align:center;font-family:var(--mono)">$${d.close.toFixed(5)}</td>
-                <td style="text-align:center">
-                    <span style="color:${signalColor};font-weight:bold">${mlSignal}${mlSize !== 'SKIP' ? ' ● ' + mlSize : ''}</span>
-                    <br><small style="color:var(--text-3)">${(mlConf * 100).toFixed(1)}% live</small>
-                    ${histHtml}
+                <td style="text-align:left;padding:8px 10px;vertical-align:top">
+                    <!-- Baris 1: LIVE — probabilitas saat ini -->
+                    <div style="display:flex;align-items:center;gap:5px">
+                        <span>${liveIcon}</span>
+                        <span style="color:${signalColor};font-weight:700;font-size:12px">LIVE: ${mlSignal}${mlSize !== 'SKIP' ? ' &#x25CF; ' + mlSize : ''}</span>
+                        <span style="color:var(--text-3);font-size:10.5px;font-family:var(--mono)">${(mlConf*100).toFixed(1)}%</span>
+                    </div>
+                    <!-- Baris 2: ENTRY — sinyal historis Telegram terakhir -->
+                    ${entryRow}
                 </td>
-                <td style="text-align:center">
-                    <span style="color:${signalColorS};font-weight:bold">${mlSignalS}${mlSizeS !== 'SKIP' ? ' ● ' + mlSizeS : ''}</span>
-                    <br><small style="color:var(--text-3)">${(mlConfS * 100).toFixed(1)}% live</small>
+                <td style="text-align:left;padding:8px 10px;vertical-align:top">
+                    <!-- Baris 1: LIVE SHORT -->
+                    <div style="display:flex;align-items:center;gap:5px">
+                        <span>${liveIconS}</span>
+                        <span style="color:${signalColorS};font-weight:700;font-size:12px">LIVE: ${mlSignalS}${mlSizeS !== 'SKIP' ? ' &#x25CF; ' + mlSizeS : ''}</span>
+                        <span style="color:var(--text-3);font-size:10.5px;font-family:var(--mono)">${(mlConfS*100).toFixed(1)}%</span>
+                    </div>
                 </td>
-                <td style="text-align:center;">
-                    <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior: 'smooth'});">
-                        Analisis 🔍
+                <td style="text-align:center;vertical-align:middle">
+                    <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior:'smooth'});">
+                        Analisis &#x1F50D;
                     </button>
                 </td>
             </tr>`;
+
         }).join('');
     } catch (e) {
         tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--accent-red);padding:24px">❌ Error Scanner: ${e.message}</td></tr>`;
