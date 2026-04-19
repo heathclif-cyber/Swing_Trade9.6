@@ -1639,6 +1639,9 @@ def api_scanner():
                 )
                 
                 if score_res:
+                    # Ambil state historis sinyal dari signal_monitor (in-memory)
+                    with signal_monitor._state_lock:
+                        pair_state = signal_monitor._alert_state.get(pair, {})
                     return {
                         "pair": pair,
                         "close": float(df_quant.iloc[-1]["Close"]),
@@ -1654,6 +1657,10 @@ def api_scanner():
                         "ml_size_s":      score_res['short'].get('ml_size', 'SKIP'),
                         "long_score":     round(score_res['long'].get('total', 0.0), 1),
                         "short_score":    round(score_res['short'].get('total', 0.0), 1),
+                        # ── Historical Signal State (dari Telegram alert terakhir) ──
+                        "last_signal_type": pair_state.get("last_signal", None),
+                        "last_signal_ts":   pair_state.get("last_signal_ts", None),
+                        "last_signal_conf": pair_state.get("last_signal_conf", None),
                     }
         except Exception as e:
             logger.error(f"[Scanner] Error analyzing {pair}: {e}")

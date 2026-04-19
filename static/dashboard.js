@@ -2,14 +2,14 @@
    PROTOCOL 9.6 — DASHBOARD JAVASCRIPT ENGINE v2.1
    ═══════════════════════════════════════════════════════════════════════════ */
 
-let APP_DATA       = null;
+let APP_DATA = null;
 let activeTimeframe = '15m';
-let activePair      = 'coin';
+let activePair = 'coin';
 let activeIndicator = '1h';
-let activeQuantTab  = 'long';
+let activeQuantTab = 'long';
 let currentBackendPair = '';
-let tradeEntries    = {};
-let tradeSummaries  = {};
+let tradeEntries = {};
+let tradeSummaries = {};
 
 /* ── MAIN DATA FETCH ────────────────────────────────────────────────────── */
 async function fetchData() {
@@ -18,8 +18,8 @@ async function fetchData() {
     document.getElementById('loadingOverlay').classList.remove('hidden');
     try {
         const pair = currentBackendPair || '';
-        const url  = pair ? `/api/data?pair=${pair}` : '/api/data';
-        const res  = await fetch(url);
+        const url = pair ? `/api/data?pair=${pair}` : '/api/data';
+        const res = await fetch(url);
         const json = await res.json();
         if (!json.success) throw new Error(json.error || 'API Error');
         APP_DATA = json;
@@ -39,7 +39,7 @@ async function fetchData() {
         renderKillSwitch(json);
         renderQuantAnalysis(json.state?.quant_analysis, json.state);
         renderEmergency(json.state?.quant_analysis, json.state);
-    } catch(e) {
+    } catch (e) {
         showAlert('danger', '❌ ' + e.message);
         console.error(e);
     } finally {
@@ -59,7 +59,7 @@ function renderStatusStrip(json) {
     let posBadge = '';
     if (pos.side) {
         const sideColor = pos.side === 'SHORT' ? 'var(--accent-red)' : 'var(--accent-green)';
-        const sideIcon  = pos.side === 'SHORT' ? '🔴' : '🟢';
+        const sideIcon = pos.side === 'SHORT' ? '🔴' : '🟢';
         posBadge += `<span style="color:${sideColor};font-size:10px;margin-left:5px;font-weight:700">${sideIcon} ${pos.side}</span>`;
     }
     if (pos.market_type === 'FUTURES' && pos.leverage > 1) {
@@ -109,10 +109,10 @@ function renderRawTable() {
         const d = r.vol_delta || 0;
         const dCls = d > 0 ? 'val-pos' : (d < 0 ? 'val-neg' : '');
         return `<tr>
-            <td>${r.time}</td><td>${r.open?.toFixed(5)||'—'}</td><td>${r.high?.toFixed(5)||'—'}</td>
-            <td>${r.low?.toFixed(5)||'—'}</td><td>${r.close?.toFixed(5)||'—'}</td>
-            <td>${fmtVol(r.total_vol||0)}</td><td class="val-pos">${fmtVol(r.buy_vol||0)}</td>
-            <td class="val-neg">${fmtVol(r.sell_vol||0)}</td><td class="${dCls}">${d>=0?'+':''}${fmtVol(d)}</td></tr>`;
+            <td>${r.time}</td><td>${r.open?.toFixed(5) || '—'}</td><td>${r.high?.toFixed(5) || '—'}</td>
+            <td>${r.low?.toFixed(5) || '—'}</td><td>${r.close?.toFixed(5) || '—'}</td>
+            <td>${fmtVol(r.total_vol || 0)}</td><td class="val-pos">${fmtVol(r.buy_vol || 0)}</td>
+            <td class="val-neg">${fmtVol(r.sell_vol || 0)}</td><td class="${dCls}">${d >= 0 ? '+' : ''}${fmtVol(d)}</td></tr>`;
     }).join('');
 }
 
@@ -125,13 +125,13 @@ function renderIndicatorTable() {
     tbody.innerHTML = [...data].reverse().map(r => {
         const rsi = r.rsi_6; const rsiCls = rsi < 30 ? 'val-pos' : rsi > 70 ? 'val-neg' : '';
         return `<tr>
-            <td>${r.time}</td><td>${r.close?.toFixed(5)||'—'}</td>
-            <td>${r.ema_7?.toFixed(4)||'—'}</td><td>${r.ema_21?.toFixed(4)||'—'}</td>
-            <td>${r.ema_50?.toFixed(4)||'—'}</td><td>${r.ema_200?.toFixed(4)||'—'}</td>
-            <td class="${rsiCls}">${rsi?.toFixed(1)||'—'}</td>
-            <td>${r.stochrsi_k?.toFixed(2)||'—'}</td><td>${r.stochrsi_d?.toFixed(2)||'—'}</td>
-            <td class="val-pos">${fmtVol(r.buy_vol||0)}</td><td class="val-neg">${fmtVol(r.sell_vol||0)}</td>
-            <td class="${(r.vol_delta||0)>0?'val-pos':'val-neg'}">${fmtVol(r.vol_delta||0)}</td></tr>`;
+            <td>${r.time}</td><td>${r.close?.toFixed(5) || '—'}</td>
+            <td>${r.ema_7?.toFixed(4) || '—'}</td><td>${r.ema_21?.toFixed(4) || '—'}</td>
+            <td>${r.ema_50?.toFixed(4) || '—'}</td><td>${r.ema_200?.toFixed(4) || '—'}</td>
+            <td class="${rsiCls}">${rsi?.toFixed(1) || '—'}</td>
+            <td>${r.stochrsi_k?.toFixed(2) || '—'}</td><td>${r.stochrsi_d?.toFixed(2) || '—'}</td>
+            <td class="val-pos">${fmtVol(r.buy_vol || 0)}</td><td class="val-neg">${fmtVol(r.sell_vol || 0)}</td>
+            <td class="${(r.vol_delta || 0) > 0 ? 'val-pos' : 'val-neg'}">${fmtVol(r.vol_delta || 0)}</td></tr>`;
     }).join('');
 }
 
@@ -147,7 +147,7 @@ function renderTacticalCompass(json) {
         ['Price vs EMA 50', cp?.toFixed(5), 'Close < EMA 50', 'Close > EMA 50', e50, r => r > e50 ? 'bull' : 'bear', 'Medium-term'],
         ['Price vs EMA 200', cp?.toFixed(5), 'Close < EMA 200', 'Close > EMA 200', e200, r => r > e200 ? 'bull' : 'bear', 'Macro trend'],
         ['RSI_6', rsi?.toFixed(1), 'RSI > 70', 'RSI < 30', rsi, r => r < 30 ? 'bull' : r > 70 ? 'bear' : 'neutral', 'Momentum'],
-        ['Volume Bias', tvol ? ((bvol/tvol*100).toFixed(1)+'% Buy') : '—', 'Buy < 45%', 'Buy > 55%', bvol/tvol, r => r > 0.55 ? 'bull' : r < 0.45 ? 'bear' : 'neutral', 'Taker pressure'],
+        ['Volume Bias', tvol ? ((bvol / tvol * 100).toFixed(1) + '% Buy') : '—', 'Buy < 45%', 'Buy > 55%', bvol / tvol, r => r > 0.55 ? 'bull' : r < 0.45 ? 'bear' : 'neutral', 'Taker pressure'],
     ];
     const smt = json.computed?.smt_divergence;
     if (smt) rows.push(['SMT (BTC vs Coin)', smt.btc_trend_12h, 'Bearish SMT', 'No divergence', smt.bearish_smt, r => r ? 'bear' : 'bull', 'BTC/Coin div']);
@@ -182,13 +182,13 @@ function renderKillSwitch(json) {
     document.getElementById('valPDL').textContent = (json.computed?.liquidity_borders?.PDL || 0).toFixed(5);
     document.getElementById('valPWH').textContent = (json.computed?.liquidity_borders?.PWH || 0).toFixed(5);
     document.getElementById('valPWL').textContent = (json.computed?.liquidity_borders?.PWL || 0).toFixed(5);
-    
+
     // Update panel SMT Divergence
     document.getElementById('valBtcTrend').textContent = smt.btc_trend_12h || '—';
     document.getElementById('valCoinTrend').textContent = smt.coin_trend_12h || '—';
     const smtEl = document.getElementById('valSMT');
     smtEl.innerHTML = smtOk ? '<span class="badge badge-red">YES ⚠️</span>' : '<span class="badge badge-green">NO ✅</span>';
-    
+
     // Update panel OI Momentum
     const oiDelta = json.computed?.oi_delta_pct || 0;
     const oiEl = document.getElementById('valOIDelta');
@@ -197,13 +197,13 @@ function renderKillSwitch(json) {
 }
 
 /* ── QUANT ANALYSIS ──────────────────────────────────────────────────────── */
-const FEATURE_LABELS = { OI:'Open Interest Change', Vol:'Relative Volume (MA20)', TakerBuy:'Taker Buy Pressure', ATR:'Volatility ATR %', CVD:'Cumulative Vol Delta', EMA21:'Distance EMA 21', EMA50:'Distance EMA 50', EMA200:'Distance EMA 200', RSI:'RSI 6 Momentum' };
-const FEATURE_UNIT = { TakerBuy:'%',RSI:'',OI:'%',Vol:'%',ATR:'%',CVD:'%',EMA21:'%',EMA50:'%',EMA200:'%' };
+const FEATURE_LABELS = { OI: 'Open Interest Change', Vol: 'Relative Volume (MA20)', TakerBuy: 'Taker Buy Pressure', ATR: 'Volatility ATR %', CVD: 'Cumulative Vol Delta', EMA21: 'Distance EMA 21', EMA50: 'Distance EMA 50', EMA200: 'Distance EMA 200', RSI: 'RSI 6 Momentum' };
+const FEATURE_UNIT = { TakerBuy: '%', RSI: '', OI: '%', Vol: '%', ATR: '%', CVD: '%', EMA21: '%', EMA50: '%', EMA200: '%' };
 
 function renderQuantAnalysis(quant, state) {
-    if (!quant) { 
-        document.getElementById('quantDecisionName').textContent = 'DATA INSUFFICIENT'; 
-        document.getElementById('quantScoreSummary').textContent = 'Need ≥22 candles of 4H data'; 
+    if (!quant) {
+        document.getElementById('quantDecisionName').textContent = 'DATA INSUFFICIENT';
+        document.getElementById('quantScoreSummary').textContent = 'Need ≥22 candles of 4H data';
         document.getElementById('quantDecisionName').className = 'decision-name color-SKIP';
         if (document.getElementById('decisionBanner')) document.getElementById('decisionBanner').className = 'quant-decision-banner decision-SKIP';
         if (document.getElementById('quantTotalBar')) document.getElementById('quantTotalBar').style.width = '0%';
@@ -216,7 +216,7 @@ function renderQuantAnalysis(quant, state) {
         if (document.getElementById('exitSignalBox')) document.getElementById('exitSignalBox').innerHTML = '';
         if (document.getElementById('quantNarrative')) document.getElementById('quantNarrative').innerHTML = '';
         if (document.getElementById('marketContext')) document.getElementById('marketContext').innerHTML = '<span style="color:var(--text-3);font-size:12px">—</span>';
-        return; 
+        return;
     }
     activeQuantTab = quant.long?.ml_signal === 'SHORT' ? 'short' : 'long';
     const data = quant[activeQuantTab];
@@ -245,7 +245,7 @@ function renderQuantAnalysis(quant, state) {
             <span>📍 <strong>POSISI AKTIF</strong></span>
             <span>Entry: <strong>$${ep.toFixed(5)}</strong></span>
             <span>Qty: <strong>${state.position.remaining_qty.toFixed(4)}</strong></span>
-            <span>P&L: <strong class="${pnl>=0?'val-pos':'val-neg'}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</strong></span></div>`;
+            <span>P&L: <strong class="${pnl >= 0 ? 'val-pos' : 'val-neg'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%</strong></span></div>`;
     } else { apb.innerHTML = ''; }
     // ML Probabilities & Feature Inputs
     let html = '';
@@ -292,26 +292,26 @@ function renderQuantAnalysis(quant, state) {
     const slLabel = lv.sl_label || '';
     const hasStructSL = slStruct && slLabel && !slLabel.includes('fallback');
     document.getElementById('slLevels').innerHTML = `
-        ${hasStructSL ? `<div class="level-pill" style="border-left:3px solid var(--accent-red)"><span><strong style="color:var(--accent-red)">SL Utama</strong> — ${slLabel}</span><span class="val-neg">$${slStruct.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl>=0?'+':''}${lv.dist_sl.toFixed(2)}%</span></div>` : ''}
-        <div style="font-size:9px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:${hasStructSL?'8':'0'}px 0 4px">Referensi ATR</div>
-        <div class="level-pill"><span>Ketat (1.0 ATR)</span><span class="val-neg">$${lv.sl_ketat.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_ketat>=0?'+':''}${lv.dist_sl_ketat.toFixed(2)}%</span></div>
-        <div class="level-pill"><span>Normal (1.5 ATR)</span><span class="val-neg">$${lv.sl_normal.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_normal>=0?'+':''}${lv.dist_sl_normal.toFixed(2)}%</span></div>
-        <div class="level-pill"><span>Lebar (2.0 ATR)</span><span class="val-neg">$${lv.sl_lebar.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_lebar>=0?'+':''}${lv.dist_sl_lebar.toFixed(2)}%</span></div>`;
-    const tp1Lbl = lv.tp1_label || (isLong?'+':'-')+'2.5%';
-    const tp2Lbl = lv.tp2_label || (isLong?'+':'-')+'4.6%';
-    const tp3Lbl = lv.tp3_label || (isLong?'+':'-')+'7.0%';
-    const rrBadge = (rr) => `<span class="rr-badge ${rr>=2?'rr-good':'rr-bad'}">${rr.toFixed(1)}x</span>`;
-    
+        ${hasStructSL ? `<div class="level-pill" style="border-left:3px solid var(--accent-red)"><span><strong style="color:var(--accent-red)">SL Utama</strong> — ${slLabel}</span><span class="val-neg">$${slStruct.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl >= 0 ? '+' : ''}${lv.dist_sl.toFixed(2)}%</span></div>` : ''}
+        <div style="font-size:9px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin:${hasStructSL ? '8' : '0'}px 0 4px">Referensi ATR</div>
+        <div class="level-pill"><span>Ketat (1.0 ATR)</span><span class="val-neg">$${lv.sl_ketat.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_ketat >= 0 ? '+' : ''}${lv.dist_sl_ketat.toFixed(2)}%</span></div>
+        <div class="level-pill"><span>Normal (1.5 ATR)</span><span class="val-neg">$${lv.sl_normal.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_normal >= 0 ? '+' : ''}${lv.dist_sl_normal.toFixed(2)}%</span></div>
+        <div class="level-pill"><span>Lebar (2.0 ATR)</span><span class="val-neg">$${lv.sl_lebar.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_sl_lebar >= 0 ? '+' : ''}${lv.dist_sl_lebar.toFixed(2)}%</span></div>`;
+    const tp1Lbl = lv.tp1_label || (isLong ? '+' : '-') + '2.5%';
+    const tp2Lbl = lv.tp2_label || (isLong ? '+' : '-') + '4.6%';
+    const tp3Lbl = lv.tp3_label || (isLong ? '+' : '-') + '7.0%';
+    const rrBadge = (rr) => `<span class="rr-badge ${rr >= 2 ? 'rr-good' : 'rr-bad'}">${rr.toFixed(1)}x</span>`;
+
     // Check if TP hits and Trailing SL active
     const tsl = quant.trailing_sl?.[activeQuantTab] || {};
     const slBadge = `<span style="font-size:10px;color:var(--accent-red);background:rgba(248,113,113,.12);padding:2px 6px;border-radius:6px;margin-left:8px;border:1px solid rgba(248,113,113,.3)">● SL</span>`;
     const bp1 = (lv.sl_structure === lv.tp1 && tsl.applicable) ? slBadge : '';
-    
+
     document.getElementById('tpLevels').innerHTML = `
-        <div class="level-pill"><span>TP1 <span style="font-size:10px;color:var(--text-3)">${tp1Lbl}</span></span><span class="val-pos">$${lv.tp1.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp1>=0?'+':''}${lv.dist_tp1.toFixed(2)}%</span>${lv.rr1!=null?rrBadge(lv.rr1):''}${bp1}</div>
-        <div class="level-pill"><span>TP2 <span style="font-size:10px;color:var(--text-3)">${tp2Lbl}</span></span><span class="val-pos">$${lv.tp2.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp2>=0?'+':''}${lv.dist_tp2.toFixed(2)}%</span>${lv.rr2!=null?rrBadge(lv.rr2):''}</div>
-        <div class="level-pill"><span>TP3 <span style="font-size:10px;color:var(--text-3)">${tp3Lbl}</span></span><span class="val-pos">$${lv.tp3.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp3>=0?'+':''}${lv.dist_tp3.toFixed(2)}%</span>${lv.rr3!=null?rrBadge(lv.rr3):''}</div>`;
-        
+        <div class="level-pill"><span>TP1 <span style="font-size:10px;color:var(--text-3)">${tp1Lbl}</span></span><span class="val-pos">$${lv.tp1.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp1 >= 0 ? '+' : ''}${lv.dist_tp1.toFixed(2)}%</span>${lv.rr1 != null ? rrBadge(lv.rr1) : ''}${bp1}</div>
+        <div class="level-pill"><span>TP2 <span style="font-size:10px;color:var(--text-3)">${tp2Lbl}</span></span><span class="val-pos">$${lv.tp2.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp2 >= 0 ? '+' : ''}${lv.dist_tp2.toFixed(2)}%</span>${lv.rr2 != null ? rrBadge(lv.rr2) : ''}</div>
+        <div class="level-pill"><span>TP3 <span style="font-size:10px;color:var(--text-3)">${tp3Lbl}</span></span><span class="val-pos">$${lv.tp3.toFixed(5)}</span><span style="font-size:10px;color:var(--text-3);margin-left:6px">${lv.dist_tp3 >= 0 ? '+' : ''}${lv.dist_tp3.toFixed(2)}%</span>${lv.rr3 != null ? rrBadge(lv.rr3) : ''}</div>`;
+
     if (tsl.applicable) {
         document.getElementById('tpLevels').innerHTML += `
         <div style="margin-top:10px;padding:10px 14px;background:rgba(52,211,153,.08);border:1px dashed rgba(52,211,153,.3);border-radius:8px">
@@ -378,23 +378,23 @@ function renderQuantAnalysis(quant, state) {
     ];
     // Add live context items
     for (const [k, v] of Object.entries(mctx)) {
-        if (!['StochRSI_K','StochRSI_D','Funding_Rate','Open_Interest','PDH','PDL','PWH','PWL'].includes(k)) continue;
+        if (!['StochRSI_K', 'StochRSI_D', 'Funding_Rate', 'Open_Interest', 'PDH', 'PDL', 'PWH', 'PWL'].includes(k)) continue;
         // Exception for Funding Rate to show 6 decimal places instead of truncating to 4
         const fmtVal = (typeof v === 'number') ? (k === 'Funding_Rate' ? v.toFixed(6) : v.toFixed(4)) : v;
         ctxItems.push([k.replace(/_/g, ' '), fmtVal]);
     }
-    
+
     // Extras for V13 requirements
     if (ctx.buy_liq_val) ctxItems.push(['Buy_Liq [CSV]', ctx.buy_liq_val?.toFixed(5)]);
     if (ctx.dyn_buy_liq) ctxItems.push(['Dyn_Buy_Liq 20', ctx.dyn_buy_liq?.toFixed(5)]);
     if (ctx.macro_slope !== null) ctxItems.push(['EMA200 Slope H4', ctx.macro_slope?.toFixed(2) + '%']);
-    
+
     if (ctx.stoch_k != null) {
         let bns = ctx.stoch_bonus_points || 0;
         ctxItems.push(['StochGate', `K=${ctx.stoch_k} D=${ctx.stoch_d} | bonus=+${bns}`]);
     }
 
-    const ctxHtml = ctxItems.filter(([,v]) => v != null && v !== '—').map(([k, v]) =>
+    const ctxHtml = ctxItems.filter(([, v]) => v != null && v !== '—').map(([k, v]) =>
         `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${v}</span></div>`
     ).join('');
     document.getElementById('marketContext').innerHTML = ctxHtml || '<span style="color:var(--text-3);font-size:12px">—</span>';
@@ -419,7 +419,7 @@ async function uploadCSVAnalysis(file) {
         zone.textContent = '✅ ' + file.name; zone.style.opacity = '1';
         if (!json.success) { showAlert('danger', '❌ ' + json.error); return; }
         renderCSVResult(json);
-    } catch(e) {
+    } catch (e) {
         zone.innerHTML = '📤 Upload CSV · <span style="color:var(--accent-red)">Error: ' + e.message + '</span>';
         zone.style.opacity = '1';
     }
@@ -433,9 +433,9 @@ function renderCSVResult(json) {
     const modes = ['long', 'short'];
     let html = `<div class="glass" style="padding:18px;margin-bottom:14px">
         <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">
-            <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Symbol</span><br><span style="font-size:18px;font-weight:700">${meta.Symbol||'—'}</span></div>
-            <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Timeframe</span><br><span style="font-size:16px;font-weight:600">${meta.Timeframe||'4H'}</span></div>
-            <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Close Price</span><br><span style="font-size:16px;font-weight:600;font-family:var(--mono)">$${json.current_price?.toFixed(5)||'—'}</span></div>
+            <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Symbol</span><br><span style="font-size:18px;font-weight:700">${meta.Symbol || '—'}</span></div>
+            <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Timeframe</span><br><span style="font-size:16px;font-weight:600">${meta.Timeframe || '4H'}</span></div>
+            <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Close Price</span><br><span style="font-size:16px;font-weight:600;font-family:var(--mono)">$${json.current_price?.toFixed(5) || '—'}</span></div>
             <div><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px">Rows</span><br><span style="font-size:16px;font-weight:600">${json.rows}</span></div>
             ${isActive ? `<div style="background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.25);padding:10px 16px;border-radius:var(--radius-sm)"><span style="font-size:11px;color:var(--text-3)">Avg Entry</span><br><span style="font-size:16px;font-weight:700;color:var(--accent-green)">$${meta.AVG_ENTRY_PRICE}</span></div>` : '<div class="badge badge-yellow">Mode: ENTRY BARU</div>'}
             ${json.timestamp ? `<div style="margin-left:auto"><span style="font-size:11px;color:var(--text-3)">Last Candle</span><br><span style="font-family:var(--mono);font-size:12px">${json.timestamp}</span></div>` : ''}
@@ -459,7 +459,7 @@ function renderCSVResult(json) {
             }
             blockMsg = [gateMsg, sBlock, stGate].filter(x => x).join(' | ');
         }
-        
+
         const pctx = json.variables || {};
         const mlFeatures = [
             { label: 'RSI 6 Momentum', value: pctx.O_rsi, unit: '' },
@@ -499,11 +499,11 @@ function renderCSVResult(json) {
         let rrHtml = '';
         const rrm = lv.rr_matrix;
         if (rrm && rrm.length >= 3) {
-            const slLbls = ['Ketat','Normal','Lebar'];
+            const slLbls = ['Ketat', 'Normal', 'Lebar'];
             rrHtml = '<table class="rr-matrix"><thead><tr><th>SL\\TP</th><th>TP1</th><th>TP2</th><th>TP3</th></tr></thead><tbody>';
             for (let i = 0; i < 3; i++) {
                 rrHtml += `<tr><td style="text-align:left;font-size:10px;color:var(--text-2)">${slLbls[i]}</td>`;
-                for (let j = 0; j < 3; j++) { const rr = rrm[i][j]||0; rrHtml += `<td class="${rr>=2?'val-pos':rr>=1?'val-warn':'val-neg'}">${rr.toFixed(1)}x</td>`; }
+                for (let j = 0; j < 3; j++) { const rr = rrm[i][j] || 0; rrHtml += `<td class="${rr >= 2 ? 'val-pos' : rr >= 1 ? 'val-warn' : 'val-neg'}">${rr.toFixed(1)}x</td>`; }
                 rrHtml += '</tr>';
             }
             rrHtml += '</tbody></table>';
@@ -514,17 +514,17 @@ function renderCSVResult(json) {
                 <div class="decision-name color-${d.code}" style="font-size:22px">${d.decision}</div>
                 <div class="decision-score">${d.total}/78 · ${d.pct.toFixed(1)}%${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}</div></div>
             <div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-bottom:4px"><span>Score</span><span>${d.total}/78</span></div>
-                <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${d.total/78*100}%;background:${d.code==='FULL'?'var(--accent-green)':d.code==='HALF'?'var(--accent-blue)':d.code==='WAIT'?'var(--accent-yellow)':'var(--accent-red)'}"></div></div></div>
+                <div style="height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden"><div style="height:100%;border-radius:3px;width:${d.total / 78 * 100}%;background:${d.code === 'FULL' ? 'var(--accent-green)' : d.code === 'HALF' ? 'var(--accent-blue)' : d.code === 'WAIT' ? 'var(--accent-yellow)' : 'var(--accent-red)'}"></div></div></div>
             <div style="margin-bottom:14px">${featureRows}</div>
             <div><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:6px">Stop Loss</div>
                 <div class="level-pill"><span>Ketat</span><span class="val-neg">$${lv.sl_ketat.toFixed(5)}</span></div>
                 <div class="level-pill"><span>Normal</span><span class="val-neg">$${lv.sl_normal.toFixed(5)}</span></div>
                 <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:10px 0 6px">Take Profit</div>
-                <div class="level-pill"><span>TP1 ${tab==='long'?'+':'−'}2.5%</span><span class="val-pos">$${lv.tp1.toFixed(5)}</span></div>
-                <div class="level-pill"><span>TP2 ${tab==='long'?'+':'−'}4.6%</span><span class="val-pos">$${lv.tp2.toFixed(5)}</span></div>
-                <div class="level-pill"><span>TP3 ${tab==='long'?'+':'−'}7.0%</span><span class="val-pos">$${lv.tp3.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP1 ${tab === 'long' ? '+' : '−'}2.5%</span><span class="val-pos">$${lv.tp1.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP2 ${tab === 'long' ? '+' : '−'}4.6%</span><span class="val-pos">$${lv.tp2.toFixed(5)}</span></div>
+                <div class="level-pill"><span>TP3 ${tab === 'long' ? '+' : '−'}7.0%</span><span class="val-pos">$${lv.tp3.toFixed(5)}</span></div>
                 ${rrHtml ? `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:10px 0 6px">R:R Matrix</div>${rrHtml}` : ''}</div>
-            ${json.exit?.signals?.length > 0 && isActive ? `<div style="margin-top:12px;border-top:1px solid var(--glass-border);padding-top:12px"><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:8px">Exit Signals</div>${json.exit.signals.map(([icon,name,val,thr])=>`<div class="exit-row"><span>${icon}</span><span style="flex:1;font-size:12px">${name}</span><span style="font-size:11px;color:var(--text-3)">${typeof val==='number'?val.toFixed(2):val} (${thr})</span></div>`).join('')}<div class="exit-mandate ${json.exit.hard_count>0?'mandate-exit':json.exit.warn_count>0?'mandate-watch':'mandate-hold'}">${json.exit.recommendation}</div></div>` : ''}
+            ${json.exit?.signals?.length > 0 && isActive ? `<div style="margin-top:12px;border-top:1px solid var(--glass-border);padding-top:12px"><div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:8px">Exit Signals</div>${json.exit.signals.map(([icon, name, val, thr]) => `<div class="exit-row"><span>${icon}</span><span style="flex:1;font-size:12px">${name}</span><span style="font-size:11px;color:var(--text-3)">${typeof val === 'number' ? val.toFixed(2) : val} (${thr})</span></div>`).join('')}<div class="exit-mandate ${json.exit.hard_count > 0 ? 'mandate-exit' : json.exit.warn_count > 0 ? 'mandate-watch' : 'mandate-hold'}">${json.exit.recommendation}</div></div>` : ''}
             <div class="narrative-box ${narCls}" style="margin-top:14px;font-size:12px">
                 <div class="nar-section"><span class="nar-lbl">Kondisi</span>${d.narrative.kondisi}</div>
                 <div class="nar-section"><span class="nar-lbl">Keputusan</span><strong>${d.narrative.keputusan}</strong></div>
@@ -537,9 +537,9 @@ function renderCSVResult(json) {
         html += `<div class="glass quant-card" style="grid-column:1/-1"><div class="panel-title">🔍 Market Context (from CSV)</div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">
             ${ctxKeys.map(k => {
-                const fVal = typeof ctx[k]==='number' ? (k === 'Funding_Rate' ? ctx[k].toFixed(6) : ctx[k].toFixed(4)) : ctx[k];
-                return `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${fVal}</span></div>`;
-            }).join('')}</div></div>`;
+            const fVal = typeof ctx[k] === 'number' ? (k === 'Funding_Rate' ? ctx[k].toFixed(6) : ctx[k].toFixed(4)) : ctx[k];
+            return `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${fVal}</span></div>`;
+        }).join('')}</div></div>`;
     }
     html += '</div>';
     el.innerHTML = html;
@@ -563,14 +563,16 @@ function downloadPDF() {
     const btn = document.getElementById('btnPdf');
     btn.classList.add('btn-loading'); btn.textContent = '⏳ Generating...';
     const pair = (APP_DATA?.state?.user_input?.coin_pair || 'UNKNOWN').replace('/', '-');
-    const now = new Date(); const pad = n => String(n).padStart(2,'0');
-    const fname = `Laporan_Protokol_9.6_${pair}_${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.pdf`;
-    html2pdf().set({ filename: fname, margin: [8,8,8,8], image: {type:'jpeg',quality:.95},
-        html2canvas: {scale:2,useCORS:true,backgroundColor:'#0a0e1a'},
-        jsPDF: {unit:'mm',format:'a3',orientation:'landscape'} })
+    const now = new Date(); const pad = n => String(n).padStart(2, '0');
+    const fname = `Laporan_Protokol_9.6_${pair}_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}.pdf`;
+    html2pdf().set({
+        filename: fname, margin: [8, 8, 8, 8], image: { type: 'jpeg', quality: .95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#0a0e1a' },
+        jsPDF: { unit: 'mm', format: 'a3', orientation: 'landscape' }
+    })
         .from(document.getElementById('dashboardContent')).save()
-        .then(() => { btn.classList.remove('btn-loading'); btn.textContent = '📄 PDF'; showAlert('success','✅ PDF berhasil diunduh!'); setTimeout(hideAlert,3000); })
-        .catch(e => { btn.classList.remove('btn-loading'); btn.textContent = '📄 PDF'; showAlert('danger','❌ PDF Error: '+e.message); });
+        .then(() => { btn.classList.remove('btn-loading'); btn.textContent = '📄 PDF'; showAlert('success', '✅ PDF berhasil diunduh!'); setTimeout(hideAlert, 3000); })
+        .catch(e => { btn.classList.remove('btn-loading'); btn.textContent = '📄 PDF'; showAlert('danger', '❌ PDF Error: ' + e.message); });
 }
 
 /* ── CSV DOWNLOAD ────────────────────────────────────────────────────────── */
@@ -590,11 +592,34 @@ function showAlert(type, msg) { const b = document.getElementById('alertBanner')
 function hideAlert() { document.getElementById('alertBanner').classList.remove('show'); }
 
 /* ── UTILITIES ───────────────────────────────────────────────────────────── */
-function fmtVol(v) { const a = Math.abs(v); if (a >= 1e6) return (v/1e6).toFixed(2)+'M'; if (a >= 1e3) return (v/1e3).toFixed(2)+'K'; return v.toFixed(2); }
+function fmtVol(v) { const a = Math.abs(v); if (a >= 1e6) return (v / 1e6).toFixed(2) + 'M'; if (a >= 1e3) return (v / 1e3).toFixed(2) + 'K'; return v.toFixed(2); }
+
+/* ── SIGNAL TIMESTAMP FORMATTER ──────────────────────────────────────────── */
+// Format Unix timestamp → WITA (UTC+8) + UTC string
+function formatSignalTimestamp(unixTs) {
+    if (!unixTs || unixTs === 0) return '';
+    const d = new Date(unixTs * 1000);
+    // UTC string
+    const utcStr = d.toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
+    // WITA (Asia/Makassar = UTC+8)
+    const witaStr = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Makassar',
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(d).replace(',', ' ') + ' WITA';
+    // Relative time (berapa jam lalu)
+    const hoursAgo = ((Date.now() - unixTs * 1000) / 3.6e6).toFixed(1);
+    const relStr = hoursAgo < 1 ? 'baru saja' : `${hoursAgo} jam lalu`;
+    return `<div style="margin-top:5px;padding:5px 8px;background:rgba(0,0,0,0.25);border-radius:6px;border-left:2px solid rgba(251,191,36,.5)">
+        <div style="font-size:9.5px;color:#fbbf24;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">⏱️ Signal Recorded</div>
+        <div style="font-family:var(--mono);font-size:10px;color:#cbd5e1">${witaStr}</div>
+        <div style="font-family:var(--mono);font-size:9.5px;color:#64748b">${utcStr} &nbsp;&middot;&nbsp; ${relStr}</div>
+    </div>`;
+}
 
 /* ── TRADE ENTRIES ───────────────────────────────────────────────────────── */
 async function loadTradeEntries() {
-    try { const r = await fetch('/api/trade-entries'); const j = await r.json(); if (j.success) { tradeEntries = j.entries || {}; tradeSummaries = j.summaries || {}; } } catch(e) { console.error(e); }
+    try { const r = await fetch('/api/trade-entries'); const j = await r.json(); if (j.success) { tradeEntries = j.entries || {}; tradeSummaries = j.summaries || {}; } } catch (e) { console.error(e); }
 }
 
 function openEntryModal() {
@@ -633,7 +658,7 @@ function onMarketTypeChange() {
 }
 function onEntrySideChange() {
     const side = document.getElementById('entrySide').value;
-    const btn  = document.getElementById('btnSaveEntry');
+    const btn = document.getElementById('btnSaveEntry');
     if (side === 'SHORT') {
         btn.style.background = 'var(--accent-red)';
         btn.textContent = '🔴 Open SHORT Position';
@@ -645,9 +670,9 @@ function onEntrySideChange() {
 
 /* ── AUTO-CALCULATE QTY DARI MARGIN USDT ───────────────────────────────── */
 function calcQtyFromUsdt() {
-    const price      = parseFloat(document.getElementById('entryPrice').value);
-    const usdt       = parseFloat(document.getElementById('entryUsdt').value);
-    const leverage   = parseInt(document.getElementById('entryLeverage').value) || 1;
+    const price = parseFloat(document.getElementById('entryPrice').value);
+    const usdt = parseFloat(document.getElementById('entryUsdt').value);
+    const leverage = parseInt(document.getElementById('entryLeverage').value) || 1;
     const marketType = document.getElementById('entryMarketType').value;
 
     if (price > 0 && usdt > 0) {
@@ -664,39 +689,41 @@ function calcQtyFromUsdt() {
 }
 
 async function saveEntry() {
-    const sym        = document.getElementById('entrySymbol').value;
-    const side       = document.getElementById('entrySide').value;
+    const sym = document.getElementById('entrySymbol').value;
+    const side = document.getElementById('entrySide').value;
     const marketType = document.getElementById('entryMarketType').value;
-    const leverage   = parseInt(document.getElementById('entryLeverage').value) || 1;
-    const ep         = parseFloat(document.getElementById('entryPrice').value);
-    const qty        = parseFloat(document.getElementById('entryQty').value);
-    if (!sym) { showAlert('danger','⚠️ Pilih coin dulu'); return; }
-    if (!ep || ep <= 0) { showAlert('danger','⚠️ Entry price harus > 0'); return; }
-    if (!qty || qty <= 0) { showAlert('danger','⚠️ Quantity harus > 0'); return; }
-    if (marketType === 'FUTURES' && leverage < 1) { showAlert('danger','⚠️ Leverage minimal 1x'); return; }
+    const leverage = parseInt(document.getElementById('entryLeverage').value) || 1;
+    const ep = parseFloat(document.getElementById('entryPrice').value);
+    const qty = parseFloat(document.getElementById('entryQty').value);
+    if (!sym) { showAlert('danger', '⚠️ Pilih coin dulu'); return; }
+    if (!ep || ep <= 0) { showAlert('danger', '⚠️ Entry price harus > 0'); return; }
+    if (!qty || qty <= 0) { showAlert('danger', '⚠️ Quantity harus > 0'); return; }
+    if (marketType === 'FUTURES' && leverage < 1) { showAlert('danger', '⚠️ Leverage minimal 1x'); return; }
     try {
         const r = await fetch('/api/trade-entries', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ symbol:sym, entry_price:ep, qty:qty, side:side,
-                                   market_type:marketType, leverage:leverage })
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: sym, entry_price: ep, qty: qty, side: side,
+                market_type: marketType, leverage: leverage
+            })
         });
         const j = await r.json();
         if (j.success) {
-            showAlert('success', `✅ ${side} Entry #${j.summary.num_entries} @ $${ep} [${marketType}${marketType==='FUTURES'?' x'+leverage:''}]`);
+            showAlert('success', `✅ ${side} Entry #${j.summary.num_entries} @ $${ep} [${marketType}${marketType === 'FUTURES' ? ' x' + leverage : ''}]`);
             setTimeout(hideAlert, 4000);
             await loadTradeEntries(); renderEntryList();
             document.getElementById('entryPrice').value = '';
             document.getElementById('entryQty').value = '';
             if (sym === currentBackendPair) fetchData();
-        } else { showAlert('danger','❌ '+j.error); }
-    } catch(e) { showAlert('danger','❌ '+e.message); }
+        } else { showAlert('danger', '❌ ' + j.error); }
+    } catch (e) { showAlert('danger', '❌ ' + e.message); }
 }
 
 // Fungsi BARU untuk Tombol MAX di Form Sell
 function setMaxSellQty() {
     const sel = document.getElementById('sellSymbol');
-    const sm  = tradeSummaries[sel.value] || {};
-    const rq  = sm.remaining_qty || 0;
+    const sm = tradeSummaries[sel.value] || {};
+    const rq = sm.remaining_qty || 0;
     if (rq > 0) {
         document.getElementById('sellQtyInput').value = rq.toFixed(6);
     } else {
@@ -706,14 +733,14 @@ function setMaxSellQty() {
 
 async function saveSell() {
     const sym = document.getElementById('sellSymbol').value;
-    const sp  = parseFloat(document.getElementById('sellPriceInput').value);
+    const sp = parseFloat(document.getElementById('sellPriceInput').value);
     const qty = parseFloat(document.getElementById('sellQtyInput').value);
-    if (!sp || sp <= 0) { showAlert('danger','⚠️ Sell price harus > 0'); return; }
-    if (!qty || qty <= 0) { showAlert('danger','⚠️ Quantity harus > 0'); return; }
+    if (!sp || sp <= 0) { showAlert('danger', '⚠️ Sell price harus > 0'); return; }
+    if (!qty || qty <= 0) { showAlert('danger', '⚠️ Quantity harus > 0'); return; }
     try {
         const r = await fetch('/api/trade-sales', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ symbol:sym, sell_price:sp, qty:qty })
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol: sym, sell_price: sp, qty: qty })
         });
         const j = await r.json();
         if (j.success) {
@@ -723,38 +750,38 @@ async function saveSell() {
             document.getElementById('sellPriceInput').value = '';
             document.getElementById('sellQtyInput').value = '';
             if (sym === currentBackendPair) fetchData();
-        } else { showAlert('danger','❌ '+j.error); }
-    } catch(e) { showAlert('danger','❌ '+e.message); }
+        } else { showAlert('danger', '❌ ' + j.error); }
+    } catch (e) { showAlert('danger', '❌ ' + e.message); }
 }
 
 async function deleteSingleEntry(sym, idx) {
-    if (!confirm(`Hapus entry #${idx+1} untuk ${sym}?`)) return;
-    const r = await fetch('/api/trade-entries/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,index:idx})});
+    if (!confirm(`Hapus entry #${idx + 1} untuk ${sym}?`)) return;
+    const r = await fetch('/api/trade-entries/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: sym, index: idx }) });
     const j = await r.json();
-    if (j.success) { showAlert('success','🗑️ Entry dihapus'); await loadTradeEntries(); renderEntryList(); if(sym===currentBackendPair) fetchData(); }
+    if (j.success) { showAlert('success', '🗑️ Entry dihapus'); await loadTradeEntries(); renderEntryList(); if (sym === currentBackendPair) fetchData(); }
 }
 async function deleteSaleEntry(sym, idx) {
-    if (!confirm(`Hapus sale #${idx+1} untuk ${sym}?`)) return;
-    const r = await fetch('/api/trade-sales/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym,index:idx})});
+    if (!confirm(`Hapus sale #${idx + 1} untuk ${sym}?`)) return;
+    const r = await fetch('/api/trade-sales/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: sym, index: idx }) });
     const j = await r.json();
-    if (j.success) { showAlert('success','🗑️ Sale dihapus'); await loadTradeEntries(); renderEntryList(); if(sym===currentBackendPair) fetchData(); }
+    if (j.success) { showAlert('success', '🗑️ Sale dihapus'); await loadTradeEntries(); renderEntryList(); if (sym === currentBackendPair) fetchData(); }
 }
 async function deleteAllEntries(sym) {
     if (!confirm(`Hapus SEMUA data untuk ${sym}?`)) return;
-    const r = await fetch('/api/trade-entries/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:sym})});
+    const r = await fetch('/api/trade-entries/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: sym }) });
     const j = await r.json();
-    if (j.success) { showAlert('success','🗑️ All cleared'); await loadTradeEntries(); renderEntryList(); if(sym===currentBackendPair) fetchData(); }
+    if (j.success) { showAlert('success', '🗑️ All cleared'); await loadTradeEntries(); renderEntryList(); if (sym === currentBackendPair) fetchData(); }
 }
 
 function switchModalTab(tab) {
     document.querySelectorAll('.modal .tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tab'+tab.charAt(0).toUpperCase()+tab.slice(1))?.classList.add('active');
-    document.getElementById('modalEntryForm').style.display = tab==='entry' ? 'grid' : 'none';
-    document.getElementById('modalSellForm').style.display  = tab==='sell'  ? 'grid' : 'none';
-    document.getElementById('modalHistory').style.display   = tab==='history'? 'block': 'none';
+    document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1))?.classList.add('active');
+    document.getElementById('modalEntryForm').style.display = tab === 'entry' ? 'grid' : 'none';
+    document.getElementById('modalSellForm').style.display = tab === 'sell' ? 'grid' : 'none';
+    document.getElementById('modalHistory').style.display = tab === 'history' ? 'block' : 'none';
     if (tab === 'sell' && APP_DATA) {
         const sel = document.getElementById('sellSymbol');
-        sel.innerHTML = (APP_DATA.state?.user_input?.available_pairs||[]).map(p => `<option value="${p}" ${p===currentBackendPair?'selected':''}>${p}</option>`).join('');
+        sel.innerHTML = (APP_DATA.state?.user_input?.available_pairs || []).map(p => `<option value="${p}" ${p === currentBackendPair ? 'selected' : ''}>${p}</option>`).join('');
         function updateSellPlaceholder() {
             const sm = tradeSummaries[sel.value] || {};
             const rq = sm.remaining_qty || 0;
@@ -775,17 +802,17 @@ function renderEntryList() {
     syms.forEach(sym => {
         const cd = tradeEntries[sym];
         const entries = cd.entries || [];
-        const sales   = cd.sales   || [];
+        const sales = cd.sales || [];
         const sm = tradeSummaries[sym] || {};
         if (!entries.length && !sales.length) return;
 
         // Position meta badges
-        const side     = cd.position_side || 'LONG';
-        const mkt      = cd.market_type   || 'SPOT';
-        const lev      = cd.leverage      || 1;
-        const sideClr  = side === 'SHORT' ? 'badge-red' : 'badge-green';
-        const sideIcon  = side === 'SHORT' ? '🔴' : '🟢';
-        const mktBadge  = mkt === 'FUTURES'
+        const side = cd.position_side || 'LONG';
+        const mkt = cd.market_type || 'SPOT';
+        const lev = cd.leverage || 1;
+        const sideClr = side === 'SHORT' ? 'badge-red' : 'badge-green';
+        const sideIcon = side === 'SHORT' ? '🔴' : '🟢';
+        const mktBadge = mkt === 'FUTURES'
             ? `<span class="badge badge-yellow" style="font-size:9px;padding:2px 7px;margin-left:4px">⚡${lev}x</span>`
             : `<span class="badge badge-blue" style="font-size:9px;padding:2px 7px;margin-left:4px">📈 SPOT</span>`;
 
@@ -794,15 +821,15 @@ function renderEntryList() {
                 <strong>${sym}</strong>
                 <span class="badge ${sideClr}" style="font-size:9px;padding:2px 7px">${sideIcon} ${side}</span>
                 ${mktBadge}
-                <span style="font-size:12px;color:var(--text-2)">Rem: <strong>${(sm.remaining_qty||0).toFixed(4)}</strong></span>
-                <span style="font-size:12px">P&L: <strong class="${(sm.realized_pnl||0)>=0?'val-pos':'val-neg'}">$${(sm.realized_pnl||0).toFixed(2)}</strong></span>
+                <span style="font-size:12px;color:var(--text-2)">Rem: <strong>${(sm.remaining_qty || 0).toFixed(4)}</strong></span>
+                <span style="font-size:12px">P&L: <strong class="${(sm.realized_pnl || 0) >= 0 ? 'val-pos' : 'val-neg'}">$${(sm.realized_pnl || 0).toFixed(2)}</strong></span>
             </div>
             <button class="btn-del-e" onclick="deleteAllEntries('${sym}')">✕ Clear</button></div>`;
 
         entries.forEach((e, i) => {
             html += `<div class="entry-item" style="margin-left:12px;border-left:3px solid var(--accent-green)">
-                <div><div style="font-size:11px;color:var(--accent-green);font-weight:700">OPEN #${i+1}</div>
-                <div style="font-size:11px;color:var(--text-3)">Qty: ${e.qty} · ${e.date||''}</div></div>
+                <div><div style="font-size:11px;color:var(--accent-green);font-weight:700">OPEN #${i + 1}</div>
+                <div style="font-size:11px;color:var(--text-3)">Qty: ${e.qty} · ${e.date || ''}</div></div>
                 <div style="display:flex;align-items:center;gap:10px">
                     <span style="font-family:var(--mono);color:var(--accent-green);font-weight:600">$${e.price}</span>
                     <button class="btn-del-e" onclick="deleteSingleEntry('${sym}',${i})">✕</button>
@@ -810,8 +837,8 @@ function renderEntryList() {
         });
         sales.forEach((s, i) => {
             html += `<div class="entry-item" style="margin-left:12px;border-left:3px solid var(--accent-red)">
-                <div><div style="font-size:11px;color:var(--accent-red);font-weight:700">CLOSE #${i+1}</div>
-                <div style="font-size:11px;color:var(--text-3)">Qty: ${s.qty} · ${s.date||''}</div></div>
+                <div><div style="font-size:11px;color:var(--accent-red);font-weight:700">CLOSE #${i + 1}</div>
+                <div style="font-size:11px;color:var(--text-3)">Qty: ${s.qty} · ${s.date || ''}</div></div>
                 <div style="display:flex;align-items:center;gap:10px">
                     <span style="font-family:var(--mono);color:var(--accent-red);font-weight:600">$${s.price}</span>
                     <button class="btn-del-e" onclick="deleteSaleEntry('${sym}',${i})">✕</button>
@@ -835,7 +862,7 @@ async function fetchScannerData() {
     try {
         const res = await fetch('/api/scanner');
         const json = await res.json();
-        
+
         if (!json.success) throw new Error(json.error || 'Scanner gagal memuat.');
         if (!json.data || json.data.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:24px">Tidak ada data.</td></tr>';
@@ -852,30 +879,50 @@ async function fetchScannerData() {
                 return `<span class="badge ${cls}" style="margin-left:8px">${code}</span>`;
             };
 
+            // ── LIVE ML SIGNAL (dari evaluasi sekarang) ──
             const mlSignal = d.ml_signal || 'FLAT';
-            const mlConf   = d.ml_confidence || 0;
-            const mlSize   = d.ml_size || 'SKIP';
+            const mlConf = d.ml_confidence || 0;
+            const mlSize = d.ml_size || 'SKIP';
             const mlSignalS = d.ml_signal_s || 'FLAT';
-            const mlConfS  = d.ml_confidence_s || 0;
-            const mlSizeS  = d.ml_size_s || 'SKIP';
+            const mlConfS = d.ml_confidence_s || 0;
+            const mlSizeS = d.ml_size_s || 'SKIP';
+            const signalColor = mlSignal === 'LONG' ? '#34d399' : mlSignal === 'SHORT' ? '#f87171' : 'var(--text-3)';
+            const signalColorS = mlSignalS === 'SHORT' ? '#f87171' : mlSignalS === 'LONG' ? '#34d399' : 'var(--text-3)';
 
-            const signalColor = mlSignal === 'LONG' ? '#00c853' : mlSignal === 'SHORT' ? '#ff1744' : '#888';
-            const signalColorS = mlSignalS === 'SHORT' ? '#ff1744' : mlSignalS === 'LONG' ? '#00c853' : '#888';
+            // ── HISTORICAL ENTRY SIGNAL (dari Telegram alert terakhir) ──
+            const histType = d.last_signal_type;
+            const histConf = d.last_signal_conf;
+            const histTs = d.last_signal_ts;
+            let histHtml = '';
+            if (histType) {
+                const isLong = histType.startsWith('LONG');
+                const histClr = isLong ? '#34d399' : '#f87171';
+                const histConf100 = histConf != null ? (histConf * 100).toFixed(1) : '—';
+                histHtml = `
+                    <div style="margin-top:6px;padding:5px 8px;background:rgba(99,125,255,.06);border:1px solid rgba(99,125,255,.18);border-radius:6px">
+                        <div style="font-size:9px;color:#a78bfa;font-weight:700;text-transform:uppercase;letter-spacing:.5px">[ Historical Entry Signal ]</div>
+                        <div style="color:${histClr};font-weight:700;font-size:11px;margin-top:2px">
+                            ${histType} <span style="color:var(--text-3);font-weight:400">&bull; ${histConf100}% conf</span>
+                        </div>
+                        ${formatSignalTimestamp(histTs)}
+                    </div>`;
+            }
 
             return `<tr>
                 <td style="text-align:left;font-weight:bold;color:var(--text-1);">${d.pair} ${d.incomplete ? '⚠️' : ''}</td>
                 <td style="text-align:center;font-family:var(--mono)">$${d.close.toFixed(5)}</td>
-                <td style="text-align:center;color:${signalColor};font-weight:bold;">
-                    ${mlSignal} ${mlSize !== 'SKIP' ? '● ' + mlSize : ''}
-                    <br><small>${(mlConf * 100).toFixed(1)}% conf</small>
+                <td style="text-align:center">
+                    <span style="color:${signalColor};font-weight:bold">${mlSignal}${mlSize !== 'SKIP' ? ' ● ' + mlSize : ''}</span>
+                    <br><small style="color:var(--text-3)">${(mlConf * 100).toFixed(1)}% live</small>
+                    ${histHtml}
                 </td>
-                <td style="text-align:center;color:${signalColorS};font-weight:bold;">
-                    ${mlSignalS} ${mlSizeS !== 'SKIP' ? '● ' + mlSizeS : ''}
-                    <br><small>${(mlConfS * 100).toFixed(1)}% conf</small>
+                <td style="text-align:center">
+                    <span style="color:${signalColorS};font-weight:bold">${mlSignalS}${mlSizeS !== 'SKIP' ? ' ● ' + mlSizeS : ''}</span>
+                    <br><small style="color:var(--text-3)">${(mlConfS * 100).toFixed(1)}% live</small>
                 </td>
                 <td style="text-align:center;">
                     <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="document.getElementById('pairSelect').value='${d.pair}'; changePair(); document.getElementById('sectionScanner').scrollIntoView({behavior: 'smooth'});">
-                        Analisis Detail 🔍
+                        Analisis 🔍
                     </button>
                 </td>
             </tr>`;

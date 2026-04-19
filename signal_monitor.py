@@ -570,6 +570,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 state["last_long_signal"] = new_signal_L
                 state["last_signal"]      = new_signal_L
+                state["last_signal_ts"]   = time.time()         # ⏱️ Unix timestamp sinyal masuk
+                state["last_signal_conf"] = result['long'].get('ml_confidence', 0.0)
                 _save_alert_state(_alert_state)
                 return
 
@@ -629,6 +631,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 )
                 state["last_short_signal"] = new_signal_S
                 state["last_signal"]       = new_signal_S
+                state["last_signal_ts"]    = time.time()        # ⏱️ Unix timestamp sinyal masuk
+                state["last_signal_conf"]  = result['short'].get('ml_confidence', 0.0)
                 _save_alert_state(_alert_state)
                 return
 

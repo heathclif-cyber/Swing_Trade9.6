@@ -8,7 +8,7 @@
             "scaler": "lstm_scaler.pkl",
             "meta": "ensemble_meta.pkl",
             "n_features": 58,
-            "seq_len": 32,
+            "seq_len": 20,
             "trained_date": "2026-04-18",
             "f1_macro": 0.5249,
             "description": "LightGBM + LSTM ensemble, 5 koin training"
