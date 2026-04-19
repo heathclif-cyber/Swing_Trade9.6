@@ -181,30 +181,45 @@ def _fetch_oi(symbol: str, limit: int = 500) -> pd.DataFrame:
 
 def _synthetic_oi(df_kline: pd.DataFrame) -> pd.DataFrame:
     """
-    Synthetic Open Interest proxy berbasis Volume Delta.
+    Synthetic Open Interest proxy — Formula sesuai training pipeline.
 
-    Logika: OI naik saat kontrak baru dibuka (posisi berlawanan bertemperamen)
-    Proxy: running z-score dari Volume Delta memberikan sinyal relatif yang
-    mirip dengan perubahan OI (naik = lebih banyak kontrak baru dibuka,
-    turun = lebih banyak kontrak ditutup / liquidasi).
+    Formula (dari training notebook):
+      cvd        = cumsum(buy_vol - sell_vol)
+      cvd_ma96   = cvd.rolling(96).mean()        # MA 24 jam di M15
+      vol_ma96   = total_volume.rolling(96).mean()
+      synthetic  = (cvd_ma96 + vol_ma96 * 2) / rolling672.mean()
+                   .ffill().fillna(1.0)
 
-    Nilai absolut tidak penting — yang penting perubahan RELATIF
-    (C_final = % deviation dari MA20) yang digunakan scoring.
+    Ini adalah rasio relatif (bukan nilai absolut), sehingga distribusi
+    tetap stabil antara training dan live deployment.
     """
     if df_kline.empty or "Buy_Volume" not in df_kline.columns:
         return pd.DataFrame()
     try:
         df = df_kline[["Open_Time", "Buy_Volume", "Total_Volume"]].copy()
         df["vol_delta"] = df["Buy_Volume"] - (df["Total_Volume"] - df["Buy_Volume"])
-        # Gunakan EMA-smoothed cumsum sebagai base OI — lebih stabil dari raw cumsum
-        smooth = df["vol_delta"].ewm(span=5, adjust=False).mean()
-        base   = abs(df["Total_Volume"].mean()) * 10 or 1e6
-        df["Open_Interest"] = base + smooth.cumsum()
-        # Clip agar tidak negatif
-        df["Open_Interest"] = df["Open_Interest"].clip(lower=base * 0.1)
+
+        # CVD (Cumulative Volume Delta) — sesuai training
+        cvd = df["vol_delta"].cumsum()
+
+        # MA 96 bar (setara 24 jam di M15)
+        cvd_ma96 = cvd.rolling(96, min_periods=1).mean()
+        vol_ma96 = df["Total_Volume"].rolling(96, min_periods=1).mean()
+
+        # Numerator
+        numerator = cvd_ma96 + vol_ma96 * 2
+
+        # Rolling 672 bar (setara 7 hari di M15) sebagai normalizer
+        rolling672 = numerator.rolling(672, min_periods=1).mean()
+        # Hindari division-by-zero
+        rolling672 = rolling672.replace(0, np.nan)
+
+        synthetic = (numerator / rolling672).ffill().fillna(1.0)
+
+        df["Open_Interest"] = synthetic
         logger.info(
-            f"  [OI] Synthetic OI digunakan (fapi 403) — "
-            f"base={base:.0f}, range=[{df['Open_Interest'].min():.0f}, {df['Open_Interest'].max():.0f}]"
+            f"  [OI] Synthetic OI (formula training) — "
+            f"range=[{synthetic.min():.4f}, {synthetic.max():.4f}]"
         )
         return df[["Open_Time", "Open_Interest"]]
     except Exception as e:
@@ -248,6 +263,38 @@ def _fetch_funding_rate(symbol: str, limit: int = 200) -> pd.DataFrame:
 # ============================================================
 # MACRO — CoinMarketCap (BTC Dominance & Altcoin Index)
 # ============================================================
+_fear_greed_cache: dict = {"data": None, "ts": 0.0}
+FEAR_GREED_CACHE_TTL = 3600  # 1 jam (data update setiap hari, 1 jam cukup)
+
+
+def _fetch_fear_greed() -> float | None:
+    """
+    Fetch Fear & Greed Index dari Alternative.me (free, no API key).
+    Return: float 0–100 (0=Extreme Fear, 100=Extreme Greed)
+            atau None jika fetch gagal.
+
+    FIX #2: Implementasi API Fear & Greed yang sebelumnya selalu None.
+    Nilai digunakan sebagai fitur 'fear_greed' di ml_feature_calculator.
+    """
+    now_ts = time.time()
+    if _fear_greed_cache["data"] is not None and (now_ts - _fear_greed_cache["ts"] < FEAR_GREED_CACHE_TTL):
+        return _fear_greed_cache["data"]
+    try:
+        url = "https://api.alternative.me/fng/"
+        r = requests.get(url, params={"limit": 1, "format": "json"}, timeout=8, verify=False)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                value = float(data[0]["value"])
+                _fear_greed_cache["data"] = value
+                _fear_greed_cache["ts"]   = now_ts
+                logger.info(f"  [Macro] Fear & Greed Index = {value:.0f}")
+                return value
+    except Exception as e:
+        logger.warning(f"  [Macro] Fear & Greed fetch failed: {e}")
+    return None
+
+
 def _fetch_macro_cmc() -> dict | None:
     """Fetch CMC global metrics dengan cache 4 jam."""
     now_ts = time.time()
@@ -571,12 +618,14 @@ def get_fully_enriched_data(symbol: str, interval: str = "4h",
     Pipeline (berurutan):
       1. Fetch Klines (4h)
       2. Apply Indicators (EMA, RSI, StochRSI, ATR, CVD)
-      3. Fetch + Merge Open Interest
+      3. Fetch + Merge Open Interest (real fapi atau synthetic formula training)
       4. Fetch + Merge Funding Rate
       5. Fetch + Merge H4 Macro EMAs (EMA_200_H4, dll.)
-      6. Fetch Macro CoinMarketCap (BTC_Dominance, Altcoin_Index)
+      6. Fetch Macro CMC (BTC_Dominance) + Fear & Greed (Alternative.me)
       7. Fetch Liquidity Walls (Buy_Liq, Sell_Liq)
       8. Apply Market Session (Market_Session column)
+
+    FIX #4: Fear & Greed Index sekarang di-fetch secara real dari Alternative.me.
 
     Returns:
         df   : pd.DataFrame siap-scoring (atau kosong jika gagal)
@@ -676,7 +725,7 @@ def get_fully_enriched_data(symbol: str, interval: str = "4h",
     # H4 EMA columns
     df = _apply_h4_macro_emas(df, df_h4 if interval != "4h" else df.copy())
 
-    # ── 6. Macro — CMC (BTC Dominance, Altcoin Index) ──────
+    # ── 6. Macro — CMC (BTC Dominance) + Fear & Greed (Alternative.me) ──
     cmc = _fetch_macro_cmc()
     if cmc:
         df["BTC_Dominance"] = cmc["BTC_Dominance"]
@@ -685,6 +734,16 @@ def get_fully_enriched_data(symbol: str, interval: str = "4h",
         df["BTC_Dominance"] = None
         df["Altcoin_Index"]  = None
         missing.append("Macro")
+
+    # FIX #2: Fear & Greed Index — sebelumnya selalu None (distribusi shift fatal)
+    # Sekarang di-fetch dari Alternative.me (free endpoint)
+    fear_greed_val = _fetch_fear_greed()
+    if fear_greed_val is not None:
+        df["Fear_Greed"] = fear_greed_val
+    else:
+        df["Fear_Greed"] = None
+        missing.append("FearGreed")
+        logger.warning(f"  [Macro] Fear & Greed tidak tersedia untuk {symbol} — fitur akan NaN→0")
 
     # ── 7. Liquidity Walls (Orderbook) ─────────────────────
     close_last = float(df["Close"].iloc[-1]) if not df.empty else 0.0

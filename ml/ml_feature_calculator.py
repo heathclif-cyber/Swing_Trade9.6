@@ -8,7 +8,7 @@ VP_BINS          = 50      # Price bins untuk volume profile
 OB_LOOKBACK      = 30      # Order block lookback
 FVG_MIN_GAP_ATR  = 0.5     # Minimum FVG gap dalam ATR
 SWING_LOOKBACK   = 5       # Swing high/low lookback
-SEQ_LEN          = 32      # LSTM sequence length
+SEQ_LEN          = 20      # LSTM sequence length — FIX: diturunkan dari 32 → 20 agar kongruen dengan training
 
 FEATURE_COLS = [
     # OHLCV
@@ -274,6 +274,13 @@ def calculate_features_realtime(symbol, df_m15, funding_rate=None, btc_dominance
 
     # Macro
     out['btc_dominance'] = btc_dominance if btc_dominance is not None else np.nan
+
+    # FIX: Jika fear_greed tidak diteruskan sebagai argumen,
+    # coba baca dari kolom df (jika enrichment sudah fetch dari Alternative.me)
+    if fear_greed is None:
+        _fg_col = 'fear_greed' if 'fear_greed' in df.columns else (
+                  'Fear_Greed' if 'Fear_Greed' in df.columns else None)
+        fear_greed = float(df[_fg_col].iloc[-1]) if _fg_col else None
     out['fear_greed'] = fear_greed if fear_greed is not None else np.nan
     
     # Market session
@@ -321,15 +328,16 @@ def calculate_features_realtime(symbol, df_m15, funding_rate=None, btc_dominance
 def get_lgbm_input(features_df: pd.DataFrame) -> pd.DataFrame:
     """
     Ambil 1 row terakhir dari features_df.
-    Tambah kolom OB_price=0 karena LightGBM ditraining dengan 59 fitur.
+    FIX: Tidak lagi inject OB_price=0.0 secara manual.
+    Gunakan lgbm_model.feature_name_ sebagai source of truth di ml_signal.py.
     """
     last_row = features_df.iloc[[-1]].copy()
-    last_row['OB_price'] = 0.0
     return last_row
 
-def get_lstm_input(features_df: pd.DataFrame, seq_len: int = 32) -> np.ndarray:
+def get_lstm_input(features_df: pd.DataFrame, seq_len: int = SEQ_LEN) -> np.ndarray:
     """
     Ambil seq_len row terakhir dari features_df (tanpa OB_price).
+    Default seq_len mengikuti konstanta SEQ_LEN = 20.
     """
     tail = features_df.tail(seq_len)
     return tail.values

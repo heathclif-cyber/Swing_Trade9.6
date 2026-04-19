@@ -14,7 +14,7 @@ logger = logging.getLogger("ml_signal")
 
 # ── Constants ──
 ML_DIR   = Path(__file__).parent / "models"
-SEQ_LEN  = 32
+SEQ_LEN  = 20  # FIX #3: Diturunkan dari 32 → 20 agar kongruen dengan training
 
 SYMBOL_MAP = {
     'SOLUSDT': 0, 'ETHUSDT': 1, 'BNBUSDT': 2, 'XRPUSDT': 3, 'DOGEUSDT': 4,
@@ -138,13 +138,14 @@ class MLSignalEngine:
         features_df['symbol'] = SYMBOL_MAP.get(symbol, 0)
 
         # 4. LightGBM — 1 row terakhir
+        # FIX #1: Hapus forced OB_price injection.
+        # Gunakan feature_name_ dari model .pkl sebagai source of truth.
         X_lgbm = features_df.iloc[[-1]].copy()
-        if 'OB_price' not in X_lgbm.columns:
-            X_lgbm['OB_price'] = 0.0
         lgbm_feat_cols = self.lgbm_model.feature_name_
-        # Tambah kolom yang missing dengan 0
+        # Tambah kolom yang missing dengan 0 (jika ada mismatch minor)
         for col in lgbm_feat_cols:
             if col not in X_lgbm.columns:
+                logger.warning(f"[{symbol}] Kolom LGBM '{col}' tidak ada di features_df — diisi 0.0")
                 X_lgbm[col] = 0.0
         lgbm_proba = self.lgbm_model.predict_proba(
             X_lgbm[lgbm_feat_cols]
@@ -159,9 +160,10 @@ class MLSignalEngine:
         X_seq     = features_df[lstm_cols].iloc[-seq_len:].values.astype(np.float32)
 
         if len(X_seq) < seq_len:
-            logger.warning(f"[{symbol}] Tidak cukup bar untuk LSTM ({len(X_seq)}/{seq_len})")
-            # Pad dengan row pertama
-            pad = np.repeat(X_seq[:1], seq_len - len(X_seq), axis=0)
+            logger.warning(f"[{symbol}] Tidak cukup bar untuk LSTM ({len(X_seq)}/{seq_len}) — menggunakan zero-padding")
+            # FIX: Zero-padding lebih aman daripada repeat-first-row
+            # agar fitur lag/momentum tidak terdistorsi
+            pad = np.zeros((seq_len - len(X_seq), X_seq.shape[1]), dtype=np.float32)
             X_seq = np.vstack([pad, X_seq])
 
         X_seq_scaled = self.lstm_scaler.transform(X_seq)           # (seq_len, n_features)
