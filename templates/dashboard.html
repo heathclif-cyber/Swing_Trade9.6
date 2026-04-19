@@ -241,6 +241,17 @@ tbody tr:last-child td { border-bottom: none; }
 .alert-banner.show { display: block; animation: fadeIn .3s ease; }
 .alert-banner.success { background: var(--accent-green); color: #0a0e1a; }
 .alert-banner.danger  { background: var(--accent-red); color: #fff; }
+/* ── SYSTEM HEALTH BANNER ──────────────────────────────────────────────────── */
+.system-health-bar {
+    display: none; position: sticky; top: 0; z-index: 800;
+    background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35);
+    border-radius: var(--radius-md); padding: 10px 18px; margin-bottom: 14px;
+    color: #fbbf24; font-size: 12.5px; font-weight: 600;
+    align-items: center; gap: 10px; animation: fadeIn .3s ease;
+    backdrop-filter: var(--blur-sm);
+}
+.system-health-bar.show { display: flex; }
+.health-errors { flex: 1; font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .emergency-bar {
     display: flex; align-items: center; justify-content: center; gap: 12px;
     padding: 14px 20px; margin-bottom: 16px;
@@ -439,6 +450,12 @@ tbody tr:last-child td { border-bottom: none; }
 </div>
 <!-- ALERT -->
 <div class="alert-banner" id="alertBanner"></div>
+<!-- SYSTEM HEALTH BANNER -->
+<div class="system-health-bar" id="systemHealthBar">
+    <span>⚠️ DATA WARNING</span>
+    <span class="health-errors" id="healthErrorText">Memeriksa status data...</span>
+    <span id="healthCheckedAt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap;"></span>
+</div>
 
 <div class="app-container" id="dashboardContent">
     <!-- HEADER -->
@@ -743,6 +760,30 @@ function toggleSection(contentId, headerEl) {
     body.classList.toggle('collapsed');
     headerEl.classList.toggle('open', isCollapsed);
 }
+
+// ── System Health Monitor ────────────────────────────────────────────────────
+function checkSystemHealth() {
+    fetch('/api/system_health')
+        .then(r => r.json())
+        .then(data => {
+            const bar   = document.getElementById('systemHealthBar');
+            const txt   = document.getElementById('healthErrorText');
+            const tsEl  = document.getElementById('healthCheckedAt');
+            if (data.status === 'warning' && data.error_count > 0) {
+                const parts = Object.entries(data.errors)
+                    .map(([sym, info]) => `${sym}: ${info.message || info} (${info.time || ''})`)
+                    .join('  |  ');
+                txt.textContent = parts;
+                tsEl.textContent = `Cek: ${data.checked_at}`;
+                bar.classList.add('show');
+            } else {
+                bar.classList.remove('show');
+            }
+        })
+        .catch(() => {});
+}
+checkSystemHealth();
+setInterval(checkSystemHealth, 30000);
 </script>
 <script src="/static/dashboard.js"></script>
 </body>

@@ -1594,9 +1594,31 @@ def analyze_csv():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/system_health")
+def api_system_health():
+    """
+    System Health — dibaca UI setiap 30 detik.
+    Berisi daftar koin dengan data API tidak tersedia.
+    Error ini sebelumnya dikirim via Telegram, sekarang dialihkan ke UI banner.
+    """
+    try:
+        with signal_monitor._state_lock:
+            errors = dict(signal_monitor._alert_state.get("system_errors", {}))
+        return jsonify({
+            "status":      "warning" if errors else "ok",
+            "errors":      errors,
+            "error_count": len(errors),
+            "checked_at":  datetime.now().strftime("%H:%M:%S"),
+        })
+    except Exception as e:
+        logger.warning(f"system_health error: {e}")
+        return jsonify({"status": "unknown", "errors": {}, "error_count": 0}), 500
+
+
 @app.route("/api/scanner")
 def api_scanner():
     """Market Scanner: Evaluasi skor LONG dan SHORT untuk semua koin secara paralel."""
+
     results = []
 
     def analyze_coin(pair):

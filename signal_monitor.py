@@ -289,22 +289,23 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             logger.warning(f"Failed to fetch M15 for {symbol}: {e}")
             df_m15 = None
 
-        # ── [FAIL-SAFE] Peringatan data tidak lengkap (1×) ──
-        if data_meta.get("data_incomplete"):
-            missing = data_meta.get("missing_data", [])
-            state_key = f"data_warn_{symbol}"
-            with _state_lock:
-                pair_state  = _alert_state.setdefault(symbol, {})
-                last_warned = pair_state.get("_data_warn_ts", 0)
-                # Kirim peringatan maksimal 1x per 4 jam
-                if time.time() - last_warned > 4 * 3600:
-                    _send_telegram(
-                        f"⚠️ <b>Peringatan Sistem — {symbol}</b>\n"
-                        f"Gagal menarik data: <b>{', '.join(missing)}</b>\n"
-                        f"Bot mungkin menggunakan data fallback.\n"
-                        f"Skor mungkin kurang akurat sementara ini."
-                    )
-                    pair_state["_data_warn_ts"] = time.time()
+        # ── [SYSTEM HEALTH] Data tidak lengkap → catat di state, BUKAN Telegram ──
+        with _state_lock:
+            sys_errors = _alert_state.setdefault("system_errors", {})
+            if data_meta.get("data_incomplete"):
+                missing = data_meta.get("missing_data", [])
+                sys_errors[symbol] = {
+                    "message": f"Data tidak tersedia: {', '.join(missing)}",
+                    "time": datetime.now().strftime("%H:%M"),
+                    "missing": missing,
+                }
+                _save_alert_state(_alert_state)
+                logger.warning(f"[{symbol}] Data incomplete: {missing} — dicatat ke system_errors, skip evaluasi ML")
+                return  # Skip evaluasi jika data tidak lengkap
+            else:
+                # Clear error jika data sudah kembali normal
+                if symbol in sys_errors:
+                    del sys_errors[symbol]
                     _save_alert_state(_alert_state)
 
         coin_data     = trade_entries.get(symbol, {})
@@ -354,32 +355,16 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
 
         now_ts = time.time()
 
-        # ── [FIX 1] Hard block sesi Asia berbasis server time (tidak bergantung enrichment) ──
-        _utc_hour = datetime.now(timezone.utc).hour
-        _is_asia_session = (_utc_hour >= 19) or (_utc_hour < 1)  # 02:00-08:00 WITA = 19:00-01:00 UTC
-        _block_new_entry = _is_asia_session
-        if _block_new_entry:
-            logger.info(
-                f"[{symbol}] [FIX1] Sesi Asia terdeteksi (UTC={_utc_hour:02d}:xx) — "
-                "entry baru DIBLOKIR secara hard. Alert posisi aktif tetap berjalan."
-            )
-
         with _state_lock:
             state = _alert_state.setdefault(symbol, {
-                # [FIX 2] State terpisah per arah menggantikan last_signal/last_alert_ts tunggal
-                "last_long_signal":    None,
-                "last_long_alert_ts":  0,
-                "last_short_signal":   None,
-                "last_short_alert_ts": 0,
-                # Backward compat — tetap ada agar state lama tidak crash saat load
-                "last_signal":    None,
-                "last_alert_ts":  0,
-                "exit_alerted":   False,
-                "tp1_alerted":    False,
-                "tp2_alerted":    False,
-                "tp3_alerted":    False,
+                "last_long_signal":  None,
+                "last_short_signal": None,
+                "last_signal":       None,
+                "exit_alerted":      False,
+                "tp1_alerted":       False,
+                "tp2_alerted":       False,
+                "tp3_alerted":       False,
             })
-            cooldown = 4 * 3600
 
             # Helper untuk PnL dinamis
             def get_pnl():
@@ -511,7 +496,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["exit_alerted"] = False
                 _save_alert_state(_alert_state)
 
-            # ── TRAILING SL ALERT ─────────────────────────
+            # ── TRAILING SL — Update state untuk UI (tanpa Telegram) ──
+            # Trailing SL info tersedia di UI via /api/system_health & /api/data
+            # Telegram hanya untuk TP hits (sudah di atas) dan SL hit (di bawah)
             trailing_L = trailing.get("long", {})
             trailing_S = trailing.get("short", {})
             active_tsl = None
@@ -522,65 +509,15 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif trailing_S.get("applicable"):
                 active_tsl = trailing_S
                 tsl_side = "SHORT"
-
-            # [FIX TSL] Alert HANYA saat stage berubah (NONE→TP1_HIT atau TP1_HIT→TP2_HIT)
-            # + cooldown 4 jam untuk mencegah spam jika harga bolak-balik di sekitar TP
-            TSL_COOLDOWN = 4 * 3600
-            if is_active and active_tsl:
-                # Gunakan 'stage' sebagai acuan perubahan — lebih deterministik dari action_text
-                current_stage = active_tsl.get("stage", "UNKNOWN")
-                last_stage    = state.get("last_trailing_stage", "NONE")
-                last_tsl_ts   = state.get("last_trailing_ts", 0)
-                _tsl_cooldown_ok = (now_ts - last_tsl_ts) > TSL_COOLDOWN
-
-                # Kirim hanya jika: stage benar-benar naik (TP1→TP2 atau NONE→TP1)
-                # DAN cooldown terpenuhi (anti-spam jika high candle berikutnya sama)
-                _stage_escalated = (
-                    (last_stage == "NONE"    and current_stage == "TP1_HIT") or
-                    (last_stage == "TP1_HIT" and current_stage == "TP2_HIT")
-                )
-                if _stage_escalated and _tsl_cooldown_ok:
-                    pnl_str = f"{((close_price/avg_entry)-1)*100:+.2f}%" if avg_entry else "N/A"
-                    if tsl_side == "SHORT" and avg_entry:
-                        pnl_str = f"{((avg_entry/close_price)-1)*100:+.2f}%"
-
-                    hold_str = ""
-                    if mom_hold.get("signal"):
-                        reasons = " · ".join(mom_hold.get("reasons", [])[:3])
-                        hold_str = (
-                            f"\n\n🔥 <b>MOMENTUM MASIH BESAR ({mom_hold['strength']})</b>\n"
-                            f"<i>Disarankan tahan posisi (partial TP).</i>\n"
-                            f"Detail: {reasons}"
-                        )
-
-                    action_text = active_tsl.get("action", "")
-                    _send_telegram(
-                        f"🛡️ <b>TRAILING SL AKTIF — {symbol}</b>\n"
-                        f"{'─'*28}\n"
-                        f"Arah Trade: <b>{tsl_side}</b> | PnL: <b>{pnl_str}</b>\n"
-                        f"Harga: <b>${close_price:.6f}</b>\n\n"
-                        f"✅ <b>Instruksi Sistem:</b>\n"
-                        f"<b>{action_text}</b>\n\n"
-                        f"💡 <i>{active_tsl.get('note', '')}</i>{hold_str}"
-                    )
-                    state["last_trailing_stage"] = current_stage
-                    state["last_trailing_ts"]    = now_ts
-                    state["last_alert_ts"]        = now_ts
-                    _save_alert_state(_alert_state)
-                    return
-                elif current_stage != "NONE" and not _stage_escalated:
-                    # Stage sudah pernah tercapai dan tidak berubah — update stage tanpa alert
-                    state["last_trailing_stage"] = current_stage
-            elif not active_tsl:
-                # Trailing tidak aktif (TP belum tercapai atau posisi ditutup) — reset stage
+            if active_tsl:
+                state["last_trailing_stage"] = active_tsl.get("stage", "NONE")
+                state["trailing_sl_action"]  = active_tsl.get("action", "")
+            else:
                 state["last_trailing_stage"] = "NONE"
 
             # ── LONG SIGNAL ────────────────────────────────
-            # [FIX] Cek session_block — jangan kirim entry alert saat sesi diblokir
-            _session_block     = variables.get("session_block", False)
-            _session_blk_type  = variables.get("session_block_type", "NONE")
-            _session_blk_rsn   = variables.get("session_block_reason", "")
-
+            # ATURAN: Kirim hanya jika tipe sinyal BERUBAH (misal FLAT→LONG_FULL)
+            # Tidak ada cooldown / Asian session block — sinyal murni dari model
             new_signal_L = None
             ml_size_L = result['long'].get('ml_size', 'SKIP')
             if ml_size_L == 'FULL' and result['long'].get('ml_signal') == 'LONG':
@@ -588,27 +525,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif ml_size_L == 'HALF' and result['long'].get('ml_signal') == 'LONG':
                 new_signal_L = "LONG_HALF"
 
-            # Blokir entry baru jika sesi enrichment diblokir
-            if new_signal_L and _session_block:
-                logger.info(
-                    f"[{symbol}] LONG signal {new_signal_L} DIBLOKIR (enrichment session) — "
-                    f"{_session_blk_type}: {_session_blk_rsn}"
-                )
-                new_signal_L = None
-
-            # [FIX 1] Hard block Asia session
-            if new_signal_L and _block_new_entry:
-                logger.info(
-                    f"[{symbol}] [FIX1] LONG signal {new_signal_L} DIBLOKIR — Sesi Asia (server time)"
-                )
-                new_signal_L = None
-
-            # [FIX 2] Per-direction cooldown dengan OR kondisi
-            _time_since_long = now_ts - state.get("last_long_alert_ts", 0)
-            if new_signal_L and (
-                new_signal_L != state.get("last_long_signal")
-                or _time_since_long > cooldown
-            ):
+            if new_signal_L and new_signal_L != state.get("last_long_signal"):
                 size_label = "FULL SIZE 🟢🟢" if new_signal_L == "LONG_FULL" else "HALF SIZE 🟡"
                 rr1        = lvl_L.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
@@ -651,16 +568,13 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     + f"🔬 StochRSI: {stoch_str}\n"
                     f"🕐 {wib} WIB"
                 )
-                # [FIX 2] Update state per-arah LONG
-                state["last_long_signal"]   = new_signal_L
-                state["last_long_alert_ts"] = now_ts
-                # Juga update backward-compat keys
-                state["last_signal"]   = new_signal_L
-                state["last_alert_ts"] = now_ts
+                state["last_long_signal"] = new_signal_L
+                state["last_signal"]      = new_signal_L
                 _save_alert_state(_alert_state)
                 return
 
             # ── SHORT SIGNAL ───────────────────────────────
+            # ATURAN: Kirim hanya jika tipe sinyal BERUBAH
             new_signal_S = None
             ml_size_S = result['short'].get('ml_size', 'SKIP')
             if ml_size_S == 'FULL' and result['short'].get('ml_signal') == 'SHORT':
@@ -668,27 +582,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             elif ml_size_S == 'HALF' and result['short'].get('ml_signal') == 'SHORT':
                 new_signal_S = "SHORT_HALF"
 
-            # Blokir entry baru jika sesi enrichment diblokir
-            if new_signal_S and _session_block:
-                logger.info(
-                    f"[{symbol}] SHORT signal {new_signal_S} DIBLOKIR (enrichment session) — "
-                    f"{_session_blk_type}: {_session_blk_rsn}"
-                )
-                new_signal_S = None
-
-            # [FIX 1] Hard block Asia session
-            if new_signal_S and _block_new_entry:
-                logger.info(
-                    f"[{symbol}] [FIX1] SHORT signal {new_signal_S} DIBLOKIR — Sesi Asia (server time)"
-                )
-                new_signal_S = None
-
-            # [FIX 2] Per-direction cooldown dengan OR kondisi
-            _time_since_short = now_ts - state.get("last_short_alert_ts", 0)
-            if new_signal_S and (
-                new_signal_S != state.get("last_short_signal")
-                or _time_since_short > cooldown
-            ):
+            if new_signal_S and new_signal_S != state.get("last_short_signal"):
                 size_label = "FULL SIZE 🔴🔴" if new_signal_S == "SHORT_FULL" else "HALF SIZE 🟠"
                 rr1        = lvl_S.get("rr1", 0)
                 rr_q       = "⭐⭐⭐" if rr1 >= 3 else ("⭐⭐" if rr1 >= 2 else "⭐")
@@ -733,12 +627,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"R:R Quality: {rr_q}\n"
                     f"🕐 {wib} WIB"
                 )
-                # [FIX 2] Update state per-arah SHORT
-                state["last_short_signal"]   = new_signal_S
-                state["last_short_alert_ts"] = now_ts
-                # Juga update backward-compat keys
-                state["last_signal"]   = new_signal_S
-                state["last_alert_ts"] = now_ts
+                state["last_short_signal"] = new_signal_S
+                state["last_signal"]       = new_signal_S
                 _save_alert_state(_alert_state)
                 return
 
