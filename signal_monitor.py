@@ -278,8 +278,8 @@ SIGNAL_CONF_MIN      = 0.55   # 55% — minimum entry signal pertama
 SIGNAL_FLIP_CONF_MIN = 0.65   # 65% — minimum untuk flip arah (lebih ketat)
 
 # Jumlah bar M15 berurutan yang harus konsisten sebelum flip diterima.
-# 1 bar = 15 menit. Default 2 bar = 30 menit lock-in.
-FLIP_CONFIRM_BARS    = 2
+# 1 bar = 15 menit. Default 1 bar = 15 menit lock-in.
+FLIP_CONFIRM_BARS    = 1
 
 # Cooldown setelah flip expired — minimal 1 jam sebelum entry baru
 FLIP_COOLDOWN_SECS   = 3600
