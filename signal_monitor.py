@@ -766,8 +766,8 @@ def _monitor_loop() -> None:
         f"✅ Monitoring {len(MONITOR_PAIRS)} pair setiap 15 menit\n"
         f"Pairs: {', '.join(MONITOR_PAIRS)}\n\n"
         f"Notifikasi akan dikirim otomatis saat:\n"
-        f"  🚀 LONG signal (skor ≥ 46/78)\n"   # [FIX v2.0] was 36/71
-        f"  📉 SHORT signal (skor ≥ 46/78)\n"   # [FIX v2.0] was 36/71
+        f"  🚀 Sinyal LONG (ML Size: FULL/HALF)\n"
+        f"  📉 Sinyal SHORT (ML Size: FULL/HALF)\n"
         f"  ⚠️ EXIT ALERT\n\n"
         f"🕐 Start: {wib} WIB"
     )

@@ -218,6 +218,7 @@ function renderQuantAnalysis(quant, state) {
         if (document.getElementById('marketContext')) document.getElementById('marketContext').innerHTML = '<span style="color:var(--text-3);font-size:12px">—</span>';
         return; 
     }
+    activeQuantTab = quant.long?.ml_signal === 'SHORT' ? 'short' : 'long';
     const data = quant[activeQuantTab];
     if (!data) return;
     const ep = state?.user_input?.entry_price || 0;
@@ -226,27 +227,16 @@ function renderQuantAnalysis(quant, state) {
     const banner = document.getElementById('decisionBanner');
     banner.className = `quant-decision-banner decision-${data.code}`;
     document.getElementById('quantDecisionName').className = `decision-name color-${data.code}`;
-    let blockMsg = '';
-    if (data.code === 'SKIP') {
-        const sBlock = state.quant_analysis?.variables?.session_override_reason || '';
-        // [PERBAIKAN] Ambil pesan yang sesuai dengan tab yang sedang aktif
-        const stGateKey = activeQuantTab === 'long' ? 'stoch_gate_override' : 'stoch_gate_override_s';
-        const stGate = state.quant_analysis?.variables?.[stGateKey] || '';
-        let gateMsg = '';
-        for (const [gk, [status, msg]] of Object.entries(data.gate.gates)) {
-            if (status === 'FAIL') gateMsg += `${gk}: ${msg} `;
-        }
-        blockMsg = [gateMsg, sBlock, stGate].filter(x => x).join(' | ');
-    }
+    let blockMsg = quant.variables?.ml_error ? `⚠ ML: ${quant.variables.ml_error}` : '';
 
-    document.getElementById('quantDecisionName').textContent = data.decision;
-    document.getElementById('quantScoreSummary').innerHTML = `Score: ${data.total}/78 (${data.pct.toFixed(1)}%)${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}`;
+    document.getElementById('quantDecisionName').textContent = quant.long?.ml_signal || 'FLAT';
+    document.getElementById('quantScoreSummary').innerHTML = `Confidence: ${(data.ml_confidence * 100).toFixed(1)}%${blockMsg ? `<br><span style="font-size:11px;color:rgba(255,255,255,0.7);display:block;margin-top:8px">${blockMsg}</span>` : ''}`;
     // Total bar
-    const pct = data.total / 71 * 100;
-    document.getElementById('quantTotalPts').textContent = `${data.total}/78`;
+    const pct = data.ml_confidence * 100;
+    document.getElementById('quantTotalPts').textContent = `${pct.toFixed(1)}%`;
     const barEl = document.getElementById('quantTotalBar');
     barEl.style.width = pct + '%';
-    barEl.style.background = data.code === 'FULL' ? 'var(--accent-green)' : data.code === 'HALF' ? 'var(--accent-blue)' : data.code === 'WAIT' ? 'var(--accent-yellow)' : 'var(--accent-red)';
+    barEl.style.background = data.ml_signal === 'LONG' ? 'var(--accent-green)' : data.ml_signal === 'SHORT' ? 'var(--accent-red)' : 'var(--accent-yellow)';
     // Active pos banner
     const apb = document.getElementById('activePosBanner');
     if (hasEntry && state?.position?.remaining_qty > 0) {
@@ -257,43 +247,42 @@ function renderQuantAnalysis(quant, state) {
             <span>Qty: <strong>${state.position.remaining_qty.toFixed(4)}</strong></span>
             <span>P&L: <strong class="${pnl>=0?'val-pos':'val-neg'}">${pnl>=0?'+':''}${pnl.toFixed(2)}%</strong></span></div>`;
     } else { apb.innerHTML = ''; }
-    // Feature scoring
-    const scores = data.scores;
+    // ML Probabilities & Feature Inputs
     let html = '';
-    for (const [key, val] of Object.entries(scores)) {
-        const [pts, max, raw, stars] = val;
-        const fillPct = max > 0 ? (pts / max * 100) : 0;
-        const dotCls = `dot-${stars}`;
-        const fillColor = stars === 3 ? 'var(--accent-green)' : stars === 2 ? 'var(--accent-yellow)' : stars === 1 ? 'var(--accent-orange)' : 'var(--accent-red)';
-        const unit = FEATURE_UNIT[key] || '';
-        const rawFmt = typeof raw === 'number' ? (raw >= 0 ? '+' : '') + raw.toFixed(2) + unit : raw;
-        
-        let customName = FEATURE_LABELS[key] || key;
-        let customVal = rawFmt;
-        let pctx = quant.variables || {};
-        
-        if (key === 'ATR') {
-            const lo = pctx.atr_thresholds?.score_sweet_lo?.toFixed(1) || '?';
-            const hi = pctx.atr_thresholds?.score_sweet_hi?.toFixed(1) || '?';
-            const h = pctx.H_atr_pct?.toFixed(2) || '?';
-            customName = `ATR sweet spot EMPIRIS: ${lo}%–${hi}%`;
-            customVal = `H=${h}% → skor ${stars}`;
-        } else if (key === 'CVD') {
-            const kval = pctx.K_cvd_norm?.toFixed(2) || '?';
-            customName = `CVD_norm K=${kval}% = (CVD[-1] − CVD[-21]) / |CVD[-21]| × 100`;
-            customVal = rawFmt;
-        } else if (key === 'EMA50') {
-            const m = pctx.M_ema50?.toFixed(2) || '?';
-            customName = `vs EMA50 M=${m}%`;
-            customVal = `skor ${stars} → poin ${pts}/${max}`;
+    const pctx = quant.variables || {};
+    const mlFeatures = [
+        { label: 'RSI 6 Momentum', value: pctx.O_rsi, unit: '' },
+        { label: 'Volatility ATR', value: pctx.H_atr_pct, unit: '%' },
+        { label: 'Open Interest Norm', value: pctx.C_oi_norm, unit: '%' },
+        { label: 'Volume Norm', value: pctx.F_vol_norm, unit: '%' },
+        { label: 'CVD Norm', value: pctx.K_cvd_norm, unit: '%' },
+        { label: 'Taker Buy', value: pctx.G_taker_buy, unit: '%' },
+        { label: 'Dist EMA 21', value: pctx.L_ema21, unit: '%' },
+        { label: 'Dist EMA 50', value: pctx.M_ema50, unit: '%' },
+        { label: 'Dist EMA 200', value: pctx.N_ema200, unit: '%' }
+    ];
+
+    html += '<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:8px">ML Feature Inputs</div>';
+    mlFeatures.forEach(f => {
+        if (f.value !== undefined && f.value !== null) {
+            html += `<div class="feature-row" style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,.05)">
+                <div class="feature-name" style="color:var(--text-2); font-size:11px">${f.label}</div>
+                <div class="feature-val" style="font-family:var(--mono);color:var(--text-1); font-size:11px; margin-left:auto">${f.value.toFixed(2)}${f.unit}</div>
+            </div>`;
         }
-        
+    });
+
+    html += '<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:12px 0 8px">Model Probabilities</div>';
+    const proba = data.ml_proba || {};
+    for (const [key, val] of Object.entries(proba)) {
+        const fillPct = val * 100;
+        const fillColor = key === 'LONG' ? 'var(--accent-green)' : key === 'SHORT' ? 'var(--accent-red)' : 'var(--accent-yellow)';
         html += `<div class="feature-row">
-            <div class="feature-dot ${dotCls}"></div>
-            <div class="feature-name">${customName}</div>
-            <div class="feature-val">${customVal}</div>
-            <div class="feature-bar-bg"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
-            <div class="pts-label">${pts}/${max}</div></div>`;
+            <div class="feature-dot" style="background:${fillColor}"></div>
+            <div class="feature-name" style="text-transform:uppercase; font-weight:bold">${key}</div>
+            <div class="feature-val">${fillPct.toFixed(1)}%</div>
+            <div class="feature-bar-bg" style="width:60px; margin-left:10px"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
+            </div>`;
     }
     document.getElementById('featureGrid').innerHTML = html;
     // SL/TP Levels
@@ -471,33 +460,40 @@ function renderCSVResult(json) {
             blockMsg = [gateMsg, sBlock, stGate].filter(x => x).join(' | ');
         }
         
-        let featureRows = '';
-        for (const [key, val] of Object.entries(d.scores)) {
-            const [pts, max, raw, stars] = val;
-            const fillPct = max > 0 ? pts / max * 100 : 0;
-            const fillColor = stars === 3 ? 'var(--accent-green)' : stars === 2 ? 'var(--accent-yellow)' : stars === 1 ? 'var(--accent-orange)' : 'var(--accent-red)';
-            const unit = FEATURE_UNIT[key] || ''; const rawFmt = (raw >= 0 ? '+' : '') + raw.toFixed(2) + unit;
-            
-            let customName = FEATURE_LABELS[key] || key;
-            let customVal = rawFmt;
-            let pctx = json.variables || {};
-            
-            if (key === 'ATR') {
-                const lo = pctx.atr_thresholds?.score_sweet_lo?.toFixed(1) || '?';
-                const hi = pctx.atr_thresholds?.score_sweet_hi?.toFixed(1) || '?';
-                const h = pctx.H_atr_pct?.toFixed(2) || '?';
-                customName = `ATR sweet spot EMPIRIS: ${lo}%–${hi}%`;
-                customVal = `H=${h}% → skor ${stars}`;
-            } else if (key === 'CVD') {
-                const kval = pctx.K_cvd_norm?.toFixed(2) || '?';
-                customName = `CVD_norm K=${kval}% = (CVD[-1] − CVD[-21]) / |CVD[-21]| × 100`;
-                customVal = rawFmt;
-            } else if (key === 'EMA50') {
-                const m = pctx.M_ema50?.toFixed(2) || '?';
-                customName = `vs EMA50 M=${m}%`;
-                customVal = `skor ${stars} → poin ${pts}/${max}`;
+        const pctx = json.variables || {};
+        const mlFeatures = [
+            { label: 'RSI 6 Momentum', value: pctx.O_rsi, unit: '' },
+            { label: 'Volatility ATR', value: pctx.H_atr_pct, unit: '%' },
+            { label: 'Open Interest Norm', value: pctx.C_oi_norm, unit: '%' },
+            { label: 'Volume Norm', value: pctx.F_vol_norm, unit: '%' },
+            { label: 'CVD Norm', value: pctx.K_cvd_norm, unit: '%' },
+            { label: 'Taker Buy', value: pctx.G_taker_buy, unit: '%' },
+            { label: 'Dist EMA 21', value: pctx.L_ema21, unit: '%' },
+            { label: 'Dist EMA 50', value: pctx.M_ema50, unit: '%' },
+            { label: 'Dist EMA 200', value: pctx.N_ema200, unit: '%' }
+        ];
+
+        let featureRows = '<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin-bottom:8px">ML Feature Inputs</div>';
+        mlFeatures.forEach(f => {
+            if (f.value !== undefined && f.value !== null) {
+                featureRows += `<div class="feature-row" style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,.05)">
+                    <div class="feature-name" style="color:var(--text-2); font-size:11px">${f.label}</div>
+                    <div class="feature-val" style="font-family:var(--mono);color:var(--text-1); font-size:11px; margin-left:auto">${f.value.toFixed(2)}${f.unit}</div>
+                </div>`;
             }
-            featureRows += `<div class="feature-row"><div class="feature-dot dot-${stars}"></div><div class="feature-name">${customName}</div><div class="feature-val">${customVal}</div><div class="feature-bar-bg"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div><div class="pts-label">${pts}/${max}</div></div>`;
+        });
+
+        featureRows += '<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:12px 0 8px">Model Probabilities</div>';
+        const proba = d.ml_proba || {};
+        for (const [key, val] of Object.entries(proba)) {
+            const fillPct = val * 100;
+            const fillColor = key === 'LONG' ? 'var(--accent-green)' : key === 'SHORT' ? 'var(--accent-red)' : 'var(--accent-yellow)';
+            featureRows += `<div class="feature-row">
+                <div class="feature-dot" style="background:${fillColor}"></div>
+                <div class="feature-name" style="text-transform:uppercase; font-weight:bold">${key}</div>
+                <div class="feature-val">${fillPct.toFixed(1)}%</div>
+                <div class="feature-bar-bg" style="width:60px; margin-left:10px"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
+                </div>`;
         }
         // R:R Matrix for CSV
         let rrHtml = '';

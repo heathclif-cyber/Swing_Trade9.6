@@ -1009,6 +1009,7 @@ def api_data():
                         "ml_signal_s":    quant_results['short'].get('ml_signal', 'FLAT'),
                         "ml_confidence_s":quant_results['short'].get('ml_confidence', 0.0),
                         "ml_size_s":      quant_results['short'].get('ml_size', 'SKIP'),
+                        "ml_narrative":   quant_results['long'].get('narrative', ''),
                         # Untuk kompatibilitas UI lama yang mungkin baca long_score:
                         "long_score":     round(quant_results['long'].get('ml_confidence', 0.0) * 100, 1),
                         "short_score":    round(quant_results['short'].get('ml_confidence', 0.0) * 100, 1),
@@ -1624,8 +1625,8 @@ def api_scanner():
                         "ml_signal_s":    score_res['short'].get('ml_signal', 'FLAT'),
                         "ml_confidence_s":score_res['short'].get('ml_confidence', 0.0),
                         "ml_size_s":      score_res['short'].get('ml_size', 'SKIP'),
-                        "long_score":     round(score_res['long'].get('ml_confidence', 0.0) * 100, 1),
-                        "short_score":    round(score_res['short'].get('ml_confidence', 0.0) * 100, 1),
+                        "long_score":     round(score_res['long'].get('total', 0.0), 1),
+                        "short_score":    round(score_res['short'].get('total', 0.0), 1),
                     }
         except Exception as e:
             logger.error(f"[Scanner] Error analyzing {pair}: {e}")

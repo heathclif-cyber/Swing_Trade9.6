@@ -1,8 +1,8 @@
 """
-Protocol 9.6 — 78-Point Quantitative Swing Trading Scoring Engine
-Full spec-compliant implementation (Bagian 0–10).
-
-Refactored to orchestrator pattern.
+Protocol 9.6 — ML-Only Scoring Engine (v3.0)
+Sumber sinyal: Stacking Ensemble (LightGBM + LSTM + Logistic Regression meta-learner)
+Tidak ada rule-based scoring. Tidak ada core.scoring_long / core.scoring_short.
+Output format dipertahankan agar protocol_96_ui.py tidak perlu diubah.
 """
 import logging
 import pandas as pd
@@ -16,24 +16,26 @@ from core.helpers import (
 )
 from core.momentum import (
     check_momentum_hold, evaluate_exit_signals,
-    calculate_trailing_sl_long, calculate_trailing_sl_short, detect_sl_wick_fakeout
+    calculate_trailing_sl_long, calculate_trailing_sl_short,
+    detect_sl_wick_fakeout
 )
-from core.scoring_long import calculate_long_score
-from core.scoring_short import calculate_short_score
+from core.levels import get_atr_projections_long, get_atr_projections_short
+
 
 def calculate_71point_score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
-    """78-point scoring engine (was 71-point, upgraded v2.0)."""
+    """Entry point — nama dipertahankan untuk kompatibilitas downstream."""
     try:
-        return _calculate_score_internal(df, meta, df_m15=df_m15, ml_engine=ml_engine)
+        return _score(df, meta, df_m15=df_m15, ml_engine=ml_engine)
     except Exception as e:
-        logger.error(f"[Scoring] Crash saat kalkulasi skor: {e}", exc_info=True)
+        logger.error(f"[Scoring] Crash: {e}", exc_info=True)
         return None
 
-def _calculate_score_internal(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
+
+def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
     if len(df) < 22:
         return None
 
-    # ── Ensure CVD ─────────────────────────────────────────────
+    # ── CVD fallback ────────────────────────────────────────────────────────
     if 'CVD' not in df.columns:
         df = df.copy()
         if 'Buy_Volume' in df.columns and 'Total_Volume' in df.columns:
@@ -45,78 +47,73 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict, df_m15=None, ml_engi
     last  = df.iloc[-1]
     prev1 = df.iloc[-2] if len(df) >= 2 else last
     prev2 = df.iloc[-3] if len(df) >= 3 else prev1
-    close_price = safe_float(last.get('Close', 0))
-    low_price   = safe_float(last.get('Low', close_price))
-    high_price  = safe_float(last.get('High', close_price))
 
-    # ── Metadata ───────────────────────────────────────────────
-    symbol = str(meta.get('Symbol', '')).upper()
-    avg_entry = meta.get('AVG_ENTRY_PRICE')
-    is_active = avg_entry is not None and float(avg_entry) > 0
-    entry_val = float(avg_entry) if is_active else close_price
+    close_price = safe_float(last.get('Close', 0))
+    low_price   = safe_float(last.get('Low',   close_price))
+    high_price  = safe_float(last.get('High',  close_price))
+
+    # ── Meta ────────────────────────────────────────────────────────────────
+    symbol         = str(meta.get('Symbol', '')).upper()
+    avg_entry      = meta.get('AVG_ENTRY_PRICE')
+    is_active      = avg_entry is not None and float(avg_entry) > 0
+    entry_val      = float(avg_entry) if is_active else close_price
     entry_date_str = meta.get('ENTRY_DATE')
 
-    # ── Slices ─────────────────────────────────────────────────
-    s20 = df.iloc[-21:-1]
-    has100 = len(df) >= 101
-    s100 = df.iloc[-101:-1] if has100 else s20
+    # ── Slices ──────────────────────────────────────────────────────────────
+    s20           = df.iloc[-21:-1]
+    has100        = len(df) >= 101
+    s100          = df.iloc[-101:-1] if has100 else s20
     candle_21_ago = df.iloc[-21] if len(df) >= 21 else df.iloc[0]
 
-    # [P1] DYNAMIC BUY_LIQ
-    _low_window = df['Low'].iloc[-20:] if 'Low' in df.columns and len(df) >= 20 else None
-    if _low_window is not None and len(_low_window) >= 5:
-        swing_low_20 = float(_low_window.min())
+    # ── Dynamic liquidity ───────────────────────────────────────────────────
+    _lw = df['Low'].iloc[-20:] if 'Low' in df.columns and len(df) >= 20 else None
+    if _lw is not None and len(_lw) >= 5:
+        swing_low_20 = float(_lw.min())
         dyn_buy_liq  = swing_low_20 * 0.995
         dist_to_liq  = (close_price - dyn_buy_liq) / dyn_buy_liq * 100
         has_dyn_liq  = True
     else:
-        swing_low_20 = None
-        dyn_buy_liq  = None
-        dist_to_liq  = None
+        swing_low_20 = dyn_buy_liq = dist_to_liq = None
         has_dyn_liq  = False
 
-    # [P1] DYNAMIC SELL_LIQ
-    _high_window = df['High'].iloc[-20:] if 'High' in df.columns and len(df) >= 20 else None
-    if _high_window is not None and len(_high_window) >= 5:
-        swing_high_20 = float(_high_window.max())
-        dyn_sell_liq  = swing_high_20 * 1.005
+    _hw = df['High'].iloc[-20:] if 'High' in df.columns and len(df) >= 20 else None
+    if _hw is not None and len(_hw) >= 5:
+        swing_high_20    = float(_hw.max())
+        dyn_sell_liq     = swing_high_20 * 1.005
         dist_to_sell_liq = (dyn_sell_liq - close_price) / close_price * 100 if close_price else 0.0
         has_dyn_sell_liq = True
     else:
-        swing_high_20    = None
-        dyn_sell_liq     = None
-        dist_to_sell_liq = None
+        swing_high_20 = dyn_sell_liq = dist_to_sell_liq = None
         has_dyn_sell_liq = False
 
-    # ── OI & Vol ─────────────────────────────────────────────
-    A = safe_float(last.get('Open_Interest', 0))
-    B20 = s20['Open_Interest'].mean() if _has_col(df, 'Open_Interest') else (A or 1.0)
+    # ── OI / Volume ─────────────────────────────────────────────────────────
+    A    = safe_float(last.get('Open_Interest', 0))
+    B20  = s20['Open_Interest'].mean()  if _has_col(df, 'Open_Interest') else (A or 1.0)
     B100 = s100['Open_Interest'].mean() if _has_col(df, 'Open_Interest') and has100 else B20
-    C = ((A - B20) / B20 * 100) if B20 else 0.0
-    C2 = ((A - B100) / B100 * 100) if B100 else 0.0
+    C    = ((A - B20)  / B20  * 100) if B20  else 0.0
+    C2   = ((A - B100) / B100 * 100) if B100 else 0.0
     C_final = (C + C2) / 2
 
-    # oi_change: perubahan OI 1 candle (untuk Liquidation Hunter)
-    A_prev = safe_float(prev1.get('Open_Interest', A))
+    A_prev    = safe_float(prev1.get('Open_Interest', A))
     oi_change = ((A - A_prev) / A_prev * 100) if A_prev else 0.0
 
-    D = safe_float(last.get('Total_Volume', 0))
-    E20 = s20['Total_Volume'].mean() if _has_col(df, 'Total_Volume') else (D or 1.0)
+    D    = safe_float(last.get('Total_Volume', 0))
+    E20  = s20['Total_Volume'].mean()  if _has_col(df, 'Total_Volume') else (D or 1.0)
     E100 = s100['Total_Volume'].mean() if _has_col(df, 'Total_Volume') and has100 else E20
-    F = ((D - E20) / E20 * 100) if E20 else 0.0
-    F2 = ((D - E100) / E100 * 100) if E100 else 0.0
+    F    = ((D - E20)  / E20  * 100) if E20  else 0.0
+    F2   = ((D - E100) / E100 * 100) if E100 else 0.0
     F_final = (F + F2) / 2
 
     buy_vol = safe_float(last.get('Buy_Volume', 0))
     G = (buy_vol / D * 100) if D else 50.0
 
     atr = safe_float(last.get('ATR_14', 0))
-    H = (atr / close_price * 100) if close_price else 0.0
+    H   = (atr / close_price * 100) if close_price else 0.0
 
-    I_cvd = safe_float(last.get('CVD', 0))
-    J_cvd = safe_float(candle_21_ago.get('CVD', 0))
-    K = ((I_cvd - J_cvd) / abs(J_cvd) * 100) if J_cvd != 0 else 0.0
-    close_21 = safe_float(candle_21_ago.get('Close', 0))
+    I_cvd        = safe_float(last.get('CVD', 0))
+    J_cvd        = safe_float(candle_21_ago.get('CVD', 0))
+    K            = ((I_cvd - J_cvd) / abs(J_cvd) * 100) if J_cvd != 0 else 0.0
+    close_21     = safe_float(candle_21_ago.get('Close', 0))
     cvd_div_bull = bool((I_cvd > J_cvd) and (close_price < close_21))
     cvd_div_bear = bool((I_cvd < J_cvd) and (close_price > close_21))
 
@@ -124,506 +121,350 @@ def _calculate_score_internal(df: pd.DataFrame, meta: dict, df_m15=None, ml_engi
     stoch_d      = _last_val(last,  'StochRSI_D')
     stoch_k_prev = _last_val(prev1, 'StochRSI_K')
     stoch_d_prev = _last_val(prev1, 'StochRSI_D')
-    has_stoch = stoch_k is not None and stoch_d is not None
-    stoch_cross_up   = False
-    stoch_cross_down = False
+    has_stoch    = stoch_k is not None and stoch_d is not None
+    stoch_cross_up = stoch_cross_down = False
     if has_stoch and stoch_k_prev is not None and stoch_d_prev is not None:
         stoch_cross_up   = bool((stoch_k > stoch_d)   and (stoch_k_prev <= stoch_d_prev))
         stoch_cross_down = bool((stoch_k < stoch_d)   and (stoch_k_prev >= stoch_d_prev))
 
-    ema21 = safe_float(last.get('EMA_21', close_price)) or close_price
-    ema50 = safe_float(last.get('EMA_50', close_price)) or close_price
+    ema21  = safe_float(last.get('EMA_21',  close_price)) or close_price
+    ema50  = safe_float(last.get('EMA_50',  close_price)) or close_price
     ema200 = safe_float(last.get('EMA_200', close_price)) or close_price
-    O_rsi   = safe_float(last.get('RSI_6',  50))
-    O_rsi_1 = safe_float(prev1.get('RSI_6', 50))
-    O_rsi_2 = safe_float(prev2.get('RSI_6', 50))
-
-    # ── [IMPROVEMENT 3] SMT Divergence — korelasi BTC vs Coin 21 candle ────
-    # Semua prerequisite (close_21, O_rsi) sudah tersedia di sini
-    _btc_price_now = safe_float(last.get('BTC_Price', 0))
-    _btc_price_21  = safe_float(candle_21_ago.get('BTC_Price', 0))
-    _btc_chg_21    = ((_btc_price_now - _btc_price_21) / _btc_price_21 * 100) if _btc_price_21 else None
-    _coin_chg_21   = ((close_price - close_21) / close_21 * 100) if close_21 else None
-
-    # SMT Bear Valid: koin naik > 3% tetapi BTC hanya naik < 1% (speculative pump)
-    # SMT Bear Caution: koin naik > 3% DAN BTC juga naik >= 3% (broad market rally)
-    if _btc_chg_21 is not None and _coin_chg_21 is not None:
-        _smt_bear_valid   = bool(_coin_chg_21 > 3.0 and _btc_chg_21 < 1.0)
-        _smt_bear_caution = bool(_coin_chg_21 > 3.0 and _btc_chg_21 >= 3.0)
-        _smt_note = f"SMT: Coin{_coin_chg_21:+.1f}% BTC{_btc_chg_21:+.1f}% (21c)"
-    else:
-        _smt_bear_valid   = False
-        _smt_bear_caution = False
-        _smt_note = "SMT: Data BTC_Price tidak tersedia — gate dilewati"
-
-    # ── [IMPROVEMENT 4] Relative Strength / Market Leader Trap ──
-    # Prerequisites: O_rsi, F_final, C_final, oi_change — all defined above
-    _rs_extreme_count = sum([
-        bool(O_rsi > 78),
-        bool(F_final > 100),
-        bool(C_final > 20 and oi_change > 5),
-    ])
-    _is_market_leader = bool(_rs_extreme_count >= 2)
-    _rs_note = (
-        f"RS: {_rs_extreme_count}/3 extreme "
-        f"(RSI={O_rsi:.1f}, Vol={F_final:.1f}%, OI={C_final:.1f}%+chg={oi_change:.1f}%)"
-    )
+    O_rsi  = safe_float(last.get('RSI_6',   50))
 
     ref_long = close_price if is_active else low_price
-    L = (ref_long - ema21) / ema21 * 100 if ema21 else 0.0
-    M = (ref_long - ema50) / ema50 * 100 if ema50 else 0.0
-    N = (ref_long - ema200) / ema200 * 100 if ema200 else 0.0
-    Lp = (high_price - ema21) / ema21 * 100 if ema21 else 0.0
-    Mp = (high_price - ema50) / ema50 * 100 if ema50 else 0.0
+    L  = (ref_long   - ema21)  / ema21  * 100 if ema21  else 0.0
+    M  = (ref_long   - ema50)  / ema50  * 100 if ema50  else 0.0
+    N  = (ref_long   - ema200) / ema200 * 100 if ema200 else 0.0
+    Lp = (high_price - ema21)  / ema21  * 100 if ema21  else 0.0
+    Mp = (high_price - ema50)  / ema50  * 100 if ema50  else 0.0
     Np = (high_price - ema200) / ema200 * 100 if ema200 else 0.0
-    # dist_ema21_close: jarak Close ke EMA21 (selalu berbasis close, bukan low/high)
-    dist_ema21_close = (close_price - ema21) / ema21 * 100 if ema21 else 0.0
 
-    # ATR helpers
-    atr_data = get_atr_multiplier(symbol, df, last)
-    ATR_MULT = atr_data['ATR_MULT']
+    # ── Helpers ─────────────────────────────────────────────────────────────
+    atr_data        = get_atr_multiplier(symbol, df, last)
+    ATR_MULT        = atr_data['ATR_MULT']
     atr_mult_reason = atr_data['atr_mult_reason']
-    atr_score_sweet_lo = atr_data['atr_score_sweet_lo']
-    atr_score_sweet_hi = atr_data['atr_score_sweet_hi']
-
-    # Session helpers
-    sess_data = get_market_session(last)
-
-    # Macro trend
-    macro_data = get_macro_trend(df, ema200)
-
-    # Aging
+    sess_data       = get_market_session(last)
+    macro_data      = get_macro_trend(df, ema200)
     aging_status, candles_since_entry = get_aging_status(df, is_active, entry_date_str)
 
-    bos_val     = _last_val(last, 'BOS')
-    funding_val = _last_val(last, 'Funding_Rate')
-    buy_liq_val = _last_val(last, 'Buy_Liq')
-    sell_liq_val= _last_val(last, 'Sell_Liq')
-    has_bos     = bos_val is not None
-    has_funding = funding_val is not None
-    has_buy_liq = buy_liq_val is not None and buy_liq_val > 0
-    has_sell_liq= sell_liq_val is not None and sell_liq_val > 0
+    bos_val      = _last_val(last, 'BOS')
+    funding_val  = _last_val(last, 'Funding_Rate')
+    buy_liq_val  = _last_val(last, 'Buy_Liq')
+    sell_liq_val = _last_val(last, 'Sell_Liq')
 
-    # Adaptive Thresholds
-    _atr_avg_20 = None
+    _atr_avg_20  = None
     _atr_extreme = False
     if 'ATR_14' in df.columns and len(df) >= 20:
-        _atr_series = df['ATR_14'].iloc[-20:]
-        _atr_close  = df['Close'].iloc[-20:]
-        _atr_pct_series = (_atr_series / _atr_close * 100).dropna()
-        if len(_atr_pct_series) >= 5:
-            _atr_avg_20 = float(_atr_pct_series.mean())
+        _ap = (df['ATR_14'].iloc[-20:] / df['Close'].iloc[-20:] * 100).dropna()
+        if len(_ap) >= 5:
+            _atr_avg_20  = float(_ap.mean())
             _atr_extreme = bool(H > _atr_avg_20 * 2.0)
 
-    if macro_data['macro_trend'] == 'UPTREND':
-        _thr_full, _thr_half, _thr_wait = 53, 36, 22  # [FIX v2.0] ×1.098: was 48,33,20
-        _thr_full_S, _thr_half_S = 58, 48             # [FIX 4] SHORT lebih ketat saat UPTREND
-        threshold_regime = "BULL"
-    else:
-        _thr_full, _thr_half, _thr_wait = 64, 46, 31  # [FIX v2.0] ×1.098: was 58,42,28
-        _thr_full_S, _thr_half_S = _thr_full, _thr_half  # [FIX 4] sama saat BEAR/SIDEWAYS
-        threshold_regime = "BEAR/SIDEWAYS"
+    # ── SL levels ───────────────────────────────────────────────────────────
+    sl_atr1_L  = close_price - atr * 1.0
+    sl_atr15_L = close_price - atr * 1.5
+    sl_atr2_L  = close_price - atr * 2.0
+    sl_atr1_S  = close_price + atr * 1.0
+    sl_atr15_S = close_price + atr * 1.5
+    sl_atr2_S  = close_price + atr * 2.0
 
-    if _atr_extreme:
-        _thr_full += 5; _thr_half += 5; _thr_wait += 5
-        _thr_full_S += 5; _thr_half_S += 5             # [FIX 4] juga naikkan SHORT threshold saat volatil
-        threshold_regime += " + VOLATILITAS EKSTREM (+5)"
+    sl_struct_L = dyn_buy_liq  if dyn_buy_liq  is not None else sl_atr15_L
+    sl_struct_S = dyn_sell_liq if dyn_sell_liq is not None else sl_atr15_S
+    sl_label_L  = "Dynamic Buy Liq"  if dyn_buy_liq  is not None else "ATR×1.5"
+    sl_label_S  = "Dynamic Sell Liq" if dyn_sell_liq is not None else "ATR×1.5"
 
-    # Fallback SL limits
-    sl_atr1_L = close_price - atr * 1.0; sl_atr15_L = close_price - atr * 1.5; sl_atr2_L = close_price - atr * 2.0
-    sl_atr1_S = close_price + atr * 1.0; sl_atr15_S = close_price + atr * 1.5; sl_atr2_S = close_price + atr * 2.0
+    # ── TP levels ───────────────────────────────────────────────────────────
+    tp_long  = get_atr_projections_long(
+        entry_val, atr, ATR_MULT,
+        close_price=close_price, macro_trend=macro_data['macro_trend']
+    )
+    tp_short = get_atr_projections_short(
+        entry_val, atr, ATR_MULT, close_price=close_price
+    )
 
-    # Context dictionary creation
-    ctx = {
-        'last': last, 'close_price': close_price, 'low_price': low_price, 'high_price': high_price,
-        'entry_val': entry_val, 'is_active': is_active, 'aging_status': aging_status,
-        'SESSION_MULT': sess_data['SESSION_MULT'], 'session_label': sess_data['session_label'],
-        'session_block': sess_data['session_block'], 'session_block_type': sess_data['session_block_type'],
-        'session_block_reason': sess_data['session_block_reason'],
-        'macro_slope': macro_data['macro_slope'], 'macro_trend': macro_data['macro_trend'],
-        'C_final': C_final, 'F_final': F_final, 'F': F, 'F2': F2, 'G': G, 'H': H, 'K': K, 'I_cvd': I_cvd, 'J_cvd': J_cvd,
-        'cvd_div_bull': cvd_div_bull, 'cvd_div_bear': cvd_div_bear,
-        'L': L, 'M': M, 'N': N, 'Lp': Lp, 'Mp': Mp, 'Np': Np, 'O_rsi': O_rsi,
-        'has_bos': has_bos, 'bos_val': bos_val, 'has_funding': has_funding, 'funding_val': funding_val,
-        'has_buy_liq': has_buy_liq, 'buy_liq_val': buy_liq_val, 'dyn_buy_liq': dyn_buy_liq,
-        'has_dyn_liq': has_dyn_liq, 'dist_to_liq': dist_to_liq, 'swing_low_20': swing_low_20,
-        'has_sell_liq': has_sell_liq, 'sell_liq_val': sell_liq_val, 'dyn_sell_liq': dyn_sell_liq,
-        'has_dyn_sell_liq': has_dyn_sell_liq, 'dist_to_sell_liq': dist_to_sell_liq, 'swing_high_20': swing_high_20,
-        'has_stoch': has_stoch, 'stoch_k': stoch_k, 'stoch_d': stoch_d,
-        'stoch_k_prev': stoch_k_prev, 'stoch_d_prev': stoch_d_prev,
-        'stoch_cross_up': stoch_cross_up, 'stoch_cross_down': stoch_cross_down,
-        'atr': atr, 'ATR_MULT': ATR_MULT, 'atr_mult_reason': atr_mult_reason,
-        'sl_atr1_L': sl_atr1_L, 'sl_atr15_L': sl_atr15_L, 'sl_atr2_L': sl_atr2_L,
-        'sl_atr1_S': sl_atr1_S, 'sl_atr15_S': sl_atr15_S, 'sl_atr2_S': sl_atr2_S,
-        '_thr_full': _thr_full, '_thr_half': _thr_half, '_thr_wait': _thr_wait,
-        '_thr_full_S': _thr_full_S, '_thr_half_S': _thr_half_S,  # [FIX 4] threshold SHORT terpisah
-        'ema21': ema21, 'ema50': ema50, 'ema200': ema200,
-        # ── Variabel baru untuk 3 improvisasi ──────────────────
-        'oi_change': oi_change, 'O_rsi_1': O_rsi_1, 'O_rsi_2': O_rsi_2,
-        'dist_ema21_close': dist_ema21_close,
-        # ── [IMPROVEMENT 3] SMT Divergence ────────────────────
-        'smt_bear_valid': _smt_bear_valid, 'smt_bear_caution': _smt_bear_caution,
-        'smt_note': _smt_note, 'btc_chg_21': _btc_chg_21, 'coin_chg_21': _coin_chg_21,
-        # ── [IMPROVEMENT 4] Market Leader ─────────────────────
-        'is_market_leader': _is_market_leader, 'rs_extreme_count': _rs_extreme_count,
-        'rs_note': _rs_note,
-    }
-    ctx.update(atr_data) # Include all ATR sweet spots
-
-    # ── [FIX] DINAMISASI THRESHOLD LONG — MODE AGRESIF SAAT UPTREND ───────
-    # Saat tren makro UPTREND, turunkan hambatan entry LONG agar sistem
-    # lebih agresif mengikuti momentum (Trend Riding Mode).
-    # Pada SIDEWAYS/DOWNTREND, ctx._thr_full dan _thr_half tetap dipakai (konservatif).
-    if ctx.get('macro_trend') == 'UPTREND':
-        ctx['_thr_full_L'] = 45   # Default UPTREND sebelumnya: 53 — diturunkan agar lebih banyak FULL SIZE ENTRY
-        ctx['_thr_half_L'] = 30   # Default UPTREND sebelumnya: 36 — menangkap momentum awal
-        # Perpanjang Time Limit agar trade tidak exit prematur di tengah impulse wave
-        if 'TIME_LIMIT' in ctx:
-            ctx['TIME_LIMIT'] = 240
-        elif 'time_limit' in ctx:
-            ctx['time_limit'] = 240
-        logger.info(f"[Scoring] 🚀 MODE AGRESIF LONG AKTIF: thr_full_L={ctx['_thr_full_L']}, thr_half_L={ctx['_thr_half_L']} (UPTREND).")
-    else:
-        # Mode konservatif: gunakan threshold default dari regime
-        ctx['_thr_full_L'] = _thr_full
-        ctx['_thr_half_L'] = _thr_half
-    # ── End Dinamisasi Threshold LONG ────────────────────────────
-
-    # ── Orchestrator calls ─────────────────────────────────────
-    res_L = calculate_long_score(df, ctx)
-    res_S = calculate_short_score(df, ctx)
-
-    # ── ML Override (Pendekatan B) ────────────────────────────────
-    _ml_signal    = 'FLAT'
-    _ml_size      = 'SKIP'
-    _ml_conf      = 0.0
-    _ml_proba     = {}
+    # ── ML Prediction ────────────────────────────────────────────────────────
+    ml_signal = 'FLAT'
+    ml_size   = 'SKIP'
+    ml_conf   = 0.0
+    ml_proba  = {}
+    ml_error  = None
 
     if ml_engine is not None and df_m15 is not None:
-        gate_L_status = res_L.get('gate', {}).get('status', 'BLOCKED')
-        gate_S_status = res_S.get('gate', {}).get('status', 'BLOCKED')
-
-        # Hanya panggil ML jika minimal satu gate tidak BLOCKED
-        if gate_L_status != 'BLOCKED' or gate_S_status != 'BLOCKED':
-            try:
-                symbol    = meta.get('Symbol', meta.get('symbol', ''))
-                ml_result = ml_engine.predict(symbol=symbol, df_m15=df_m15)
-                _ml_signal = ml_result.get('signal', 'FLAT')
-                _ml_size   = ml_result.get('size', 'SKIP')
-                _ml_conf   = ml_result.get('confidence', 0.0)
-                _ml_proba  = ml_result.get('proba', {})
-            except Exception as e:
-                import logging
-                logging.getLogger('algo_scoring').warning(f'ML predict error: {e}')
-                # Fallback: semua SKIP, tidak ada sinyal
-
-    # Inject ML result ke res_L dan res_S
-    # LONG
-    if res_L.get('gate', {}).get('status') != 'BLOCKED' and _ml_signal == 'LONG':
-        res_L['ml_signal']     = _ml_signal
-        res_L['ml_size']       = _ml_size
-        res_L['ml_confidence'] = _ml_conf
-        res_L['ml_proba']      = _ml_proba
-        # Override adj_score agar kompatibel dengan downstream logic
-        res_L['adj_score'] = 78 if _ml_size == 'FULL' else 40 if _ml_size == 'HALF' else 0
-        res_L['code']      = _ml_size  # 'FULL' / 'HALF' / 'SKIP'
+        try:
+            r         = ml_engine.predict(symbol=symbol, df_m15=df_m15)
+            ml_signal = r.get('signal',     'FLAT')
+            ml_size   = r.get('size',       'SKIP')
+            ml_conf   = r.get('confidence', 0.0)
+            ml_proba  = r.get('proba',      {})
+            logger.info(f"[{symbol}] ML → {ml_signal} {ml_size} conf={ml_conf:.4f}")
+        except Exception as e:
+            ml_error = str(e)
+            logger.warning(f"[{symbol}] ML error: {e}")
     else:
-        res_L['ml_signal']     = _ml_signal
-        res_L['ml_size']       = 'SKIP'
-        res_L['ml_confidence'] = _ml_conf
-        res_L['ml_proba']      = _ml_proba
-        res_L['adj_score']     = 0
-        res_L['code']          = 'SKIP'
+        ml_error = "ml_engine tidak tersedia" if ml_engine is None else "df_m15 tidak tersedia"
 
-    # SHORT
-    if res_S.get('gate', {}).get('status') != 'BLOCKED' and _ml_signal == 'SHORT':
-        res_S['ml_signal']     = _ml_signal
-        res_S['ml_size']       = _ml_size
-        res_S['ml_confidence'] = _ml_conf
-        res_S['ml_proba']      = _ml_proba
-        res_S['adj_score'] = 78 if _ml_size == 'FULL' else 40 if _ml_size == 'HALF' else 0
-        res_S['code']      = _ml_size
-    else:
-        res_S['ml_signal']     = _ml_signal
-        res_S['ml_size']       = 'SKIP'
-        res_S['ml_confidence'] = _ml_conf
-        res_S['ml_proba']      = _ml_proba
-        res_S['adj_score']     = 0
-        res_S['code']          = 'SKIP'
-    # ── End ML Override ───────────────────────────────────────────
+    # ── Decision ────────────────────────────────────────────────────────────
+    long_active  = ml_signal == 'LONG'  and ml_size != 'SKIP'
+    short_active = ml_signal == 'SHORT' and ml_size != 'SKIP'
+    conf_pct_L   = round(ml_conf * 100, 2) if long_active  else 0.0
+    conf_pct_S   = round(ml_conf * 100, 2) if short_active else 0.0
 
-    def dist_pct(target):
-        return round((target - close_price) / close_price * 100, 4) if close_price else 0.0
-
-    def rr_long_atr(tp, sl):
+    # ── RR helpers ──────────────────────────────────────────────────────────
+    def rr_l(tp, sl):
         d = close_price - sl
         return round((tp - close_price) / d, 2) if d > 0 else 0.0
-    def rr_short_atr(tp, sl):
+
+    def rr_s(tp, sl):
         d = sl - close_price
         return round((close_price - tp) / d, 2) if d > 0 else 0.0
 
-    rr_matrix_L = [[rr_long_atr(tp, sl) for tp in [res_L['tp1'][0], res_L['tp2'][0], res_L['tp3'][0]]] for sl in [sl_atr1_L, sl_atr15_L, sl_atr2_L]]
-    rr_matrix_S = [[rr_short_atr(tp, sl) for tp in [res_S['tp1'][0], res_S['tp2'][0], res_S['tp3'][0]]] for sl in [sl_atr1_S, sl_atr15_S, sl_atr2_S]]
+    def dist(target):
+        return round((target - close_price) / close_price * 100, 4) if close_price else 0.0
 
-    # Momentum hold
+    rr_matrix_L = [
+        [rr_l(tp, sl) for tp in [tp_long[0][0], tp_long[1][0], tp_long[2][0]]]
+        for sl in [sl_atr1_L, sl_atr15_L, sl_atr2_L]
+    ]
+    rr_matrix_S = [
+        [rr_s(tp, sl) for tp in [tp_short[0][0], tp_short[1][0], tp_short[2][0]]]
+        for sl in [sl_atr1_S, sl_atr15_S, sl_atr2_S]
+    ]
+
+    # ── Momentum / Exit / Trailing ───────────────────────────────────────────
     momentum_hold = check_momentum_hold(K, G, O_rsi, C_final, L)
 
-    # Fakeout check
-    sl_wick_result = detect_sl_wick_fakeout(is_active, close_price, low_price, last, res_L['sl_struct'], K, D, E20)
+    sl_wick_result = detect_sl_wick_fakeout(
+        is_active, close_price, low_price, last, sl_struct_L, K, D, E20
+    )
 
-    # Trailing SL — [FIX P9.7] teruskan atr=atr dan tp3_val untuk 3-tahap trailing
     trailing_sl_long = calculate_trailing_sl_long(
         is_active, high_price,
-        res_L['tp1'][0], res_L['tp2'][0], res_L['tp1'][1],
-        entry_val, res_L['sl_struct'], res_L['sl_label'], close_price,
-        atr=atr, tp3_val=res_L['tp3'][0],   # [FIX P9.7]
+        tp_long[0][0], tp_long[1][0], tp_long[0][1],
+        entry_val, sl_struct_L, sl_label_L, close_price,
+        atr=atr, tp3_val=tp_long[2][0],
     )
     trailing_sl_short = calculate_trailing_sl_short(
         is_active, low_price,
-        res_S['tp1'][0], res_S['tp2'][0], res_S['tp1'][1],
-        entry_val, res_S['sl_struct'], res_S['sl_label'], close_price,
-        atr=atr, tp3_val=res_S['tp3'][0],   # [FIX P9.7]
+        tp_short[0][0], tp_short[1][0], tp_short[0][1],
+        entry_val, sl_struct_S, sl_label_S, close_price,
+        atr=atr, tp3_val=tp_short[2][0],
     )
 
-    # Exit Signals
-    exit_signals, exit_reco, exit_hard, exit_warn = evaluate_exit_signals(is_active, close_price, ema21, ema50, O_rsi, G, last, aging_status, candles_since_entry, res_L['tp1'][0])
+    exit_signals, exit_reco, exit_hard, exit_warn = evaluate_exit_signals(
+        is_active, close_price, ema21, ema50, O_rsi, G, last,
+        aging_status, candles_since_entry, tp_long[0][0]
+    )
 
-    # Validation
-    validations = []
-    if not (0 <= res_L['raw_score'] <= 78): validations.append("⚠️ V1: Skor long anomali")   # [FIX v2.0] was 71
-    if not (0 <= res_S['raw_score'] <= 78): validations.append("⚠️ V2: Skor short anomali")  # [FIX v2.0] was 71
-    for k, (pts, mx, _, _) in res_L['scores'].items():
-        if pts > mx: validations.append(f"⚠️ V3: Overflow {k} (L)")
-    for k, (pts, mx, _, _) in res_S['scores'].items():
-        if pts > mx: validations.append(f"⚠️ V3: Overflow {k} (S)")
-    if res_L['scores']['TakerBuy'][0] > 6 or res_S['scores']['TakerBuy'][0] > 6:  # [FIX v2.0] was 8
-        validations.append("⚠️ V4: TakerBuy overflow (maks 6)")
-    if res_L['sl_struct'] >= close_price: validations.append("⚠️ V5: SL long di atas harga")
-    if res_S['sl_struct'] <= close_price: validations.append("⚠️ V6: SL short di bawah harga")
-    if not (res_L['tp1'][0] <= res_L['tp2'][0] <= res_L['tp3'][0]): validations.append("⚠️ V7: Urutan TP long terbalik")
-    if not (res_S['tp1'][0] >= res_S['tp2'][0] >= res_S['tp3'][0]): validations.append("⚠️ V8: Urutan TP short terbalik")
-    if any(t <= close_price for t in [res_L['tp1'][0], res_L['tp2'][0], res_L['tp3'][0]]): validations.append("⚠️ V9: Ada TP long di bawah harga")
-    if any(t >= close_price for t in [res_S['tp1'][0], res_S['tp2'][0], res_S['tp3'][0]]): validations.append("⚠️ V10: Ada TP short di atas harga")
-    if res_L['rr1'] <= 0: validations.append("⚠️ V11: RR long negatif")
-    if res_S['rr1'] <= 0: validations.append("⚠️ V11: RR short negatif")
-    if (atr_score_sweet_lo == 1.5 * ATR_MULT or atr_score_sweet_lo == 2.0 * ATR_MULT or atr_score_sweet_lo == 1.0):
-        validations.append(f"⚠️ V13: ATR pakai threshold flat — cek ATR_MULT scoring (dipakai: {atr_score_sweet_lo:.2f}%–{atr_score_sweet_hi:.2f}%)")
-    if abs(I_cvd) > 0 and abs(K) == abs(I_cvd): validations.append(f"⚠️ V14: CVD scoring salah formula (CVD_norm K={K:.2f}%)")
-    if M < -4.0 and res_L['scores']['EMA50'][3] != 3: validations.append("⚠️ V15: EMA50 scoring salah tier")
-    if has_buy_liq and has_dyn_liq and buy_liq_val == df['Buy_Liq'].iloc[-101:-1].mean():
-        validations.append("⚠️ V16: Buy_Liq CSV kemungkinan statis — pakai dynamic version")
-    valid_ok = len(validations) == 0
-
-    # Market Context
+    # ── Market context ───────────────────────────────────────────────────────
     ctx_out = {}
-    ctx_cols = ['MSB','BOS','CHoCH','SFP_Sweep','FVG_Up_Top','FVG_Up_Bottom',
-                'FVG_Down_Top','FVG_Down_Bottom','OB_Price','Fib_0.618','Fib_0.786',
-                'POC','VAH','VAL','Buy_Liq','Sell_Liq','PDH','PDL','PWH','PWL',
-                'EMA_7','EMA_7_H4','EMA_21_H4','EMA_50_H4','EMA_200_H4',
-                'StochRSI_K','StochRSI_D','Funding_Rate','BTC_Price','BTC_Dominance','Altcoin_Index']
-    for col in ctx_cols:
+    for col in [
+        'MSB','BOS','CHoCH','SFP_Sweep','FVG_Up_Top','FVG_Up_Bottom',
+        'FVG_Down_Top','FVG_Down_Bottom','OB_Price','Fib_0.618','Fib_0.786',
+        'POC','VAH','VAL','Buy_Liq','Sell_Liq','PDH','PDL','PWH','PWL',
+        'EMA_7','EMA_7_H4','EMA_21_H4','EMA_50_H4','EMA_200_H4',
+        'StochRSI_K','StochRSI_D','Funding_Rate','BTC_Price','BTC_Dominance','Altcoin_Index'
+    ]:
         v = _last_val(last, col)
         if v is not None:
             ctx_out[col] = v
 
-    pnl_pct = round((close_price / entry_val - 1) * 100, 4) if is_active and entry_val else None
+    pnl_pct  = round((close_price / entry_val - 1) * 100, 4) if is_active and entry_val else None
+    narrative = [
+        f"ML Signal: {ml_signal} | Confidence: {ml_conf:.2%} | Size: {ml_size}",
+        f"Proba → LONG:{ml_proba.get('LONG',0):.2%}  FLAT:{ml_proba.get('FLAT',0):.2%}  SHORT:{ml_proba.get('SHORT',0):.2%}",
+    ]
 
+    # ── Final result ─────────────────────────────────────────────────────────
     result = {
         'long': {
-            'raw': res_L['raw_score'], 'total': res_L['adj_score'],
-            'pct': round(res_L['adj_score'] / 78 * 100, 2),  # [FIX v2.0] was /71
-            'decision': res_L['dec'], 'code': res_L['code'],
-            'gate': res_L['gate'],
-            'scores': res_L['scores'], 'narrative': res_L['narrative'],
-            'ppi': res_L['ppi'],
-            'ml_signal':     res_L.get('ml_signal', 'FLAT'),
-            'ml_confidence': res_L.get('ml_confidence', 0.0),
-            'ml_size':       res_L.get('ml_size', 'SKIP'),
-            'ml_proba':      res_L.get('ml_proba', {}),
-            # [FIX P9.7 - PERBAIKAN 2] Time Limit terkoneksi ke output
-            'time_limit': 240 if macro_data['macro_trend'] == 'UPTREND' else (180 if macro_data['macro_trend'] == 'SIDEWAYS' else 180),
+            'raw':      conf_pct_L,
+            'total':    conf_pct_L,
+            'pct':      conf_pct_L,
+            'decision': 'LONG' if long_active else 'SKIP',
+            'code':     ml_size if long_active else 'SKIP',
+            'gate':     {'status': 'CLEAR' if long_active else 'FLAT/SHORT', 'reason': f"ML→{ml_signal}"},
+            'scores':   {'ML': (conf_pct_L, 100, 'Meta-Learner confidence', 'ML')},
+            'narrative': narrative,
+            'ppi':       round(ml_conf * 100, 1),
+            'ml_signal':     ml_signal,
+            'ml_confidence': ml_conf,
+            'ml_size':       ml_size if long_active else 'SKIP',
+            'ml_proba':      ml_proba,
+            'time_limit':    240 if macro_data['macro_trend'] == 'UPTREND' else 180,
             'time_limit_reason': (
-                'LONG UPTREND: 240 candles — ride impulse wave penuh [FIX P9.7]'
-                if macro_data['macro_trend'] == 'UPTREND'
-                else ('LONG SIDEWAYS: 180 candles — tren netral, keluar lebih cepat [FIX P9.7]'
-                if macro_data['macro_trend'] == 'SIDEWAYS'
-                else 'LONG DOWNTREND: 180 candles — konservatif melawan tren [FIX P9.7]')
+                'LONG UPTREND: 240 candles' if macro_data['macro_trend'] == 'UPTREND'
+                else f"LONG {macro_data['macro_trend']}: 180 candles"
             ),
             'levels': {
-                'sl_structure': round(res_L['sl_struct'], 8), 'sl_label': res_L['sl_label'],
-                'sl_ketat': round(sl_atr1_L, 8), 'sl_normal': round(sl_atr15_L, 8), 'sl_lebar': round(sl_atr2_L, 8),
-                'tp1': round(res_L['tp1'][0], 8), 'tp1_label': res_L['tp1'][1],
-                'tp2': round(res_L['tp2'][0], 8), 'tp2_label': res_L['tp2'][1],
-                'tp3': round(res_L['tp3'][0], 8), 'tp3_label': res_L['tp3'][1],
-                'rr1': res_L['rr1'], 'rr2': res_L['rr2'], 'rr3': res_L['rr3'],
-                'rr_matrix': rr_matrix_L,
-                'dist_sl': dist_pct(res_L['sl_struct']),
-                'dist_sl_ketat': dist_pct(sl_atr1_L), 'dist_sl_normal': dist_pct(sl_atr15_L), 'dist_sl_lebar': dist_pct(sl_atr2_L),
-                'dist_tp1': dist_pct(res_L['tp1'][0]), 'dist_tp2': dist_pct(res_L['tp2'][0]), 'dist_tp3': dist_pct(res_L['tp3'][0]),
-                # [FIX P9.7 - PERBAIKAN 3] SL Cap monitoring
-                'sl_capped': res_L.get('sl_capped', False),
-                'leverage_mode': res_L.get('leverage_mode', False),
-                'max_sl_pct': res_L.get('max_sl_pct', None),
+                'sl_structure':   round(sl_struct_L, 8), 'sl_label': sl_label_L,
+                'sl_ketat':       round(sl_atr1_L,   8),
+                'sl_normal':      round(sl_atr15_L,  8),
+                'sl_lebar':       round(sl_atr2_L,   8),
+                'tp1':            round(tp_long[0][0], 8), 'tp1_label': tp_long[0][1],
+                'tp2':            round(tp_long[1][0], 8), 'tp2_label': tp_long[1][1],
+                'tp3':            round(tp_long[2][0], 8), 'tp3_label': tp_long[2][1],
+                'rr1': rr_l(tp_long[0][0], sl_struct_L),
+                'rr2': rr_l(tp_long[1][0], sl_struct_L),
+                'rr3': rr_l(tp_long[2][0], sl_struct_L),
+                'rr_matrix':      rr_matrix_L,
+                'dist_sl':        dist(sl_struct_L),
+                'dist_sl_ketat':  dist(sl_atr1_L),
+                'dist_sl_normal': dist(sl_atr15_L),
+                'dist_sl_lebar':  dist(sl_atr2_L),
+                'dist_tp1': dist(tp_long[0][0]),
+                'dist_tp2': dist(tp_long[1][0]),
+                'dist_tp3': dist(tp_long[2][0]),
+                'sl_capped': False, 'leverage_mode': False, 'max_sl_pct': None,
             },
-            'sl_candidates': [(round(p, 8), l) for p, l in res_L['sl_cands']],
+            'sl_candidates': [
+                (round(sl_struct_L,8), sl_label_L),
+                (round(sl_atr1_L,8),  "ATR×1.0"),
+                (round(sl_atr15_L,8), "ATR×1.5"),
+            ],
         },
         'short': {
-            'raw': res_S['raw_score'], 'total': res_S['adj_score'],
-            'pct': round(res_S['adj_score'] / 78 * 100, 2),  # [FIX v2.0] was /71
-            'decision': res_S['dec'], 'code': res_S['code'],
-            'gate': res_S['gate'],
-            'scores': res_S['scores'], 'narrative': res_S['narrative'],
-            'ppi': res_S['ppi'],
-            'ml_signal':     res_S.get('ml_signal', 'FLAT'),
-            'ml_confidence': res_S.get('ml_confidence', 0.0),
-            'ml_size':       res_S.get('ml_size', 'SKIP'),
-            'ml_proba':      res_S.get('ml_proba', {}),
-            # [FIX P9.7 - PERBAIKAN 2] Time Limit SHORT selalu 120 candles
-            'time_limit': 120,
-            'time_limit_reason': 'SHORT: 120 candles — SHORT tidak perlu ride lama, exit cepat [FIX P9.7]',
+            'raw':      conf_pct_S,
+            'total':    conf_pct_S,
+            'pct':      conf_pct_S,
+            'decision': 'SHORT' if short_active else 'SKIP',
+            'code':     ml_size if short_active else 'SKIP',
+            'gate':     {'status': 'CLEAR' if short_active else 'FLAT/LONG', 'reason': f"ML→{ml_signal}"},
+            'scores':   {'ML': (conf_pct_S, 100, 'Meta-Learner confidence', 'ML')},
+            'narrative': narrative,
+            'ppi':       round(ml_conf * 100, 1),
+            'ml_signal':     ml_signal,
+            'ml_confidence': ml_conf,
+            'ml_size':       ml_size if short_active else 'SKIP',
+            'ml_proba':      ml_proba,
+            'time_limit':    120,
+            'time_limit_reason': 'SHORT: 120 candles',
             'levels': {
-                'sl_structure': round(res_S['sl_struct'], 8), 'sl_label': res_S['sl_label'],
-                'sl_ketat': round(sl_atr1_S, 8), 'sl_normal': round(sl_atr15_S, 8), 'sl_lebar': round(sl_atr2_S, 8),
-                'tp1': round(res_S['tp1'][0], 8), 'tp1_label': res_S['tp1'][1],
-                'tp2': round(res_S['tp2'][0], 8), 'tp2_label': res_S['tp2'][1],
-                'tp3': round(res_S['tp3'][0], 8), 'tp3_label': res_S['tp3'][1],
-                'rr1': res_S['rr1'], 'rr2': res_S['rr2'], 'rr3': res_S['rr3'],
-                'rr_matrix': rr_matrix_S,
-                'dist_sl': dist_pct(res_S['sl_struct']),
-                'dist_sl_ketat': dist_pct(sl_atr1_S), 'dist_sl_normal': dist_pct(sl_atr15_S), 'dist_sl_lebar': dist_pct(sl_atr2_S),
-                'dist_tp1': dist_pct(res_S['tp1'][0]), 'dist_tp2': dist_pct(res_S['tp2'][0]), 'dist_tp3': dist_pct(res_S['tp3'][0]),
+                'sl_structure':   round(sl_struct_S, 8), 'sl_label': sl_label_S,
+                'sl_ketat':       round(sl_atr1_S,   8),
+                'sl_normal':      round(sl_atr15_S,  8),
+                'sl_lebar':       round(sl_atr2_S,   8),
+                'tp1':            round(tp_short[0][0], 8), 'tp1_label': tp_short[0][1],
+                'tp2':            round(tp_short[1][0], 8), 'tp2_label': tp_short[1][1],
+                'tp3':            round(tp_short[2][0], 8), 'tp3_label': tp_short[2][1],
+                'rr1': rr_s(tp_short[0][0], sl_struct_S),
+                'rr2': rr_s(tp_short[1][0], sl_struct_S),
+                'rr3': rr_s(tp_short[2][0], sl_struct_S),
+                'rr_matrix':      rr_matrix_S,
+                'dist_sl':        dist(sl_struct_S),
+                'dist_sl_ketat':  dist(sl_atr1_S),
+                'dist_sl_normal': dist(sl_atr15_S),
+                'dist_sl_lebar':  dist(sl_atr2_S),
+                'dist_tp1': dist(tp_short[0][0]),
+                'dist_tp2': dist(tp_short[1][0]),
+                'dist_tp3': dist(tp_short[2][0]),
+                'sl_capped': False, 'leverage_mode': False, 'max_sl_pct': None,
             },
-            'sl_candidates': [(round(p, 8), l) for p, l in res_S['sl_cands']],
+            'sl_candidates': [
+                (round(sl_struct_S,8), sl_label_S),
+                (round(sl_atr1_S,8),  "ATR×1.0"),
+                (round(sl_atr15_S,8), "ATR×1.5"),
+            ],
         },
         'emergency': {
-            'sl_touched': bool(is_active and (close_price < res_L['sl_struct'])),
-            'rsi_ob': bool(O_rsi > 75),
-            'stale': bool(aging_status == "STALE"),
+            'sl_touched': bool(is_active and close_price < sl_struct_L),
+            'rsi_ob':     bool(O_rsi > 75),
+            'stale':      bool(aging_status == "STALE"),
         },
         'exit': {
-            'signals': exit_signals, 'recommendation': exit_reco,
-            'hard_count': exit_hard, 'warn_count': exit_warn,
+            'signals':        exit_signals,
+            'recommendation': exit_reco,
+            'hard_count':     exit_hard,
+            'warn_count':     exit_warn,
         },
         'momentum_hold': momentum_hold,
         'sl_wick':       sl_wick_result,
-        'trailing_sl': {
-            'long':  trailing_sl_long,
-            'short': trailing_sl_short,
-        },
+        'trailing_sl':  {'long': trailing_sl_long, 'short': trailing_sl_short},
         'validation': {
-            'ok': bool(valid_ok),
-            'issues': validations,
-            'badge': '✅ Kalkulasi v12 valid' if valid_ok else f'⚠️ {len(validations)} isu validasi'
+            'ok':     ml_error is None,
+            'issues': [] if ml_error is None else [f"⚠ ML: {ml_error}"],
+            'badge':  '✅ ML v3.0' if ml_error is None else f'⚠ {ml_error}',
         },
         'market_context': ctx_out,
         'variables': {
-            'C_oi_short': round(C, 2), 'C_oi_long': round(C2, 2), 'C_final': round(C_final, 2),
-            'F_vol_short': round(F, 2), 'F_vol_long': round(F2, 2), 'F_final': round(F_final, 2),
-            'C_oi_norm': round(C_final, 2), 'F_vol_norm': round(F_final, 2),
-            'G_taker_buy': round(G, 2), 'H_atr_pct': round(H, 2),
-            'K_cvd_norm': round(K, 2), 'cvd_div_bull': cvd_div_bull, 'cvd_div_bear': cvd_div_bear,
-            'I_cvd_abs': round(I_cvd, 2), 'J_cvd_abs': round(J_cvd, 2),
-            'L_ema21': round(L, 2), 'M_ema50': round(M, 2), 'N_ema200': round(N, 2),
-            'Lp_ema21': round(Lp, 2), 'Mp_ema50': round(Mp, 2), 'Np_ema200': round(Np, 2),
-            'O_rsi': round(O_rsi, 2),
-            'stoch_k': round(stoch_k, 2) if has_stoch else None,
-            'stoch_d': round(stoch_d, 2) if has_stoch else None,
-            'stoch_cross_up': stoch_cross_up,
-            'stoch_cross_down': stoch_cross_down,
-            'close_price': round(close_price, 8), 'low_price': round(low_price, 8), 'high_price': round(high_price, 8),
-            'ema21': round(ema21, 8), 'ema50': round(ema50, 8), 'ema200': round(ema200, 8),
-            'atr': round(atr, 8), 'ATR_MULT': ATR_MULT, 'atr_mult_reason': atr_mult_reason,
+            'C_oi_short': round(C,2),   'C_oi_long': round(C2,2),  'C_final': round(C_final,2),
+            'F_vol_short': round(F,2),  'F_vol_long': round(F2,2), 'F_final': round(F_final,2),
+            'C_oi_norm': round(C_final,2), 'F_vol_norm': round(F_final,2),
+            'G_taker_buy': round(G,2),  'H_atr_pct': round(H,2),
+            'K_cvd_norm': round(K,2),
+            'cvd_div_bull': cvd_div_bull, 'cvd_div_bear': cvd_div_bear,
+            'I_cvd_abs': round(I_cvd,2), 'J_cvd_abs': round(J_cvd,2),
+            'L_ema21': round(L,2), 'M_ema50': round(M,2), 'N_ema200': round(N,2),
+            'Lp_ema21': round(Lp,2), 'Mp_ema50': round(Mp,2), 'Np_ema200': round(Np,2),
+            'O_rsi': round(O_rsi,2),
+            'stoch_k': round(stoch_k,2) if has_stoch else None,
+            'stoch_d': round(stoch_d,2) if has_stoch else None,
+            'stoch_cross_up': stoch_cross_up, 'stoch_cross_down': stoch_cross_down,
+            'close_price': round(close_price,8), 'low_price': round(low_price,8), 'high_price': round(high_price,8),
+            'ema21': round(ema21,8), 'ema50': round(ema50,8), 'ema200': round(ema200,8),
+            'atr': round(atr,8), 'ATR_MULT': ATR_MULT, 'atr_mult_reason': atr_mult_reason,
             'atr_thresholds': {
-                'sweet_lo': round(atr_data['sweet_lo'], 2), 'sweet_hi': round(atr_data['sweet_hi'], 2),
-                't2_lo': round(atr_data['t2_lo'], 2), 't2_hi': round(atr_data['t2_hi'], 2),
-                't1_lo': round(atr_data['t1_lo'], 2), 't1_hi': round(atr_data['t1_hi'], 2),
-                'score_sweet_lo': round(atr_score_sweet_lo, 2), 'score_sweet_hi': round(atr_score_sweet_hi, 2),
-                'score_t2_lo': round(atr_data['atr_score_t2_lo'], 2), 'score_t2_hi': round(atr_data['atr_score_t2_hi'], 2),
-                'score_t1_lo': round(atr_data['atr_score_t1_lo'], 2), 'score_t1_hi': round(atr_data['atr_score_t1_hi'], 2),
+                k: round(v,2) for k,v in {
+                    'sweet_lo': atr_data['sweet_lo'],   'sweet_hi': atr_data['sweet_hi'],
+                    't2_lo':    atr_data['t2_lo'],       't2_hi':    atr_data['t2_hi'],
+                    't1_lo':    atr_data['t1_lo'],       't1_hi':    atr_data['t1_hi'],
+                    'score_sweet_lo': atr_data['atr_score_sweet_lo'], 'score_sweet_hi': atr_data['atr_score_sweet_hi'],
+                    'score_t2_lo':    atr_data['atr_score_t2_lo'],    'score_t2_hi':    atr_data['atr_score_t2_hi'],
+                    'score_t1_lo':    atr_data['atr_score_t1_lo'],    'score_t1_hi':    atr_data['atr_score_t1_hi'],
+                }.items()
             },
-            'SESSION_MULT': sess_data['SESSION_MULT'], 'session': sess_data['session_label'],
-            'session_block': sess_data['session_block'],
-            'session_block_type': sess_data['session_block_type'],
+            'SESSION_MULT':         sess_data['SESSION_MULT'],
+            'session':              sess_data['session_label'],
+            'session_block':        sess_data['session_block'],
+            'session_block_type':   sess_data['session_block_type'],
             'session_block_reason': sess_data['session_block_reason'],
-            'session_override_reason': "", # Set dynamically below if we want to mimic the old exact but skipping for brevity
-            'is_altcoin': bool(not ('BTC' in symbol or 'ETH' in symbol)),
-            'is_active_pos': bool(is_active), 'entry_price': entry_val if is_active else None,
-            'aging_status': aging_status, 'candles_since_entry': int(candles_since_entry),
-            'pnl_pct': pnl_pct,
+            'session_override_reason': '',
+            'macro_slope':        round(macro_data['macro_slope'],4) if macro_data['macro_slope'] is not None else None,
+            'macro_trend':        macro_data['macro_trend'],
+            'macro_trend_reason': macro_data['macro_trend_reason'],
+            'atr_extreme': _atr_extreme,
+            'atr_avg_20':  round(_atr_avg_20,4) if _atr_avg_20 is not None else None,
+            'ml_signal':     ml_signal,
+            'ml_confidence': round(ml_conf,4),
+            'ml_size':       ml_size,
+            'ml_proba':      ml_proba,
+            'ml_error':      ml_error,
+            'is_altcoin':          bool(not ('BTC' in symbol or 'ETH' in symbol)),
+            'is_active_pos':       bool(is_active),
+            'entry_price':         entry_val if is_active else None,
+            'aging_status':        aging_status,
+            'candles_since_entry': int(candles_since_entry),
+            'pnl_pct':             pnl_pct,
             'bos_val': bos_val, 'funding_val': funding_val,
             'buy_liq_val': buy_liq_val, 'sell_liq_val': sell_liq_val,
-            'dyn_buy_liq': round(dyn_buy_liq, 8) if dyn_buy_liq is not None else None,
-            'swing_low_20': round(swing_low_20, 8) if swing_low_20 is not None else None,
-            'dist_to_liq': round(dist_to_liq, 4) if dist_to_liq is not None else None,
+            'dyn_buy_liq':      round(dyn_buy_liq,8)      if dyn_buy_liq      is not None else None,
+            'swing_low_20':     round(swing_low_20,8)     if swing_low_20     is not None else None,
+            'dist_to_liq':      round(dist_to_liq,4)      if dist_to_liq      is not None else None,
             'l2_zone': (
-                'SKIP' if (dist_to_liq is not None and dist_to_liq < 1.0)
-                else 'SWEET_SPOT' if (dist_to_liq is not None and dist_to_liq <= 5.0)
-                else 'WARNING' if (dist_to_liq is not None and dist_to_liq <= 10.0)
-                else 'GAGAL' if (dist_to_liq is not None and dist_to_liq > 10.0)
+                'SKIP'       if dist_to_liq is not None and dist_to_liq < 1.0
+                else 'SWEET_SPOT' if dist_to_liq is not None and dist_to_liq <= 5.0
+                else 'WARNING'    if dist_to_liq is not None and dist_to_liq <= 10.0
+                else 'GAGAL'      if dist_to_liq is not None
                 else 'N/A'
             ),
-            'dyn_sell_liq': round(dyn_sell_liq, 8) if dyn_sell_liq is not None else None,
-            'swing_high_20': round(swing_high_20, 8) if swing_high_20 is not None else None,
-            'dist_to_sell_liq': round(dist_to_sell_liq, 4) if dist_to_sell_liq is not None else None,
+            'dyn_sell_liq':     round(dyn_sell_liq,8)     if dyn_sell_liq     is not None else None,
+            'swing_high_20':    round(swing_high_20,8)    if swing_high_20    is not None else None,
+            'dist_to_sell_liq': round(dist_to_sell_liq,4) if dist_to_sell_liq is not None else None,
             's2_zone': (
-                'SKIP' if (dist_to_sell_liq is not None and dist_to_sell_liq < 1.0)
-                else 'SWEET_SPOT' if (dist_to_sell_liq is not None and dist_to_sell_liq <= 5.0)
-                else 'WARNING' if (dist_to_sell_liq is not None and dist_to_sell_liq <= 10.0)
-                else 'GAGAL' if (dist_to_sell_liq is not None and dist_to_sell_liq > 10.0)
+                'SKIP'       if dist_to_sell_liq is not None and dist_to_sell_liq < 1.0
+                else 'SWEET_SPOT' if dist_to_sell_liq is not None and dist_to_sell_liq <= 5.0
+                else 'WARNING'    if dist_to_sell_liq is not None and dist_to_sell_liq <= 10.0
+                else 'GAGAL'      if dist_to_sell_liq is not None
                 else 'N/A'
             ),
-            'stoch_gatekeeper_ok': res_L['stoch_gatekeeper_ok'],
-            'stoch_gatekeeper_skip': res_L['stoch_gatekeeper_skip'],
-            'stoch_gatekeeper_reason': res_L['stoch_gatekeeper_reason'],
-            'stoch_bonus_points': res_L['stoch_bonus_points'],
-            'stoch_gate_override': res_L['stoch_gate_override'],
-            # [PERBAIKAN] Tambahkan data override spesifik untuk SHORT
-            'stoch_gatekeeper_ok_s': res_S.get('stoch_gatekeeper_ok_s', True),
-            'stoch_gatekeeper_skip_s': res_S.get('stoch_gatekeeper_skip_s', False),
-            'stoch_gate_override_s': res_S.get('stoch_gate_override_s', ''),
-            'macro_slope': round(macro_data['macro_slope'], 4) if macro_data['macro_slope'] is not None else None,
-            'macro_trend': macro_data['macro_trend'],
-            'macro_trend_reason': macro_data['macro_trend_reason'],
-            'threshold_regime': threshold_regime,
-            'thr_full': _thr_full, 'thr_half': _thr_half, 'thr_wait': _thr_wait,
-            'thr_full_S': _thr_full_S, 'thr_half_S': _thr_half_S,  # [FIX 4] SHORT thresholds
-            'thr_full_L': ctx['_thr_full_L'], 'thr_half_L': ctx['_thr_half_L'],  # [FIX] LONG dynamic thresholds
-            'atr_extreme': _atr_extreme,
-            'atr_avg_20': round(_atr_avg_20, 4) if _atr_avg_20 is not None else None,
-            # ── [IMPROVEMENT 3] SMT Divergence ─────────────────────────────
-            'smt_bear_valid':   _smt_bear_valid,
-            'smt_bear_caution': _smt_bear_caution,
-            'smt_note':         _smt_note,
-            'btc_chg_21':       round(_btc_chg_21, 2) if _btc_chg_21 is not None else None,
-            'coin_chg_21':      round(_coin_chg_21, 2) if _coin_chg_21 is not None else None,
-            # ── [IMPROVEMENT 4] Market Leader ───────────────────────────────
-            'is_market_leader':   _is_market_leader,
-            'rs_extreme_count':   _rs_extreme_count,
-            'rs_note':            _rs_note,
-            # [FIX P9.7 - PERBAIKAN 2] Time Limit terkoneksi ke variables
-            'time_limit_candles': (
-                240 if macro_data['macro_trend'] == 'UPTREND'
-                else (180 if macro_data['macro_trend'] == 'SIDEWAYS' else 180)
-            ),
-            'time_limit_short_candles': 120,  # [FIX P9.7] SHORT selalu 120
+            'time_limit_candles':       240 if macro_data['macro_trend'] == 'UPTREND' else 180,
+            'time_limit_short_candles': 120,
             'time_limit_reason': (
-                f"UPTREND: LONG=240c SHORT=120c [FIX P9.7]"
+                "UPTREND: LONG=240c SHORT=120c"
                 if macro_data['macro_trend'] == 'UPTREND'
-                else f"{macro_data['macro_trend']}: LONG=180c SHORT=120c [FIX P9.7]"
+                else f"{macro_data['macro_trend']}: LONG=180c SHORT=120c"
             ),
         },
     }
-    
-    # Optional logic to perfectly match session override string which is just cosmetic:
-    session_override_reason = ""
-    if sess_data['session_block']: session_override_reason = sess_data['session_block_reason']
-    elif sess_data['session_block_type'] == 'CONDITIONAL_NY':
-        if res_L['adj_score'] < 40: session_override_reason += f"LONG skip: Sesi NY skor {res_L['adj_score']:.1f} < 40. "
-        if res_S['adj_score'] < 40: session_override_reason += f"SHORT skip: Sesi NY skor {res_S['adj_score']:.1f} < 40. "
-    elif sess_data['session_block_type'] == 'CONDITIONAL_OTHER':
-        if res_L['adj_score'] < 45: session_override_reason += f"LONG skip: Sesi Lainnya skor {res_L['adj_score']:.1f} < 45. "
-        if res_S['adj_score'] < 45: session_override_reason += f"SHORT skip: Sesi Lainnya skor {res_S['adj_score']:.1f} < 45. "
-    result['variables']['session_override_reason'] = session_override_reason
 
     return json_safe(result)
-

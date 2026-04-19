@@ -518,10 +518,10 @@ tbody tr:last-child td { border-bottom: none; }
     <div class="section" id="sectionQuantitative">
         <div class="section-header">
             <div class="section-icon-badge icon-purple">🤖</div>
-            <div class="section-title">Quantitative Swing Analyst — 78-Point Scoring (Live 4H)</div>
-            <span class="section-badge" style="background:rgba(167,139,250,.12);color:var(--accent-purple);border-color:rgba(167,139,250,.25)">ALGO V2.1</span>
+            <div class="section-title">Machine Learning Swing Analyst — ML Ensemble (Live 4H)</div>
+            <span class="section-badge" style="background:rgba(167,139,250,.12);color:var(--accent-purple);border-color:rgba(167,139,250,.25)">ML V3.0</span>
         </div>
-        <div class="tabs" id="quantSetupTabs">
+        <div class="tabs" id="quantSetupTabs" style="display:none;">
             <button class="tab-btn active" onclick="switchQuantTab('long')">🐂 LONG Setup</button>
             <button class="tab-btn" onclick="switchQuantTab('short')">🐻 SHORT Setup</button>
         </div>
@@ -533,9 +533,9 @@ tbody tr:last-child td { border-bottom: none; }
         </div>
         <div class="quant-grid">
             <div class="glass quant-card" style="height: 100%; display: flex; flex-direction: column;">
-                <div class="panel-title">📊 9-Feature Weighted Scoring</div>
+                <div class="panel-title">🧠 ML Indicator & Probabilities</div>
                 <div style="margin-bottom:14px">
-                    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:5px"><span>Total Score</span><span id="quantTotalPts">—/71</span></div>
+                    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:5px"><span>ML Confidence</span><span id="quantTotalPts">0.0%</span></div>
                     <div style="height:8px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden"><div id="quantTotalBar" style="height:100%;border-radius:4px;transition:width .5s ease;width:0%"></div></div>
                 </div>
                 <div id="featureGrid" style="display:flex;flex-direction:column;gap:0;flex:1;"></div>
