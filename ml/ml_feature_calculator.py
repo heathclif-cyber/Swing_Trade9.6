@@ -46,6 +46,9 @@ FEATURE_COLS = [
     'taker_buy_sell_ratio',
     # Symbol encoding
     'symbol',
+    # New structural features (v2)
+    'dist_swing_high', 'dist_swing_low', 'price_in_range',
+    'swing_momentum', 'h4_trend', 'trend_strength', 'vol_regime'
 ]
 
 SYMBOL_MAP = {
@@ -322,6 +325,25 @@ def calculate_features_realtime(symbol, df_m15, funding_rate=None, btc_dominance
 
     # Symbol encoding
     out['symbol'] = SYMBOL_MAP.get(symbol.upper(), -1)
+    
+    # ── New Structural Features (v2) ──
+    out['dist_swing_high'] = (swing_hi - df['close']) / atr_safe
+    out['dist_swing_low'] = (df['close'] - swing_lo) / atr_safe
+    out['price_in_range'] = (df['close'] - swing_lo) / (swing_hi - swing_lo + 1e-8)
+    
+    # Swing momentum
+    swing_hi_diff = swing_hi - swing_hi.shift(1)
+    swing_lo_diff = swing_lo - swing_lo.shift(1)
+    out['swing_momentum'] = ((swing_hi_diff + swing_lo_diff) / 2) / atr_safe
+    
+    # H4 Trend & Strength
+    out['h4_trend'] = np.sign(out['ema_7_h4'] - out['ema_21_h4'])
+    out['trend_strength'] = np.abs(out['ema_7_h4'] - out['ema_50_h4'])
+    
+    # Volatility Regime
+    out['vol_regime'] = out['atr_14_m15'] / (out['atr_14_m15'].rolling(96).mean() + 1e-8)
+    
+    # ── End New Features ──
     
     return out[FEATURE_COLS]
 
