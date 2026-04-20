@@ -142,8 +142,10 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
 
     # ── Helpers ─────────────────────────────────────────────────────────────
     atr_data        = get_atr_multiplier(symbol, df, last)
-    ATR_MULT        = atr_data['ATR_MULT']
-    atr_mult_reason = atr_data['atr_mult_reason']
+    # [FIX] Force ATR_MULT=1.0 agar sesuai dengan kondisi training model
+    # (inference_config.json: tp_atr_mult=2.0, sl_atr_mult=1.0, tanpa extra multiplier)
+    ATR_MULT        = 1.0
+    atr_mult_reason = f"fixed=1.0 (training default, orig={atr_data['ATR_MULT']}x [{atr_data['atr_mult_reason']}])"
     sess_data       = get_market_session(last)
     macro_data      = get_macro_trend(df, ema200)
     aging_status, candles_since_entry = get_aging_status(df, is_active, entry_date_str)
