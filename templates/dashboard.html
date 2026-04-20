@@ -1311,15 +1311,21 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       const tpHit = tpHitIdx > 0 && (slHitIdx < 0 || tpHitIdx <= slHitIdx);
       const slHit = slHitIdx > 0 && (tpHitIdx < 0 || slHitIdx < tpHitIdx);
 
-      // Buat array data horizontal (null di luar window)
-      function buildHLine(price, from, to) {
-        return ohlcv.map((_, i) => (i >= from && i <= to) ? price : null);
+      // Buat garis yang BERANGKAT dari harga entry lalu horizontal ke level target
+      // data[entryIdx] = entryPrice → data[entryIdx+1..to] = targetPrice
+      // Ini membuat garis "keluar" dari titik entry secara visual
+      function buildFromEntry(targetPrice, from, to) {
+        return ohlcv.map((_, i) => {
+          if (i === from) return entryPrice;          // mulai dari harga entry
+          if (i > from && i <= to) return targetPrice; // horizontal ke target
+          return null;
+        });
       }
 
       // TP line
       tpSlDatasets.push({
         label: `TP ${direction} @${tpPrice.toFixed(isLong && tpPrice > 1 ? 4 : 6)}`,
-        data: buildHLine(tpPrice, entryIdx, tpEnd),
+        data: buildFromEntry(tpPrice, entryIdx, tpEnd),
         type: 'line',
         yAxisID: 'yPrice',
         borderColor: tpHit
@@ -1340,7 +1346,7 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       // SL line
       tpSlDatasets.push({
         label: `SL ${direction} @${slPrice.toFixed(isLong && slPrice > 1 ? 4 : 6)}`,
-        data: buildHLine(slPrice, entryIdx, slEnd),
+        data: buildFromEntry(slPrice, entryIdx, slEnd),
         type: 'line',
         yAxisID: 'yPrice',
         borderColor: slHit
