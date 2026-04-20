@@ -60,9 +60,20 @@ SYMBOL_MAP = {
 
 # --- Helper Functions ---
 def calc_atr(high, low, close, period=14):
+    """
+    Wilder's RMA — identik dengan pandas_ta.atr(length=N).
+    Seed bar pertama dengan SMA(N), lalu apply Wilder's smoothing:
+        ATR[t] = (ATR[t-1] × (N-1) + TR[t]) / N
+    """
     prev_close = close.shift(1)
     tr = pd.concat([high-low, (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
-    return tr.ewm(span=period, min_periods=period, adjust=False).mean()
+    
+    rma = tr.copy() * float('nan')
+    rma.iloc[period - 1] = tr.iloc[:period].mean()   # SMA seed (bar ke-N)
+    for i in range(period, len(tr)):
+        rma.iloc[i] = (rma.iloc[i - 1] * (period - 1) + tr.iloc[i]) / period
+    return rma
+
 
 def calc_ema(close, span):
     return close.ewm(span=span, adjust=False).mean()
