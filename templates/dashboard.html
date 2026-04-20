@@ -1236,9 +1236,159 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     }
   });
 
+  // ── Hitung ATR (Wilder's 14-period) dari OHLCV high/low/close ──
+  function computeWilderATR(ohlcvArr, period = 14) {
+    const atrArr = new Array(ohlcvArr.length).fill(null);
+    if (ohlcvArr.length < period + 1) return atrArr;
+    const trs = [];
+    for (let i = 1; i < ohlcvArr.length; i++) {
+      const h  = ohlcvArr[i].high  || ohlcvArr[i].close;
+      const l  = ohlcvArr[i].low   || ohlcvArr[i].close;
+      const pc = ohlcvArr[i - 1].close;
+      trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    // SMA awal
+    let atr = trs.slice(0, period).reduce((s, v) => s + v, 0) / period;
+    atrArr[period] = atr;
+    for (let i = period; i < trs.length; i++) {
+      atr = (atr * (period - 1) + trs[i]) / period;
+      atrArr[i + 1] = atr;
+    }
+    return atrArr;
+  }
+
+  const atrValues = computeWilderATR(ohlcv, 14);  // ATR per candle
+
+  // ── Proyeksi TP / SL dari inference_config ──
+  // tp_atr_mult = 2.0, sl_atr_mult = 1.0, max_hold_bars = 48
+  const TP_MULT    = 2.0;
+  const SL_MULT    = 1.0;
+  const MAX_HOLD   = 48;  // max candle ke depan
+
+  // Kumpulkan semua TP/SL line datasets
+  const tpSlDatasets = [];
+
+  function buildProjectionDatasets(points, direction) {
+    points.forEach(pt => {
+      const entryIdx = pt.x;
+      const entryPrice = pt.y;
+      const atr = atrValues[entryIdx];
+      if (!atr) return;
+
+      const isLong = (direction === 'LONG');
+      const tpPrice = isLong ? entryPrice + TP_MULT * atr : entryPrice - TP_MULT * atr;
+      const slPrice = isLong ? entryPrice - SL_MULT * atr : entryPrice + SL_MULT * atr;
+
+      // Tentukan window ke depan (sampai max_hold atau akhir data)
+      const endIdx = Math.min(ohlcv.length - 1, entryIdx + MAX_HOLD);
+
+      // Periksa apakah TP atau SL tercapai lebih dulu
+      let tpHitIdx = -1, slHitIdx = -1;
+      for (let i = entryIdx + 1; i <= endIdx; i++) {
+        const h = ohlcv[i].high  || ohlcv[i].close;
+        const l = ohlcv[i].low   || ohlcv[i].close;
+        if (tpHitIdx < 0 && (isLong ? h >= tpPrice : l <= tpPrice)) tpHitIdx = i;
+        if (slHitIdx < 0 && (isLong ? l <= slPrice : h >= slPrice)) slHitIdx = i;
+      }
+
+      // Tentukan actual end untuk masing-masing line
+      const tpEnd = tpHitIdx > 0 ? tpHitIdx : endIdx;
+      const slEnd = slHitIdx > 0 ? slHitIdx : endIdx;
+      const tpHit = tpHitIdx > 0 && (slHitIdx < 0 || tpHitIdx <= slHitIdx);
+      const slHit = slHitIdx > 0 && (tpHitIdx < 0 || slHitIdx < tpHitIdx);
+
+      // Buat array data horizontal (null di luar window)
+      function buildHLine(price, from, to) {
+        return ohlcv.map((_, i) => (i >= from && i <= to) ? price : null);
+      }
+
+      // TP line
+      tpSlDatasets.push({
+        label: `TP ${direction} @${tpPrice.toFixed(isLong && tpPrice > 1 ? 4 : 6)}`,
+        data: buildHLine(tpPrice, entryIdx, tpEnd),
+        type: 'line',
+        yAxisID: 'yPrice',
+        borderColor: tpHit
+          ? (isLong ? 'rgba(52,211,153,1.0)' : 'rgba(248,113,113,1.0)')
+          : (isLong ? 'rgba(52,211,153,0.45)' : 'rgba(248,113,113,0.45)'),
+        borderWidth: tpHit ? 2 : 1,
+        borderDash: [6, 4],
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        fill: false,
+        showLine: true,
+        tension: 0,
+        spanGaps: false,
+        order: 6,
+        _meta: { type: 'tp', direction, entryIdx, tpHit, slHit, tpPrice, slPrice, atr }
+      });
+
+      // SL line
+      tpSlDatasets.push({
+        label: `SL ${direction} @${slPrice.toFixed(isLong && slPrice > 1 ? 4 : 6)}`,
+        data: buildHLine(slPrice, entryIdx, slEnd),
+        type: 'line',
+        yAxisID: 'yPrice',
+        borderColor: slHit
+          ? 'rgba(251,191,36,1.0)'
+          : (isLong ? 'rgba(248,113,113,0.45)' : 'rgba(52,211,153,0.45)'),
+        borderWidth: slHit ? 2 : 1,
+        borderDash: [3, 3],
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        fill: false,
+        showLine: true,
+        tension: 0,
+        spanGaps: false,
+        order: 6,
+        _meta: { type: 'sl', direction, entryIdx, tpHit, slHit, tpPrice, slPrice, atr }
+      });
+
+      // Dot marker di ujung TP/SL
+      const dotTP = new Array(ohlcv.length).fill(null);
+      dotTP[tpEnd] = tpPrice;
+      const dotSL = new Array(ohlcv.length).fill(null);
+      dotSL[slEnd] = slPrice;
+
+      tpSlDatasets.push({
+        label: `_dot_tp_${direction}`,
+        data: dotTP, type: 'line', showLine: false, yAxisID: 'yPrice',
+        borderColor: isLong ? '#34d399' : '#f87171',
+        backgroundColor: tpHit
+          ? (isLong ? 'rgba(52,211,153,0.9)' : 'rgba(248,113,113,0.9)')
+          : 'rgba(100,100,100,0.4)',
+        pointRadius: 6, pointStyle: tpHit ? 'star' : 'circle',
+        pointHoverRadius: 8, fill: false, tension: 0, order: 5,
+      });
+      tpSlDatasets.push({
+        label: `_dot_sl_${direction}`,
+        data: dotSL, type: 'line', showLine: false, yAxisID: 'yPrice',
+        borderColor: '#fbbf24',
+        backgroundColor: slHit
+          ? 'rgba(251,191,36,0.9)'
+          : 'rgba(100,100,100,0.4)',
+        pointRadius: 6, pointStyle: slHit ? 'crossRot' : 'circle',
+        pointHoverRadius: 8, fill: false, tension: 0, order: 5,
+      });
+    });
+  }
+
+  buildProjectionDatasets(longPoints,  'LONG');
+  buildProjectionDatasets(shortPoints, 'SHORT');
+
+  // ── Simpan lookup TP/SL per indeks candle untuk tooltip ──
+  // (gabung semua _meta dari tpSlDatasets TP)
+  const tpSlByIdx = {};
+  tpSlDatasets.forEach(ds => {
+    if (!ds._meta) return;
+    if (!tpSlByIdx[ds._meta.entryIdx]) tpSlByIdx[ds._meta.entryIdx] = {};
+    Object.assign(tpSlByIdx[ds._meta.entryIdx], ds._meta);
+  });
+
   // ── ML Confidence line — dimap ke indeks label M15 terdekat ──
   const confLineData = new Array(ohlcv.length).fill(null);
   confHistory.forEach(ch => {
+
     if (!ch.ts) return;
     // Cari indeks OHLCV yang paling dekat
     let bestIdx = -1, bestDiff = Infinity;
@@ -1342,6 +1492,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           pointStyle: 'circle',
           order: 2,
         },
+        // TP / SL projection datasets
+        ...tpSlDatasets.filter(ds => !ds.label.startsWith('_dot_')),
+        ...tpSlDatasets.filter(ds => ds.label.startsWith('_dot_')),
       ]
     },
     options: {
@@ -1380,10 +1533,24 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
 
               if (inLong) {
                 lines.push(`✅ VALID ENTRY: LONG`);
+                const m = tpSlByIdx[i];
                 lines.push(`Conf   : ${(inLong.conf*100).toFixed(1)}% (≥ 72%)`);
+                if (m) {
+                  const fmt = v => v >= 1 ? v.toFixed(4) : v.toFixed(6);
+                  lines.push(`ATR    : ${(m.atr||0).toFixed(6)}`);
+                  lines.push(`TP (2×): ${fmt(m.tpPrice)} ${m.tpHit ? '✅ HIT' : '⏳'}`);
+                  lines.push(`SL (1×): ${fmt(m.slPrice)} ${m.slHit ? '🔴 HIT' : '⏳'}`);
+                }
               } else if (inShort) {
                 lines.push(`✅ VALID ENTRY: SHORT`);
+                const m = tpSlByIdx[i];
                 lines.push(`Conf   : ${(inShort.conf*100).toFixed(1)}% (≥ 72%)`);
+                if (m) {
+                  const fmt = v => v >= 1 ? v.toFixed(4) : v.toFixed(6);
+                  lines.push(`ATR    : ${(m.atr||0).toFixed(6)}`);
+                  lines.push(`TP (2×): ${fmt(m.tpPrice)} ${m.tpHit ? '✅ HIT' : '⏳'}`);
+                  lines.push(`SL (1×): ${fmt(m.slPrice)} ${m.slHit ? '🔴 HIT' : '⏳'}`);
+                }
               } else if (inWeak) {
                 lines.push(`⚠️ Weak signal: ${inWeak.sig}`);
                 lines.push(`Conf   : ${(inWeak.conf*100).toFixed(1)}% (< 72%, skip)`);
