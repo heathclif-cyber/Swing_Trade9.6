@@ -1201,7 +1201,8 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
   const flatPoints  = [];
 
   ohlcv.forEach((d, i) => {
-    const match = signals.find(s => Math.abs((s.ts || 0) - d.ts) < 15 * 60 * 1000);
+    // s.ts dari backend = Unix seconds; d.ts = milliseconds — normalize
+    const match = signals.find(s => Math.abs((s.ts || 0) * 1000 - d.ts) < 15 * 60 * 1000);
     if (match) {
       const sig  = match.ml_signal || match.signal;
       const conf = match.ml_conf   || match.conf || 0;
@@ -1354,7 +1355,7 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
               const i   = items[0]?.dataIndex;
               const sig = signals.find(s => {
                 const d = ohlcv[i];
-                return d && Math.abs((s.ts||0) - d.ts) < 15*60*1000;
+                return d && Math.abs((s.ts||0) * 1000 - d.ts) < 15*60*1000;
               });
               const confVal = confLineData[i];
               const lines = [];
