@@ -71,7 +71,7 @@ class MLSignalEngine:
         with open(registry_path) as f:
             registry = json.load(f)
 
-        active     = registry['active_model']
+        active     = registry.get('active_model', registry.get('active'))
         cfg        = registry['models'][active]
         self.cfg   = cfg
         model_type = cfg['type']
