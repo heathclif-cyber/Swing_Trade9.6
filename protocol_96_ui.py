@@ -1799,18 +1799,47 @@ def api_price_perf_v2(pair: str):
         # Buat index timestamp → indeks OHLCV untuk lookup cepat
         ts_to_idx = {c["ts"]: i for i, c in enumerate(ohlcv)}
 
-        # ─── Kalkulasi TP/SL per sinyal berdasarkan ATR riil ───
-        pnl_simulation = []
-        fee_total_pct = FEE_SIDE * 2 * leverage
+        # ─── Kalkulasi TP/SL — HANYA untuk sinyal yang lolos filter ───
+        # Filter sama dengan frontend:
+        #   1. conf >= 0.72 (confidence_threshold_entry)
+        #   2. cooldown min_hold_bars = 192 candles × 15min = 172800 detik antar sinyal searah
+        CONF_THRESHOLD = 0.72
+        COOLDOWN_SEC   = 192 * 15 * 60  # 48 jam
 
-        for h in hist:
+        pnl_simulation = []
+        fee_total_pct  = FEE_SIDE * 2 * leverage
+        last_long_ts   = -float("inf")
+        last_short_ts  = -float("inf")
+
+        # Sort by timestamp ascending untuk cooldown tracking
+        sorted_hist = sorted(hist, key=lambda h: h.get("ts") or 0)
+
+        for h in sorted_hist:
             sig   = h.get("ml_signal")
             conf  = h.get("ml_conf", 0)
+
+            # Filter 1: hanya LONG/SHORT
             if sig not in ("LONG", "SHORT"):
                 continue
 
+            # Filter 2: confidence threshold
+            if conf < CONF_THRESHOLD:
+                continue
+
+            sig_ts = h.get("ts") or 0  # dalam detik
+
+            # Filter 3: cooldown antar sinyal searah
+            if sig == "LONG":
+                if sig_ts - last_long_ts < COOLDOWN_SEC:
+                    continue
+                last_long_ts = sig_ts
+            else:  # SHORT
+                if sig_ts - last_short_ts < COOLDOWN_SEC:
+                    continue
+                last_short_ts = sig_ts
+
             # Cari candle entry yang paling dekat
-            sig_ms = (h.get("ts") or 0) * 1000
+            sig_ms = sig_ts * 1000
             best_idx, best_diff = -1, float("inf")
             for i, c in enumerate(ohlcv):
                 diff = abs(c["ts"] - sig_ms)
@@ -1820,6 +1849,7 @@ def api_price_perf_v2(pair: str):
 
             if best_idx < 0 or best_diff > 15 * 60 * 1000 * 2:
                 continue
+
 
             entry_price = ohlcv[best_idx]["close"]
             atr         = atr_vals[best_idx]
