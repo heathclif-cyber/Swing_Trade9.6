@@ -57,9 +57,9 @@ def get_atr_projections_long(entry_val, atr, atr_mult, close_price=None, macro_t
         )
 
     return [
-        (tp1, "ATR Projection (+2.0x)"),
-        (tp2, "ATR Projection (+3.0x)"),
-        (tp3, f"ATR Projection (+8.0x){' [OVERRIDE 10x UPTREND]' if _tp3_overridden else ''} [FIX P9.7]"),
+        (tp1, f"ATR Projection (+{TP_ATR_MULT * atr_mult:g}x)"),
+        (tp2, f"ATR Projection (+{3.0 * atr_mult:g}x)"),
+        (tp3, f"ATR Projection (+{8.0 * atr_mult:g}x){' [OVERRIDE 10x UPTREND]' if _tp3_overridden else ''} [FIX P9.7]"),
     ]
 
 def get_atr_projections_short(entry_val, atr, atr_mult, close_price=None):
@@ -83,9 +83,9 @@ def get_atr_projections_short(entry_val, atr, atr_mult, close_price=None):
         )
 
     return [
-        (tp1, "ATR Projection (-2.0x)"),
-        (tp2, "ATR Projection (-3.0x)"),
-        (tp3, "ATR Projection (-8.0x) [FIX P9.7]"),
+        (tp1, f"ATR Projection (-{TP_ATR_MULT * atr_mult:g}x)"),
+        (tp2, f"ATR Projection (-{3.0 * atr_mult:g}x)"),
+        (tp3, f"ATR Projection (-{8.0 * atr_mult:g}x) [FIX P9.7]"),
     ]
 
 
@@ -97,10 +97,11 @@ def get_entry_based_sl(entry_val: float, atr: float, atr_mult: float, direction:
     Return (sl_value, label)
     """
     raw_atr = atr * atr_mult
+    eff_mult = SL_ATR_MULT * atr_mult
     if direction == 'SHORT':
         sl = entry_val + (raw_atr * SL_ATR_MULT)  # was: 1.0
-        label = f"Entry + {SL_ATR_MULT}×ATR (SL SHORT)"
+        label = f"Entry + {eff_mult:g}×ATR (SL SHORT)"
     else:
         sl = entry_val - (raw_atr * SL_ATR_MULT)  # was: 1.0
-        label = f"Entry − {SL_ATR_MULT}×ATR (SL LONG)"
+        label = f"Entry − {eff_mult:g}×ATR (SL LONG)"
     return (round(sl, 8), label)

@@ -1000,30 +1000,63 @@ def api_data():
                     lvl_L = quant_results["long"]["levels"]
                     lvl_S = quant_results["short"]["levels"]
                     em    = quant_results.get("emergency", {})
-                    sl_val = lvl_L.get("sl_structure") or 0.0
+
+                    # ── Tentukan sisi aktif: jika ada posisi aktif, ikuti sisi posisi.
+                    #    Jika tidak ada posisi, ikuti ML signal.
+                    _ml_sig    = quant_results['long'].get('ml_signal', 'FLAT')
+                    _pos_side  = coin_state.get("position_side", "LONG").upper()   # dari trade_entries
+                    _has_pos   = coin_state.get("remaining_qty", 0) > 0
+                    _ml_conflict = _has_pos and _ml_sig != _pos_side and _ml_sig != 'FLAT'
+
+                    # Levels yang ditampilkan selalu mengikuti POSISI AKTIF jika ada,
+                    # bukan ML signal (ML SHORT ≠ rubah display TP posisi LONG)
+                    if _has_pos and _pos_side == "LONG":
+                        _active_lvl  = lvl_L
+                        _active_sl   = lvl_L.get("sl_structure") or 0.0
+                    elif _has_pos and _pos_side == "SHORT":
+                        _active_lvl  = lvl_S
+                        _active_sl   = lvl_S.get("sl_structure") or 0.0
+                    else:
+                        # Tidak ada posisi — ikuti ML signal
+                        _active_lvl  = lvl_L if _ml_sig != 'SHORT' else lvl_S
+                        _active_sl   = _active_lvl.get("sl_structure") or 0.0
+
+                    sl_val = _active_sl
                     computed["battle_plan"] = {
-                        # LONG levels (dari algo_scoring — sama persis dengan notif Telegram)
-                        "structural_sl":       sl_val,
-                        "tp1_val":             lvl_L.get("tp1"),
-                        "tp1_label":           lvl_L.get("tp1_label", "TP1"),
-                        "tp2_val":             lvl_L.get("tp2"),
-                        "tp2_label":           lvl_L.get("tp2_label", "TP2"),
-                        "tp3_val":             lvl_L.get("tp3"),
-                        "tp3_label":           lvl_L.get("tp3_label", "TP3"),
-                        "dist_sl":             lvl_L.get("dist_sl"),
-                        "dist_tp1":            lvl_L.get("dist_tp1"),
-                        "dist_tp2":            lvl_L.get("dist_tp2"),
-                        "dist_tp3":            lvl_L.get("dist_tp3"),
-                        "rr1":                 lvl_L.get("rr1"),
-                        "rr2":                 lvl_L.get("rr2"),
-                        "rr3":                 lvl_L.get("rr3"),
-                        # SHORT levels
+                        # Levels sesuai posisi aktif (bukan ML signal)
+                        "structural_sl":  sl_val,
+                        "tp1_val":        _active_lvl.get("tp1"),
+                        "tp1_label":      _active_lvl.get("tp1_label", "TP1"),
+                        "tp2_val":        _active_lvl.get("tp2"),
+                        "tp2_label":      _active_lvl.get("tp2_label", "TP2"),
+                        "tp3_val":        _active_lvl.get("tp3"),
+                        "tp3_label":      _active_lvl.get("tp3_label", "TP3"),
+                        "dist_sl":        _active_lvl.get("dist_sl"),
+                        "dist_tp1":       _active_lvl.get("dist_tp1"),
+                        "dist_tp2":       _active_lvl.get("dist_tp2"),
+                        "dist_tp3":       _active_lvl.get("dist_tp3"),
+                        "rr1":            _active_lvl.get("rr1"),
+                        "rr2":            _active_lvl.get("rr2"),
+                        "rr3":            _active_lvl.get("rr3"),
+                        "rr_matrix":      _active_lvl.get("rr_matrix", []),
+                        "sl_ketat":       _active_lvl.get("sl_ketat"),
+                        "sl_normal":      _active_lvl.get("sl_normal"),
+                        "sl_lebar":       _active_lvl.get("sl_lebar"),
+                        "sl_label":       _active_lvl.get("sl_label", ""),
+                        "dist_sl_ketat":  _active_lvl.get("dist_sl_ketat"),
+                        "dist_sl_normal": _active_lvl.get("dist_sl_normal"),
+                        "dist_sl_lebar":  _active_lvl.get("dist_sl_lebar"),
+                        # Reference SHORT levels (untuk info/exit planning)
                         "structural_sl_short": lvl_S.get("sl_structure"),
-                        "tp1_val_short":        lvl_S.get("tp1"),
-                        "tp2_val_short":        lvl_S.get("tp2"),
-                        "tp3_val_short":        lvl_S.get("tp3"),
+                        "tp1_val_short":       lvl_S.get("tp1"),
+                        "tp2_val_short":       lvl_S.get("tp2"),
+                        "tp3_val_short":       lvl_S.get("tp3"),
+                        # Status flags
                         "kill_switch_active":  em.get("sl_touched", False),
-                        "ml_signal":      quant_results['long'].get('ml_signal', 'FLAT'),
+                        "position_side":       _pos_side if _has_pos else "NONE",
+                        "ml_conflict":         _ml_conflict,  # True = ML berlawanan dengan posisi (exit warning)
+                        # ML data
+                        "ml_signal":      _ml_sig,
                         "ml_confidence":  quant_results['long'].get('ml_confidence', 0.0),
                         "ml_size":        quant_results['long'].get('ml_size', 'SKIP'),
                         "ml_proba":       quant_results['long'].get('ml_proba', {}),
@@ -1031,7 +1064,6 @@ def api_data():
                         "ml_confidence_s":quant_results['short'].get('ml_confidence', 0.0),
                         "ml_size_s":      quant_results['short'].get('ml_size', 'SKIP'),
                         "ml_narrative":   quant_results['long'].get('narrative', ''),
-                        # Untuk kompatibilitas UI lama yang mungkin baca long_score:
                         "long_score":     round(quant_results['long'].get('ml_confidence', 0.0) * 100, 1),
                         "short_score":    round(quant_results['short'].get('ml_confidence', 0.0) * 100, 1),
                         "source": "algo_scoring_ssot",
