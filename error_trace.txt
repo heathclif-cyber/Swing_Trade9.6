@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "D:\Apps-Dev\Swing_Trade9.6\test_err.py", line 9, in <module>
-    algo_scoring.calculate_71point_score(df, meta)
-  File "D:\Apps-Dev\Swing_Trade9.6\algo_scoring.py", line 589, in calculate_71point_score
-    if not _stoch_rising: _reasons.append(f"K tidak naik ({stoch_k:.1f}≤prev {stoch_k_prev:.1f if stoch_k_prev else 'N/A'})")
-                                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-ValueError: Invalid format specifier '.1f if stoch_k_prev else 'N/A'' for object of type 'float'
