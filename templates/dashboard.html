@@ -872,19 +872,19 @@ tbody tr:last-child td { border-bottom: none; }
         <!-- Stat Cards -->
         <div class="perf-stat-grid" id="perfStatGrid" style="display:none;">
           <div class="perf-stat-card">
-            <div class="perf-stat-label">Total Sinyal</div>
+            <div class="perf-stat-label" title="Total sinyal entry yang valid (conf ≥ 72%)">Total Valid Entry</div>
             <div class="perf-stat-value blue" id="statTotalSignals">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">🐂 LONG</div>
+            <div class="perf-stat-label">🐂 VALID LONG</div>
             <div class="perf-stat-value green" id="statLongCount">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">🐻 SHORT</div>
+            <div class="perf-stat-label">🐻 VALID SHORT</div>
             <div class="perf-stat-value red" id="statShortCount">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">⏸ FLAT</div>
+            <div class="perf-stat-label">○ WEAK (Skip)</div>
             <div class="perf-stat-value" id="statFlatCount" style="color:var(--text-2);">—</div>
           </div>
           <div class="perf-stat-card">
@@ -1155,8 +1155,8 @@ async function loadPerfChart() {
     // Gabungkan data confidence ke dalam objek
     const confHistory = (confData.success && confData.data) ? confData.data : [];
 
-    renderPerfChart(perfData, coin, leverage, confHistory);
-    updatePerfStats(perfData.stats);
+    const filteredCounts = renderPerfChart(perfData, coin, leverage, confHistory);
+    updatePerfStats(perfData.stats, filteredCounts);
 
     document.getElementById('perfLastUpdate').textContent =
       `Update: ${new Date().toLocaleTimeString('id-ID')} · ${confHistory.length} titik conf`;
@@ -1448,16 +1448,31 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
 
   // Tampilkan legend
   document.getElementById('perfLegend').style.display = 'flex';
+
+  return {
+    longCount: longPoints.length,
+    shortCount: shortPoints.length,
+    weakCount: weakPoints.length
+  };
 }
 
-function updatePerfStats(stats) {
+function updatePerfStats(stats, filteredCounts) {
   if (!stats) return;
   const grid = document.getElementById('perfStatGrid');
   grid.style.display = 'grid';
-  document.getElementById('statTotalSignals').textContent = stats.total_signals ?? '—';
-  document.getElementById('statLongCount').textContent    = stats.long_count    ?? '—';
-  document.getElementById('statShortCount').textContent   = stats.short_count   ?? '—';
-  document.getElementById('statFlatCount').textContent    = stats.flat_count    ?? '—';
+  
+  if (filteredCounts) {
+    document.getElementById('statTotalSignals').textContent = filteredCounts.longCount + filteredCounts.shortCount;
+    document.getElementById('statLongCount').textContent    = filteredCounts.longCount;
+    document.getElementById('statShortCount').textContent   = filteredCounts.shortCount;
+    document.getElementById('statFlatCount').textContent    = filteredCounts.weakCount;
+  } else {
+    document.getElementById('statTotalSignals').textContent = stats.total_signals ?? '—';
+    document.getElementById('statLongCount').textContent    = stats.long_count    ?? '—';
+    document.getElementById('statShortCount').textContent   = stats.short_count   ?? '—';
+    document.getElementById('statFlatCount').textContent    = stats.flat_count    ?? '—';
+  }
+  
   document.getElementById('statAvgConf').textContent      = (stats.avg_confidence ?? '—') + '%';
   document.getElementById('statLeverage').textContent     = (stats.leverage ?? '—') + 'x';
 }
