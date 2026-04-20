@@ -39,8 +39,7 @@ async function fetchData() {
         renderKillSwitch(json);
         renderQuantAnalysis(json.state?.quant_analysis, json.state);
         renderEmergency(json.state?.quant_analysis, json.state);
-        // [INTEGRASI] Update confidence chart di panel detail
-        loadDetailConfidenceChart(currentBackendPair);
+        // ML Confidence chart kini digabung di Price Performance Monitor
     } catch (e) {
         showAlert('danger', '❌ ' + e.message);
         console.error(e);
@@ -296,8 +295,7 @@ function renderQuantAnalysis(quant, state) {
             </div>`;
     }
 
-    // [INTEGRASI] Placeholder untuk Confidence History Chart di panel detail
-    html += `<div id="detailConfChart" style="margin-top:16px; border-top:1px solid rgba(255,255,255,0.05); padding-top:16px;"></div>`;
+    // ML Confidence chart dipindahkan ke Price Performance Monitor
 
     document.getElementById('featureGrid').innerHTML = html;
     // SL/TP Levels
@@ -982,28 +980,11 @@ function openDetailWithHistory(pair) {
     setTimeout(() => {
         const sec = document.getElementById('sectionScanner') || document.getElementById('quantPanel');
         if (sec) sec.scrollIntoView({ behavior: 'smooth' });
-        // Muat history confidence untuk panel detail
-        loadDetailConfidenceChart(pair);
+        // ML Confidence ditampilkan di Price Performance Monitor
     }, 400);
 }
 
-async function loadDetailConfidenceChart(pair) {
-    const container = document.getElementById('detailConfChart');
-    if (!container) return;
-    container.innerHTML = '<div style="text-align:center;color:var(--text-3);font-size:11px;padding:10px">⏳ Memuat history...</div>';
-    try {
-        const res = await fetch(`/api/confidence-history/${pair}`);
-        const json = await res.json();
-        if (json.success && json.data.length) {
-            container.innerHTML = renderConfidenceChart(pair, json.data, 340); // Ukuran lebih lebar untuk panel detail
-        } else {
-            container.innerHTML = ''; // Sembunyikan jika tidak ada data
-        }
-    } catch (e) {
-        console.error("Detail chart error:", e);
-        container.innerHTML = '';
-    }
-}
+// loadDetailConfidenceChart dipindahkan ke Price Performance Monitor
 
 const _confChartOpen = {};   // track open state per pair
 

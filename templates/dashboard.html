@@ -907,12 +907,14 @@ tbody tr:last-child td { border-bottom: none; }
         </div>
 
         <!-- Legend -->
-        <div id="perfLegend" style="display:none;margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-          <span style="font-size:12px;color:var(--text-2);">Sinyal:</span>
+        <div id="perfLegend" style="display:none;margin-top:12px;flex-wrap:wrap;gap:8px;align-items:center;">
+          <span style="font-size:12px;color:var(--text-2);">Sinyal harga:</span>
           <span class="signal-badge LONG">▲ LONG</span>
           <span class="signal-badge SHORT">▼ SHORT</span>
           <span class="signal-badge FLAT">— FLAT</span>
-          <span style="font-size:12px;color:var(--text-2);margin-left:8px;">● = confidence ≥ 0.72 (aktif trading)</span>
+          <span style="font-size:12px;color:rgba(167,139,250,0.9);margin-left:10px;">- - 🧠 ML Conf % (kiri)</span>
+          <span style="font-size:12px;color:rgba(99,125,255,0.8);margin-left:4px;">— Harga Close (kanan)</span>
+          <span style="font-size:11px;color:var(--text-3);margin-left:8px;">● besar = conf ≥ 72%</span>
         </div>
 
       </div>
@@ -1130,7 +1132,6 @@ async function loadPerfChart() {
   const hours    = parseInt(document.getElementById('perfHoursSelect').value) || 24;
 
   // Show loading
-  const container   = document.getElementById('perfChartContainer');
   const placeholder = document.getElementById('perfChartPlaceholder');
   const canvas      = document.getElementById('perfChart');
   placeholder.innerHTML = `
@@ -1141,15 +1142,24 @@ async function loadPerfChart() {
   canvas.style.display = 'none';
 
   try {
-    const res  = await fetch(`/api/price-performance/${coin}?hours=${hours}&leverage=${leverage}`);
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error || 'Gagal memuat data');
+    // Fetch OHLCV+signals dan confidence-history SECARA PARALEL
+    const [perfRes, confRes] = await Promise.all([
+      fetch(`/api/price-performance/${coin}?hours=${hours}&leverage=${leverage}`),
+      fetch(`/api/confidence-history/${coin}?hours=${hours}`)
+    ]);
+    const perfData = await perfRes.json();
+    const confData = await confRes.json();
 
-    renderPerfChart(data, coin, leverage);
-    updatePerfStats(data.stats);
+    if (!perfData.success) throw new Error(perfData.error || 'Gagal memuat data harga');
+
+    // Gabungkan data confidence ke dalam objek
+    const confHistory = (confData.success && confData.data) ? confData.data : [];
+
+    renderPerfChart(perfData, coin, leverage, confHistory);
+    updatePerfStats(perfData.stats);
 
     document.getElementById('perfLastUpdate').textContent =
-      `Update: ${new Date().toLocaleTimeString('id-ID')}`;
+      `Update: ${new Date().toLocaleTimeString('id-ID')} · ${confHistory.length} titik conf`;
 
   } catch (err) {
     placeholder.innerHTML = `
@@ -1160,7 +1170,7 @@ async function loadPerfChart() {
   }
 }
 
-function renderPerfChart(data, coin, leverage) {
+function renderPerfChart(data, coin, leverage, confHistory = []) {
   const canvas      = document.getElementById('perfChart');
   const placeholder = document.getElementById('perfChartPlaceholder');
 
@@ -1179,34 +1189,41 @@ function renderPerfChart(data, coin, leverage) {
   }
 
   // Siapkan data chart
-  const labels     = ohlcv.map(d => {
+  const labels = ohlcv.map(d => {
     const dt = new Date(d.ts);
     return dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   });
-  const closes     = ohlcv.map(d => d.close);
-
-  // Map sinyal ke timestamp
-  const signalMap = {};
-  signals.forEach(s => { if (s.ts) signalMap[s.ts] = s; });
+  const closes = ohlcv.map(d => d.close);
 
   // Scatter points untuk sinyal
   const longPoints  = [];
   const shortPoints = [];
   const flatPoints  = [];
-  
+
   ohlcv.forEach((d, i) => {
-    // Cari sinyal yang paling dekat dengan timestamp candle ini
-    const match = signals.find(s => {
-      const diff = Math.abs((s.ts || 0) - d.ts);
-      return diff < 15 * 60 * 1000; // dalam 1 candle M15
-    });
+    const match = signals.find(s => Math.abs((s.ts || 0) - d.ts) < 15 * 60 * 1000);
     if (match) {
-      const sig = match.ml_signal || match.signal;
-      const conf = match.ml_conf  || match.conf || 0;
-      const point = { x: i, y: d.close, conf: conf, ts: d.ts };
+      const sig  = match.ml_signal || match.signal;
+      const conf = match.ml_conf   || match.conf || 0;
+      const point = { x: i, y: d.close, conf };
       if (sig === 'LONG')       longPoints.push(point);
       else if (sig === 'SHORT') shortPoints.push(point);
       else if (sig === 'FLAT')  flatPoints.push(point);
+    }
+  });
+
+  // ── ML Confidence line — dimap ke indeks label M15 terdekat ──
+  const confLineData = new Array(ohlcv.length).fill(null);
+  confHistory.forEach(ch => {
+    if (!ch.ts) return;
+    // Cari indeks OHLCV yang paling dekat
+    let bestIdx = -1, bestDiff = Infinity;
+    ohlcv.forEach((d, i) => {
+      const diff = Math.abs(d.ts - ch.ts * 1000); // ch.ts dalam detik
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    if (bestIdx >= 0 && bestDiff < 30 * 60 * 1000) {
+      confLineData[bestIdx] = (ch.ml_conf || 0) * 100;
     }
   });
 
@@ -1216,18 +1233,24 @@ function renderPerfChart(data, coin, leverage) {
   gradient.addColorStop(0, 'rgba(99,125,255,0.3)');
   gradient.addColorStop(1, 'rgba(99,125,255,0.0)');
 
+  // Gradient untuk confidence line
+  const confGrad = ctx.createLinearGradient(0, 0, 0, 400);
+  confGrad.addColorStop(0, 'rgba(167,139,250,0.25)');
+  confGrad.addColorStop(1, 'rgba(167,139,250,0.0)');
+
   placeholder.style.display = 'none';
   canvas.style.display = 'block';
 
   perfChartInstance = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: labels,
+      labels,
       datasets: [
         // Harga Close
         {
           label: `${coin} Close`,
           data: closes,
+          yAxisID: 'yPrice',
           borderColor: 'rgba(99,125,255,0.9)',
           borderWidth: 1.5,
           backgroundColor: gradient,
@@ -1235,6 +1258,22 @@ function renderPerfChart(data, coin, leverage) {
           tension: 0.3,
           pointRadius: 0,
           pointHoverRadius: 4,
+          order: 4,
+        },
+        // ML Confidence %
+        {
+          label: '🧠 ML Conf %',
+          data: confLineData,
+          yAxisID: 'yConf',
+          borderColor: 'rgba(167,139,250,0.85)',
+          borderWidth: 2,
+          backgroundColor: confGrad,
+          fill: false,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          borderDash: [4, 3],
+          spanGaps: true,
           order: 3,
         },
         // Sinyal LONG
@@ -1242,12 +1281,11 @@ function renderPerfChart(data, coin, leverage) {
           label: '▲ LONG',
           data: longPoints.map(p => ({ x: p.x, y: p.y })),
           type: 'scatter',
+          yAxisID: 'yPrice',
           borderColor: '#34d399',
           backgroundColor: p => {
             const pt = longPoints[p.dataIndex];
-            return pt && pt.conf >= 0.72 
-              ? 'rgba(52,211,153,0.9)' 
-              : 'rgba(52,211,153,0.35)';
+            return pt && pt.conf >= 0.72 ? 'rgba(52,211,153,0.9)' : 'rgba(52,211,153,0.35)';
           },
           pointRadius: p => {
             const pt = longPoints[p.dataIndex];
@@ -1261,12 +1299,11 @@ function renderPerfChart(data, coin, leverage) {
           label: '▼ SHORT',
           data: shortPoints.map(p => ({ x: p.x, y: p.y })),
           type: 'scatter',
+          yAxisID: 'yPrice',
           borderColor: '#f87171',
           backgroundColor: p => {
             const pt = shortPoints[p.dataIndex];
-            return pt && pt.conf >= 0.72 
-              ? 'rgba(248,113,113,0.9)' 
-              : 'rgba(248,113,113,0.35)';
+            return pt && pt.conf >= 0.72 ? 'rgba(248,113,113,0.9)' : 'rgba(248,113,113,0.35)';
           },
           pointRadius: p => {
             const pt = shortPoints[p.dataIndex];
@@ -1281,6 +1318,7 @@ function renderPerfChart(data, coin, leverage) {
           label: '— FLAT',
           data: flatPoints.map(p => ({ x: p.x, y: p.y })),
           type: 'scatter',
+          yAxisID: 'yPrice',
           borderColor: '#94a3b8',
           backgroundColor: 'rgba(148,163,184,0.3)',
           pointRadius: 5,
@@ -1290,42 +1328,44 @@ function renderPerfChart(data, coin, leverage) {
       ]
     },
     options: {
-      responsive:          true,
+      responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      animation:   { duration: 400 },
+      animation: { duration: 400 },
       plugins: {
         legend: {
           display: true,
           position: 'top',
           labels: {
-            color:    'rgba(255,255,255,0.7)',
+            color: 'rgba(255,255,255,0.7)',
             boxWidth: 12,
-            font:     { size: 12 },
+            font: { size: 12 },
           }
         },
         tooltip: {
           backgroundColor: 'rgba(15,15,30,0.95)',
-          borderColor:     'rgba(255,255,255,0.1)',
-          borderWidth:     1,
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
           titleColor: '#fff',
-          bodyColor:       'rgba(255,255,255,0.7)',
-          padding:         12,
+          bodyColor: 'rgba(255,255,255,0.7)',
+          padding: 12,
           callbacks: {
             afterBody: function(items) {
-              const i = items[0]?.dataIndex;
+              const i   = items[0]?.dataIndex;
               const sig = signals.find(s => {
                 const d = ohlcv[i];
                 return d && Math.abs((s.ts||0) - d.ts) < 15*60*1000;
               });
-              if (!sig) return '';
-              const conf = ((sig.ml_conf || sig.conf || 0) * 100).toFixed(1);
-              const lev  = leverage;
-              return [
-                `Signal : ${sig.ml_signal || sig.signal || '—'}`,
-                `Conf   : ${conf}%`,
-                `Lev    : ${lev}x`,
-              ];
+              const confVal = confLineData[i];
+              const lines = [];
+              if (sig) {
+                const c = ((sig.ml_conf || sig.conf || 0) * 100).toFixed(1);
+                lines.push(`Signal : ${sig.ml_signal || sig.signal || '—'}`);
+                lines.push(`Conf   : ${c}%`);
+              }
+              if (confVal != null) lines.push(`ML Conf: ${confVal.toFixed(1)}%`);
+              if (leverage > 1) lines.push(`Lev    : ${leverage}x`);
+              return lines;
             }
           }
         }
@@ -1333,20 +1373,35 @@ function renderPerfChart(data, coin, leverage) {
       scales: {
         x: {
           ticks: {
-            color:     'rgba(255,255,255,0.4)',
+            color: 'rgba(255,255,255,0.4)',
             maxTicksLimit: 12,
             font: { size: 11 },
           },
           grid: { color: 'rgba(255,255,255,0.04)' }
         },
-        y: {
+        yPrice: {
+          type: 'linear',
           position: 'right',
           ticks: {
-            color: 'rgba(255,255,255,0.4)',
+            color: 'rgba(99,125,255,0.6)',
             font: { size: 11 },
             callback: v => v >= 1 ? v.toFixed(2) : v.toFixed(5),
           },
           grid: { color: 'rgba(255,255,255,0.04)' }
+        },
+        yConf: {
+          type: 'linear',
+          position: 'left',
+          min: 0,
+          max: 100,
+          ticks: {
+            color: 'rgba(167,139,250,0.6)',
+            font: { size: 10 },
+            callback: v => v + '%',
+            stepSize: 25,
+          },
+          grid: { drawOnChartArea: false },
+          border: { dash: [4, 4] }
         }
       }
     }
