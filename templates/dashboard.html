@@ -80,11 +80,11 @@ body {
     border: 1px solid var(--glass-border); border-radius: var(--radius-md);
 }
 /* ── LAYOUT ─────────────────────────────────────────────────────────────── */
-.app-container { max-width: 1520px; margin: 0 auto; padding: 20px 24px; }
+.app-container { max-width: 1520px; margin: 0 auto; padding: 12px 18px; }
 /* ── HEADER ─────────────────────────────────────────────────────────────── */
 .header {
     display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 12px; padding: 14px 22px; margin-bottom: 20px;
+    flex-wrap: wrap; gap: 8px; padding: 10px 16px; margin-bottom: 12px;
 }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-logo {
@@ -131,10 +131,10 @@ body {
 .select-styled:hover { border-color: var(--accent-blue); }
 /* ── STATUS STRIP ───────────────────────────────────────────────────────── */
 .status-strip {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 12px; margin-bottom: 20px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px; margin-bottom: 14px;
 }
-.status-card { padding: 16px 18px; position: relative; overflow: hidden; animation: slideUp .4s ease backwards; }
+.status-card { padding: 11px 14px; position: relative; overflow: hidden; animation: slideUp .4s ease backwards; }
 .status-card::before {
     content: ''; position: absolute; inset: 0; border-radius: inherit;
     background: linear-gradient(135deg, rgba(255,255,255,0.025) 0%, transparent 100%); pointer-events: none;
@@ -144,8 +144,8 @@ body {
 .status-card.accent-red   { border-top: 2px solid var(--accent-red); }
 .status-card.accent-purple{ border-top: 2px solid var(--accent-purple); }
 .status-card.accent-yellow{ border-top: 2px solid var(--accent-yellow); }
-.status-label { font-size: 10.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px; }
-.status-value { font-size: 22px; font-weight: 600; line-height: 1.2; }
+.status-label { font-size: 9.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px; }
+.status-value { font-size: 18px; font-weight: 600; line-height: 1.2; }
 .status-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 10px; margin-top: 4px; }
 .tag-active { background: rgba(52,211,153,.14); color: var(--accent-green); border: 1px solid rgba(52,211,153,.28); }
 .tag-killed { background: rgba(248,113,113,.14); color: var(--accent-red); border: 1px solid rgba(248,113,113,.28); }
@@ -153,11 +153,11 @@ body {
 .val-neg { color: var(--accent-red) !important; }
 .val-warn { color: var(--accent-yellow) !important; }
 /* ── SECTIONS ───────────────────────────────────────────────────────────── */
-.section { margin-bottom: 22px; }
-.section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.section { margin-bottom: 12px; }
+.section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .section-icon-badge {
-    width: 36px; height: 36px; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    width: 30px; height: 30px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
 }
 .icon-blue   { background: rgba(99,125,255,.12); }
 .icon-cyan   { background: rgba(34,211,238,.12); }
@@ -165,7 +165,7 @@ body {
 .icon-red    { background: rgba(248,113,113,.12); }
 .icon-purple { background: rgba(167,139,250,.12); }
 .icon-yellow { background: rgba(251,191,36,.12); }
-.section-title { font-size: 16px; font-weight: 600; }
+.section-title { font-size: 14px; font-weight: 600; }
 .section-badge {
     margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: .8px;
     text-transform: uppercase; padding: 4px 12px; border-radius: 12px;
@@ -200,19 +200,19 @@ tbody tr:hover { background: var(--glass-hover); }
 tbody tr:last-child td { border-bottom: none; }
 /* ── PANELS ──────────────────────────────────────────────────────────────── */
 .panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
-.panel { padding: 20px; }
+.panel { padding: 14px; }
 .panel-title {
-    font-size: 12px; font-weight: 600; color: var(--text-2);
-    display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+    font-size: 11px; font-weight: 600; color: var(--text-2);
+    display: flex; align-items: center; gap: 6px; margin-bottom: 10px;
     text-transform: uppercase; letter-spacing: .7px;
 }
 .panel-row {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.035);
+    padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.035);
 }
 .panel-row:last-child { border-bottom: none; }
-.panel-row-label { font-size: 13px; color: var(--text-2); }
-.panel-row-value { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+.panel-row-label { font-size: 12px; color: var(--text-2); }
+.panel-row-value { font-family: var(--mono); font-size: 12px; font-weight: 500; }
 /* ── BADGES ──────────────────────────────────────────────────────────────── */
 .badge {
     display: inline-flex; align-items: center; gap: 5px;
@@ -357,27 +357,27 @@ tbody tr:last-child td { border-bottom: none; }
 /* Stat card kecil */
 .perf-stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 7px;
+  margin-bottom: 12px;
 }
 .perf-stat-card {
   background:    rgba(255,255,255,0.04);
   border:        1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  padding:       14px 12px;
+  padding:       10px;
   text-align:    center;
   backdrop-filter: blur(8px);
 }
 .perf-stat-label {
-  font-size:  11px;
+  font-size:  10px;
   color:      var(--text-2);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 .perf-stat-value {
-  font-size:   20px;
+  font-size:   17px;
   font-weight: 700;
   font-family: var(--mono);
 }
@@ -390,7 +390,7 @@ tbody tr:last-child td { border-bottom: none; }
 #perfChartContainer {
   position:      relative;
   width:         100%;
-  height:        420px;
+  height:        360px;
   border-radius: var(--radius-md);
   overflow:      hidden;
   border:        1px solid var(--glass-border);
@@ -435,8 +435,8 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* ── QUANT SECTION ──────────────────────────────────────────────────────── */
 .quant-decision-banner {
-    padding: 24px 28px; border-radius: var(--radius-lg);
-    text-align: center; margin-bottom: 18px;
+    padding: 14px 20px; border-radius: var(--radius-lg);
+    text-align: center; margin-bottom: 12px;
     border: 1px solid transparent; position: relative; overflow: hidden;
 }
 .quant-decision-banner::before {
@@ -448,8 +448,8 @@ tbody tr:last-child td { border-bottom: none; }
 .decision-WAIT { background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.3); }
 .decision-SKIP { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.3); }
 .decision-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--text-3); margin-bottom: 6px; }
-.decision-name  { font-size: 28px; font-weight: 800; letter-spacing: -1px; margin-bottom: 6px; }
-.decision-score { font-size: 15px; font-weight: 500; opacity: .8; }
+.decision-name  { font-size: 22px; font-weight: 800; letter-spacing: -1px; margin-bottom: 4px; }
+.decision-score { font-size: 13px; font-weight: 500; opacity: .8; }
 .color-FULL { color: var(--accent-green); }
 .color-HALF { color: var(--accent-blue); }
 .color-WAIT { color: var(--accent-yellow); }
@@ -457,7 +457,7 @@ tbody tr:last-child td { border-bottom: none; }
 .quant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .narrative-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
 @media(max-width: 900px) { .quant-grid { grid-template-columns: 1fr; } .narrative-grid { grid-template-columns: 1fr; } }
-.quant-card { padding: 20px; }
+.quant-card { padding: 14px; }
 /* Feature scoring */
 .feature-row {
     display: flex; align-items: center; gap: 10px;
@@ -825,48 +825,30 @@ tbody tr:last-child td { border-bottom: none; }
 
       <div id="perfMonitorContent" class="section-body">
 
-        <!-- Input Controls -->
-        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:18px;">
-          
-          <div style="display:flex;flex-direction:column;gap:6px;">
-            <label style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;">Koin</label>
-            <select id="perfCoinSelect" class="glass-select" style="min-width:160px;">
-              <option value="DOGEUSDT">DOGEUSDT ⭐</option>
-              <option value="TRXUSDT">TRXUSDT ⭐</option>
-              <option value="ARBUSDT">ARBUSDT ⭐</option>
-              <option value="ETHUSDT">ETHUSDT</option>
-              <option value="BNBUSDT">BNBUSDT</option>
-              <option value="SOLUSDT">SOLUSDT</option>
-              <option value="SUIUSDT">SUIUSDT</option>
-              <option value="XRPUSDT">XRPUSDT</option>
-              <option value="ADAUSDT">ADAUSDT</option>
-              <option value="AVAXUSDT">AVAXUSDT</option>
-              <option value="LINKUSDT">LINKUSDT</option>
-              <option value="NEARUSDT">NEARUSDT</option>
-            </select>
+        <!-- Input Controls (compact) -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;">
+          <div style="font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Monitor:</div>
+          <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2);">
+            <span>Koin:</span>
+            <strong id="perfCoinLabel" style="color:var(--accent-cyan);font-family:var(--mono);">—</strong>
           </div>
-
-          <div style="display:flex;flex-direction:column;gap:6px;">
-            <label style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;">Leverage</label>
-            <input id="perfLeverageInput" type="number" class="glass-input" 
-                   value="3" min="1" max="20" step="1" style="width:90px;" />
+          <div style="display:flex;align-items:center;gap:4px;">
+            <label style="font-size:11px;color:var(--text-2);">Lev</label>
+            <input id="perfLeverageInput" type="number" class="glass-input" value="3" min="1" max="20" step="1" style="width:64px;padding:5px 8px;font-size:12px;" />
           </div>
-
-          <div style="display:flex;flex-direction:column;gap:6px;">
-            <label style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;">Periode</label>
-            <select id="perfHoursSelect" class="glass-select">
+          <div style="display:flex;align-items:center;gap:4px;">
+            <label style="font-size:11px;color:var(--text-2);">Periode</label>
+            <select id="perfHoursSelect" class="glass-select" style="padding:5px 8px;font-size:12px;">
               <option value="12">12 Jam</option>
               <option value="24" selected>24 Jam</option>
               <option value="48">48 Jam</option>
               <option value="72">72 Jam</option>
             </select>
           </div>
-
-          <button class="glass-btn" onclick="loadPerfChart()" style="align-self:flex-end;">
+          <button class="glass-btn" onclick="loadPerfChart()" style="padding:5px 14px;font-size:12px;">
             🔍 Analisis
           </button>
-
-          <div id="perfLastUpdate" style="align-self:flex-end;font-size:12px;color:var(--text-2);padding-bottom:2px;"></div>
+          <div id="perfLastUpdate" style="font-size:11px;color:var(--text-3);"></div>
         </div>
 
         <!-- Stat Cards -->
@@ -1127,9 +1109,14 @@ setInterval(checkSystemHealth, 30000);
 let perfChartInstance = null;
 
 async function loadPerfChart() {
-  const coin     = document.getElementById('perfCoinSelect').value;
+  // Baca koin dari selector GLOBAL (sinkronisasi 1 sumber)
+  const coin     = document.getElementById('pairSelect').value || currentBackendPair || 'BTCUSDT';
   const leverage = parseFloat(document.getElementById('perfLeverageInput').value) || 3;
   const hours    = parseInt(document.getElementById('perfHoursSelect').value) || 24;
+
+  // Update label koin di controls
+  const lbl = document.getElementById('perfCoinLabel');
+  if (lbl) lbl.textContent = coin;
 
   // Show loading
   const placeholder = document.getElementById('perfChartPlaceholder');

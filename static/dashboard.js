@@ -568,7 +568,13 @@ function switchQuantTab(tab) {
 function switchPair(btn) { document.querySelectorAll('#pairTabs .tab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); activePair = btn.dataset.pair; renderRawTable(); }
 function switchTimeframe(btn) { document.querySelectorAll('#timeframeTabs .tab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); activeTimeframe = btn.dataset.tf; renderRawTable(); }
 function switchIndicator(btn) { document.querySelectorAll('#indicatorTabs .tab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); activeIndicator = btn.dataset.ind; renderIndicatorTable(); }
-function changePair() { currentBackendPair = document.getElementById('pairSelect').value; fetchData(); }
+function changePair() {
+    currentBackendPair = document.getElementById('pairSelect').value;
+    // Sync label di Price Performance Monitor
+    const lbl = document.getElementById('perfCoinLabel');
+    if (lbl) lbl.textContent = currentBackendPair;
+    fetchData();
+}
 
 /* ── PDF ──────────────────────────────────────────────────────────────────── */
 function downloadPDF() {
