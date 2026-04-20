@@ -1,5 +1,25 @@
 import pandas as pd
 import numpy as np
+import json
+from pathlib import Path
+
+def load_inference_config(model_dir: str = None) -> dict:
+    """
+    Load inference_config.json — single source of truth for all ML parameters.
+    Call this once at module level in each file that needs ML parameters.
+    Raises FileNotFoundError with clear message if file not found.
+    """
+    if model_dir is None:
+        # Auto-detect: look relative to this file's location
+        model_dir = Path(__file__).parent.parent / "models"
+    config_path = Path(model_dir) / "inference_config.json"
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"inference_config.json not found at {config_path}.\n"
+            f"Run training pipeline (08_backtest.py) first to generate this file."
+        )
+    with open(config_path) as f:
+        return json.load(f)
 
 def safe_float(val, default=0.0):
     try:

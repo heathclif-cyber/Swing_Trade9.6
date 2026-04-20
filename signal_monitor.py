@@ -24,6 +24,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ml.ml_signal import MLSignalEngine
 _ml_engine = MLSignalEngine()
 
+# ── ML Config (from models/inference_config.json) ──────────────────────
+from core.helpers import load_inference_config
+INFERENCE_CFG  = load_inference_config()
+CONF_FULL      = INFERENCE_CFG["inference"]["confidence_full_size"]
+CONF_HALF      = INFERENCE_CFG["inference"]["confidence_half_size"]
+# ────────────────────────────────────────────────────────────────────────
+
 logger = logging.getLogger("SignalMonitor")
 
 # ============================================================
@@ -32,6 +39,7 @@ logger = logging.getLogger("SignalMonitor")
 POLL_INTERVAL_SECONDS = 15 * 60   # 15 menit
 # CATATAN: Threshold FULL/HALF kini bersifat adaptif (dari P7 result['variables'])
 # Nilai di bawah hanya sebagai fallback jika variabel adaptif tidak tersedia.
+# App-level fallback for scoring engine. ML confidence thresholds → INFERENCE_CFG
 SIGNAL_THRESHOLD_FULL = 48        # ADJ score default FULL SIZE ENTRY (bull mode)
 SIGNAL_THRESHOLD_HALF = 33        # ADJ score default HALF SIZE ENTRY (bull mode)
 
@@ -274,7 +282,7 @@ def _normalize_m15_columns(df):
 # ============================================================
 # Threshold confidence minimum untuk mengirim sinyal baru / flip.
 # Sinyal < threshold → SKIP, tidak dikirim ke Telegram.
-SIGNAL_CONF_MIN      = 0.55   # 55% — minimum entry signal pertama
+SIGNAL_CONF_MIN      = INFERENCE_CFG["inference"]["confidence_half_size"]  # was: 0.55
 SIGNAL_FLIP_CONF_MIN = 0.65   # 65% — minimum untuk flip arah (lebih ketat)
 
 # Jumlah bar M15 berurutan yang harus konsisten sebelum flip diterima.

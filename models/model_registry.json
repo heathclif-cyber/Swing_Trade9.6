@@ -1,0 +1,41 @@
+{
+  "active": "ensemble_v2",
+  "models": {
+    "ensemble_v1": {
+      "type": "ensemble",
+      "lgbm_path": "lgbm_baseline.pkl",
+      "lstm_path": "lstm_best.pt",
+      "scaler_path": "lstm_scaler.pkl",
+      "meta_path": "ensemble_meta.pkl",
+      "n_features": 58,
+      "lstm_hidden": 128,
+      "lstm_layers": 2,
+      "description": "LightGBM + LSTM stacking ensemble v1 (58 fitur)",
+      "f1_macro": 0.5249,
+      "trained_date": "2025-01-15",
+      "status": "deprecated"
+    },
+    "ensemble_v2": {
+      "type": "ensemble",
+      "lgbm_path": "lgbm_baseline.pkl",
+      "lstm_path": "lstm_best.pt",
+      "scaler_path": "lstm_scaler.pkl",
+      "meta_path": "ensemble_meta.pkl",
+      "calibrator_path": "calibrator.pkl",
+      "feature_cols_path": "feature_cols_v2.json",
+      "n_features": 65,
+      "lstm_hidden": 128,
+      "lstm_layers": 2,
+      "description": "LightGBM + LSTM stacking ensemble v2 (65 fitur, structural filter, calibrated)",
+      "f1_macro": 0.061630861172089144,
+      "winrate": 0.6255,
+      "trade_per_month": 14.58,
+      "pnl_lev3x": 5320.02,
+      "pnl_lev5x": 9046.57,
+      "max_drawdown": 0.1524,
+      "max_consecutive_loss": 8,
+      "trained_date": "2026-04-20",
+      "status": "active"
+    }
+  }
+}

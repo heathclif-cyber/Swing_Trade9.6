@@ -1,0 +1,323 @@
+{
+  "run_id": "run_20260420_062017",
+  "coins": [
+    "SOLUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "TONUSDT",
+    "ADAUSDT",
+    "TRXUSDT",
+    "1000SHIBUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "DOTUSDT",
+    "SUIUSDT",
+    "POLUSDT",
+    "NEARUSDT",
+    "1000PEPEUSDT",
+    "TAOUSDT",
+    "ARBUSDT"
+  ],
+  "n_features": 65,
+  "n_folds": 8,
+  "purge_gap_bars": 5,
+  "best_fold": 7,
+  "best_f1_macro": 0.6748,
+  "mean_f1_macro": 0.6485,
+  "std_f1_macro": 0.0117,
+  "feature_cols": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "volume_delta",
+    "cvd",
+    "buy_volume",
+    "sell_volume",
+    "MSB_BOS",
+    "CHoCH",
+    "bars_since_BOS",
+    "FVG_up",
+    "FVG_down",
+    "Buy_Liq",
+    "Sell_Liq",
+    "SFP_sweep",
+    "open_interest",
+    "funding_rate",
+    "ema_7_m15",
+    "ema_21_m15",
+    "ema_50_m15",
+    "ema_200_m15",
+    "ema_7_h4",
+    "ema_21_h4",
+    "ema_50_h4",
+    "ema_200_h4",
+    "rsi_6",
+    "stochrsi_k",
+    "stochrsi_d",
+    "atr_14_m15",
+    "atr_14_h4",
+    "PDH",
+    "PDL",
+    "PWH",
+    "PWL",
+    "Fib_618",
+    "Fib_786",
+    "POC",
+    "VAH",
+    "VAL",
+    "btc_dominance",
+    "fear_greed",
+    "market_session",
+    "log_ret_1",
+    "log_ret_5",
+    "log_ret_20",
+    "vol_ratio_20",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "time_to_funding_norm",
+    "long_short_ratio",
+    "long_account_pct",
+    "short_account_pct",
+    "taker_buy_sell_ratio",
+    "symbol",
+    "dist_swing_high",
+    "dist_swing_low",
+    "price_in_range",
+    "swing_momentum",
+    "h4_trend",
+    "trend_strength",
+    "vol_regime"
+  ],
+  "folds": [
+    {
+      "fold": 1,
+      "n_train": 150630,
+      "n_test": 150630,
+      "accuracy": 0.6808,
+      "f1_macro": 0.6415,
+      "f1_weighted": 0.6861,
+      "f1_SHORT": 0.7791,
+      "f1_FLAT": 0.5473,
+      "f1_LONG": 0.5982,
+      "confusion_matrix": [
+        [
+          60064,
+          7869,
+          12874
+        ],
+        [
+          4915,
+          16198,
+          5902
+        ],
+        [
+          8398,
+          8113,
+          26266
+        ]
+      ]
+    },
+    {
+      "fold": 2,
+      "n_train": 301265,
+      "n_test": 150630,
+      "accuracy": 0.6621,
+      "f1_macro": 0.6364,
+      "f1_weighted": 0.6737,
+      "f1_SHORT": 0.7502,
+      "f1_FLAT": 0.559,
+      "f1_LONG": 0.5999,
+      "confusion_matrix": [
+        [
+          53672,
+          12308,
+          14843
+        ],
+        [
+          2461,
+          18957,
+          3917
+        ],
+        [
+          6137,
+          11222,
+          27082
+        ]
+      ]
+    },
+    {
+      "fold": 3,
+      "n_train": 451900,
+      "n_test": 150630,
+      "accuracy": 0.6759,
+      "f1_macro": 0.6522,
+      "f1_weighted": 0.6858,
+      "f1_SHORT": 0.7458,
+      "f1_FLAT": 0.5589,
+      "f1_LONG": 0.6519,
+      "confusion_matrix": [
+        [
+          51634,
+          11175,
+          14494
+        ],
+        [
+          2653,
+          17388,
+          3211
+        ],
+        [
+          6872,
+          10408,
+          32764
+        ]
+      ]
+    },
+    {
+      "fold": 4,
+      "n_train": 602535,
+      "n_test": 150630,
+      "accuracy": 0.6673,
+      "f1_macro": 0.6445,
+      "f1_weighted": 0.6799,
+      "f1_SHORT": 0.7333,
+      "f1_FLAT": 0.5478,
+      "f1_LONG": 0.6526,
+      "confusion_matrix": [
+        [
+          50730,
+          14036,
+          15507
+        ],
+        [
+          1816,
+          17594,
+          3127
+        ],
+        [
+          5551,
+          10068,
+          32170
+        ]
+      ]
+    },
+    {
+      "fold": 5,
+      "n_train": 753170,
+      "n_test": 150630,
+      "accuracy": 0.6832,
+      "f1_macro": 0.6562,
+      "f1_weighted": 0.6931,
+      "f1_SHORT": 0.7541,
+      "f1_FLAT": 0.5771,
+      "f1_LONG": 0.6373,
+      "confusion_matrix": [
+        [
+          55471,
+          9868,
+          18246
+        ],
+        [
+          2278,
+          16159,
+          4042
+        ],
+        [
+          5786,
+          7497,
+          31252
+        ]
+      ]
+    },
+    {
+      "fold": 6,
+      "n_train": 903805,
+      "n_test": 150630,
+      "accuracy": 0.6668,
+      "f1_macro": 0.6379,
+      "f1_weighted": 0.6778,
+      "f1_SHORT": 0.7456,
+      "f1_FLAT": 0.5488,
+      "f1_LONG": 0.6193,
+      "confusion_matrix": [
+        [
+          54153,
+          10393,
+          16936
+        ],
+        [
+          2305,
+          15774,
+          2986
+        ],
+        [
+          7311,
+          10250,
+          30491
+        ]
+      ]
+    },
+    {
+      "fold": 7,
+      "n_train": 1054440,
+      "n_test": 150629,
+      "accuracy": 0.6971,
+      "f1_macro": 0.6748,
+      "f1_weighted": 0.705,
+      "f1_SHORT": 0.7677,
+      "f1_FLAT": 0.6086,
+      "f1_LONG": 0.648,
+      "confusion_matrix": [
+        [
+          54893,
+          8944,
+          15098
+        ],
+        [
+          1699,
+          17904,
+          2379
+        ],
+        [
+          7488,
+          10002,
+          32191
+        ]
+      ]
+    },
+    {
+      "fold": 8,
+      "n_train": 1205074,
+      "n_test": 150629,
+      "accuracy": 0.6726,
+      "f1_macro": 0.6446,
+      "f1_weighted": 0.6858,
+      "f1_SHORT": 0.7463,
+      "f1_FLAT": 0.549,
+      "f1_LONG": 0.6384,
+      "confusion_matrix": [
+        [
+          53390,
+          11557,
+          18086
+        ],
+        [
+          1346,
+          15768,
+          3166
+        ],
+        [
+          5312,
+          9838,
+          32135
+        ]
+      ]
+    }
+  ]
+}

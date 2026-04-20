@@ -23,6 +23,12 @@ from datetime import datetime, timedelta
 from requests.packages import urllib3  # type: ignore
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# ── ML Config (from models/inference_config.json) ──────────────────────
+from core.helpers import load_inference_config
+INFERENCE_CFG  = load_inference_config()
+TIMEFRAME      = INFERENCE_CFG["inference"]["timeframe"]
+# ────────────────────────────────────────────────────────────────────────
+
 logger = logging.getLogger("Enrichment")
 
 # ============================================================
@@ -159,7 +165,7 @@ def _fetch_oi(symbol: str, limit: int = 500) -> pd.DataFrame:
         url = "https://fapi.binance.com/futures/data/openInterestHist"
         resp = requests.get(
             url,
-            params={"symbol": symbol, "period": "15m", "limit": limit},
+            params={"symbol": symbol, "period": TIMEFRAME, "limit": limit},
             timeout=10, verify=False
         )
         if resp.status_code == 403:
@@ -378,6 +384,9 @@ def _apply_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+    
+    # Indicator params — must match FEATURE_COLS in training pipeline (core/features.py)
+    # Do not change without retraining the model
     df["EMA_7"]   = ta.ema(df["Close"], length=7)
     df["EMA_21"]  = ta.ema(df["Close"], length=21)
     df["EMA_50"]  = ta.ema(df["Close"], length=50)

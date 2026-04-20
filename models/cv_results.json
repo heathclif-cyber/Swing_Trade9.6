@@ -1,0 +1,345 @@
+{
+  "run_id": "run_20260420_041215",
+  "coins": [
+    "SOLUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "TONUSDT",
+    "ADAUSDT",
+    "TRXUSDT",
+    "1000SHIBUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "DOTUSDT",
+    "SUIUSDT",
+    "POLUSDT",
+    "NEARUSDT",
+    "1000PEPEUSDT",
+    "TAOUSDT",
+    "ARBUSDT"
+  ],
+  "n_folds": 8,
+  "purge_gap_bars": 5,
+  "best_fold": 7,
+  "best_f1_macro": 0.7231,
+  "mean_f1_macro": 0.7057,
+  "std_f1_macro": 0.0093,
+  "mean_accuracy": 0.7349,
+  "lgbm_params": {
+    "objective": "multiclass",
+    "num_class": 3,
+    "n_estimators": 1000,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "num_leaves": 31,
+    "min_child_samples": 50,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "verbose": -1,
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "feature_cols": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "volume_delta",
+    "cvd",
+    "buy_volume",
+    "sell_volume",
+    "MSB_BOS",
+    "CHoCH",
+    "bars_since_BOS",
+    "FVG_up",
+    "FVG_down",
+    "Buy_Liq",
+    "Sell_Liq",
+    "SFP_sweep",
+    "open_interest",
+    "funding_rate",
+    "ema_7_m15",
+    "ema_21_m15",
+    "ema_50_m15",
+    "ema_200_m15",
+    "ema_7_h4",
+    "ema_21_h4",
+    "ema_50_h4",
+    "ema_200_h4",
+    "rsi_6",
+    "stochrsi_k",
+    "stochrsi_d",
+    "atr_14_m15",
+    "atr_14_h4",
+    "PDH",
+    "PDL",
+    "PWH",
+    "PWL",
+    "Fib_618",
+    "Fib_786",
+    "POC",
+    "VAH",
+    "VAL",
+    "btc_dominance",
+    "fear_greed",
+    "market_session",
+    "log_ret_1",
+    "log_ret_5",
+    "log_ret_20",
+    "vol_ratio_20",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "time_to_funding_norm",
+    "long_short_ratio",
+    "long_account_pct",
+    "short_account_pct",
+    "taker_buy_sell_ratio",
+    "symbol",
+    "dist_swing_high",
+    "dist_swing_low",
+    "price_in_range",
+    "swing_momentum",
+    "h4_trend",
+    "trend_strength",
+    "vol_regime"
+  ],
+  "folds": [
+    {
+      "fold": 1,
+      "n_train": 150630,
+      "n_val": 150635,
+      "best_iteration": 366,
+      "accuracy": 0.7248,
+      "f1_macro": 0.6948,
+      "f1_weighted": 0.7294,
+      "f1_SHORT": 0.8036,
+      "f1_FLAT": 0.6268,
+      "f1_LONG": 0.654,
+      "confusion_matrix": [
+        [
+          61579,
+          6816,
+          12440
+        ],
+        [
+          3842,
+          18485,
+          4688
+        ],
+        [
+          7007,
+          6665,
+          29113
+        ]
+      ]
+    },
+    {
+      "fold": 2,
+      "n_train": 301265,
+      "n_val": 150635,
+      "best_iteration": 472,
+      "accuracy": 0.7264,
+      "f1_macro": 0.6932,
+      "f1_weighted": 0.7297,
+      "f1_SHORT": 0.8128,
+      "f1_FLAT": 0.6327,
+      "f1_LONG": 0.634,
+      "confusion_matrix": [
+        [
+          63420,
+          6748,
+          10655
+        ],
+        [
+          3199,
+          18912,
+          3224
+        ],
+        [
+          8606,
+          8786,
+          27085
+        ]
+      ]
+    },
+    {
+      "fold": 3,
+      "n_train": 451900,
+      "n_val": 150635,
+      "best_iteration": 999,
+      "accuracy": 0.7329,
+      "f1_macro": 0.7051,
+      "f1_weighted": 0.7367,
+      "f1_SHORT": 0.8042,
+      "f1_FLAT": 0.628,
+      "f1_LONG": 0.683,
+      "confusion_matrix": [
+        [
+          59908,
+          6122,
+          11283
+        ],
+        [
+          3214,
+          17211,
+          2831
+        ],
+        [
+          8555,
+          8225,
+          33286
+        ]
+      ]
+    },
+    {
+      "fold": 4,
+      "n_train": 602535,
+      "n_val": 150635,
+      "best_iteration": 604,
+      "accuracy": 0.7353,
+      "f1_macro": 0.7106,
+      "f1_weighted": 0.7406,
+      "f1_SHORT": 0.795,
+      "f1_FLAT": 0.6404,
+      "f1_LONG": 0.6964,
+      "confusion_matrix": [
+        [
+          59186,
+          7189,
+          13921
+        ],
+        [
+          2433,
+          16886,
+          3224
+        ],
+        [
+          6985,
+          6118,
+          34693
+        ]
+      ]
+    },
+    {
+      "fold": 5,
+      "n_train": 753170,
+      "n_val": 150635,
+      "best_iteration": 996,
+      "accuracy": 0.7424,
+      "f1_macro": 0.7142,
+      "f1_weighted": 0.748,
+      "f1_SHORT": 0.8102,
+      "f1_FLAT": 0.6535,
+      "f1_LONG": 0.679,
+      "confusion_matrix": [
+        [
+          63114,
+          6860,
+          13617
+        ],
+        [
+          2223,
+          17271,
+          2987
+        ],
+        [
+          6877,
+          6244,
+          31442
+        ]
+      ]
+    },
+    {
+      "fold": 6,
+      "n_train": 903805,
+      "n_val": 150635,
+      "best_iteration": 982,
+      "accuracy": 0.7322,
+      "f1_macro": 0.7016,
+      "f1_weighted": 0.7376,
+      "f1_SHORT": 0.8036,
+      "f1_FLAT": 0.6268,
+      "f1_LONG": 0.6744,
+      "confusion_matrix": [
+        [
+          61643,
+          6155,
+          13710
+        ],
+        [
+          2396,
+          15750,
+          2924
+        ],
+        [
+          7872,
+          7277,
+          32908
+        ]
+      ]
+    },
+    {
+      "fold": 7,
+      "n_train": 1054440,
+      "n_val": 150634,
+      "best_iteration": 998,
+      "accuracy": 0.747,
+      "f1_macro": 0.7231,
+      "f1_weighted": 0.7504,
+      "f1_SHORT": 0.8139,
+      "f1_FLAT": 0.6703,
+      "f1_LONG": 0.685,
+      "confusion_matrix": [
+        [
+          61397,
+          5425,
+          12124
+        ],
+        [
+          1909,
+          17656,
+          2426
+        ],
+        [
+          8621,
+          7607,
+          33469
+        ]
+      ]
+    },
+    {
+      "fold": 8,
+      "n_train": 1205074,
+      "n_val": 150634,
+      "best_iteration": 1000,
+      "accuracy": 0.7381,
+      "f1_macro": 0.7034,
+      "f1_weighted": 0.7447,
+      "f1_SHORT": 0.8146,
+      "f1_FLAT": 0.6205,
+      "f1_LONG": 0.6752,
+      "confusion_matrix": [
+        [
+          63327,
+          6351,
+          13373
+        ],
+        [
+          1892,
+          15418,
+          2973
+        ],
+        [
+          7219,
+          7641,
+          32440
+        ]
+      ]
+    }
+  ]
+}

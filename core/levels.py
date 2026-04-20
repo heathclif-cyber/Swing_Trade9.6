@@ -2,6 +2,13 @@
 # [UPDATE] TP1 = Entry ± 2×ATR | SL = Entry ∓ 1×ATR
 import logging
 
+# ── ML Config (from models/inference_config.json) ──────────────────────
+from core.helpers import load_inference_config
+INFERENCE_CFG  = load_inference_config()
+TP_ATR_MULT    = INFERENCE_CFG["labeling"]["tp_atr_mult"]
+SL_ATR_MULT    = INFERENCE_CFG["labeling"]["sl_atr_mult"]
+# ────────────────────────────────────────────────────────────────────────
+
 logger = logging.getLogger(__name__)
 
 def get_atr_projections_long(entry_val, atr, atr_mult, close_price=None, macro_trend=None):
@@ -16,7 +23,7 @@ def get_atr_projections_long(entry_val, atr, atr_mult, close_price=None, macro_t
     _tp3_anchor = close_price if (close_price is not None and close_price > 0) else entry_val
     _used_fallback = (close_price is None or close_price <= 0)
 
-    tp1 = entry_val + (atr * 2.0 * atr_mult)  # [UPDATE] was 1.5×, kini 2×ATR
+    tp1 = entry_val + (atr * TP_ATR_MULT * atr_mult)  # was: 2.0
     tp2 = entry_val + (atr * 3.0 * atr_mult)
     tp3 = _tp3_anchor + (atr * 8.0 * atr_mult)  # [FIX P9.7] was entry_val + atr*5.0
 
@@ -64,7 +71,7 @@ def get_atr_projections_short(entry_val, atr, atr_mult, close_price=None):
     _tp3_anchor = close_price if (close_price is not None and close_price > 0) else entry_val
     _used_fallback = (close_price is None or close_price <= 0)
 
-    tp1 = entry_val - (atr * 2.0 * atr_mult)  # [UPDATE] was 1.5×, kini 2×ATR
+    tp1 = entry_val - (atr * TP_ATR_MULT * atr_mult)  # was: 2.0
     tp2 = entry_val - (atr * 3.0 * atr_mult)
     tp3 = _tp3_anchor - (atr * 8.0 * atr_mult)  # [FIX P9.7] was entry_val - atr*5.0
 
@@ -91,9 +98,9 @@ def get_entry_based_sl(entry_val: float, atr: float, atr_mult: float, direction:
     """
     raw_atr = atr * atr_mult
     if direction == 'SHORT':
-        sl = entry_val + (raw_atr * 1.0)
-        label = "Entry + 1×ATR (SL SHORT)"
+        sl = entry_val + (raw_atr * SL_ATR_MULT)  # was: 1.0
+        label = f"Entry + {SL_ATR_MULT}×ATR (SL SHORT)"
     else:
-        sl = entry_val - (raw_atr * 1.0)
-        label = "Entry − 1×ATR (SL LONG)"
+        sl = entry_val - (raw_atr * SL_ATR_MULT)  # was: 1.0
+        label = f"Entry − {SL_ATR_MULT}×ATR (SL LONG)"
     return (round(sl, 8), label)
