@@ -888,16 +888,30 @@ tbody tr:last-child td { border-bottom: none; }
           <canvas id="perfChart" style="display:none;"></canvas>
         </div>
 
-        <!-- Legend -->
-        <div id="perfLegend" style="display:none;margin-top:12px;flex-wrap:wrap;gap:10px;align-items:center;">
-          <span style="font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Entry Valid (conf ≥ 72%):</span>
-          <span class="signal-badge LONG">▲ LONG</span>
-          <span class="signal-badge SHORT">▼ SHORT</span>
-          <span style="font-size:11px;color:rgba(148,163,184,0.7);margin-left:6px;">○ Weak (60–72%, skip)</span>
-          <span style="font-size:11px;color:rgba(167,139,250,0.9);margin-left:10px;">- - 🧠 ML Conf % (kiri)</span>
-          <span style="font-size:11px;color:rgba(99,125,255,0.8);margin-left:4px;">— Harga Close (kanan)</span>
-          <span style="font-size:10px;color:var(--text-3);margin-left:6px;">cooldown 48j antar sinyal searah</span>
+        <!-- Legend (Custom - lebih bersih) -->
+        <div id="perfLegend" style="display:none;margin-top:10px;flex-direction:column;gap:6px;">
+          <!-- Baris 1: Sinyal Entry -->
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Sinyal:</span>
+            <span class="signal-badge LONG">▲ LONG (conf ≥72%)</span>
+            <span class="signal-badge SHORT">▼ SHORT (conf ≥72%)</span>
+            <span style="font-size:11px;color:rgba(148,163,184,0.7);">○ Weak (60–72%, skip)</span>
+            <span style="font-size:11px;color:rgba(167,139,250,0.9);">- - 🧠 ML Conf % (sumbu kiri)</span>
+            <span style="font-size:11px;color:rgba(99,125,255,0.8);">— Harga Close (sumbu kanan)</span>
+          </div>
+          <!-- Baris 2: TP/SL Projection -->
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Proyeksi TP/SL:</span>
+            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(52,211,153,0.1);border:1px dashed rgba(52,211,153,0.6);color:#34d399;">- - TP (2×ATR)</span>
+            <span style="font-size:11px;color:var(--text-3);">Target profit</span>
+            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(248,113,113,0.1);border:1px dashed rgba(248,113,113,0.5);color:#f87171;">- - SL (1×ATR)</span>
+            <span style="font-size:11px;color:var(--text-3);">Stop loss</span>
+            <span style="font-size:11px;color:#34d399;">★ = TP HIT ✅</span>
+            <span style="font-size:11px;color:#fbbf24;">✕ = SL HIT 🔴</span>
+            <span style="font-size:11px;color:var(--text-3);">⊙ = belum tercapai | max 48 candle ke depan</span>
+          </div>
         </div>
+
 
       </div>
     </div>
@@ -1504,13 +1518,7 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       animation: { duration: 400 },
       plugins: {
         legend: {
-          display: true,
-          position: 'top',
-          labels: {
-            color: 'rgba(255,255,255,0.7)',
-            boxWidth: 12,
-            font: { size: 12 },
-          }
+          display: false,  // Gunakan custom legend di bawah chart
         },
         tooltip: {
           backgroundColor: 'rgba(15,15,30,0.95)',
