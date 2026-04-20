@@ -220,11 +220,20 @@ function renderQuantAnalysis(quant, state) {
         if (document.getElementById('marketContext')) document.getElementById('marketContext').innerHTML = '<span style="color:var(--text-3);font-size:12px">—</span>';
         return;
     }
-    activeQuantTab = quant.long?.ml_signal === 'SHORT' ? 'short' : 'long';
-    const data = quant[activeQuantTab];
-    if (!data) return;
     const ep = state?.user_input?.entry_price || 0;
     const hasEntry = ep > 0;
+    const posSide = state?.position?.side || '';
+
+    if (hasEntry && posSide === 'LONG') {
+        activeQuantTab = 'long';
+    } else if (hasEntry && posSide === 'SHORT') {
+        activeQuantTab = 'short';
+    } else {
+        activeQuantTab = quant.long?.ml_signal === 'SHORT' ? 'short' : 'long';
+    }
+
+    const data = quant[activeQuantTab];
+    if (!data) return;
     // Decision banner
     const banner = document.getElementById('decisionBanner');
     banner.className = `quant-decision-banner decision-${data.code}`;
