@@ -1250,159 +1250,99 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     }
   });
 
-  // ── Hitung ATR (Wilder's 14-period) dari OHLCV high/low/close ──
-  function computeWilderATR(ohlcvArr, period = 14) {
-    const atrArr = new Array(ohlcvArr.length).fill(null);
-    if (ohlcvArr.length < period + 1) return atrArr;
-    const trs = [];
-    for (let i = 1; i < ohlcvArr.length; i++) {
-      const h  = ohlcvArr[i].high  || ohlcvArr[i].close;
-      const l  = ohlcvArr[i].low   || ohlcvArr[i].close;
-      const pc = ohlcvArr[i - 1].close;
-      trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
-    }
-    // SMA awal
-    let atr = trs.slice(0, period).reduce((s, v) => s + v, 0) / period;
-    atrArr[period] = atr;
-    for (let i = period; i < trs.length; i++) {
-      atr = (atr * (period - 1) + trs[i]) / period;
-      atrArr[i + 1] = atr;
-    }
-    return atrArr;
-  }
-
-  const atrValues = computeWilderATR(ohlcv, 14);  // ATR per candle
-
-  // ── Proyeksi TP / SL dari inference_config ──
-  // tp_atr_mult = 2.0, sl_atr_mult = 1.0, max_hold_bars = 48
-  const TP_MULT    = 2.0;
-  const SL_MULT    = 1.0;
-  const MAX_HOLD   = 48;  // max candle ke depan
-
-  // Kumpulkan semua TP/SL line datasets
+  // ── Proyeksi TP/SL — dari backend simulation (ATR riil, model params) ──
+  const simulation = data.simulation || [];
   const tpSlDatasets = [];
+  const tpSlByIdx    = {};  // lookup per entry candle index
 
-  function buildProjectionDatasets(points, direction) {
-    points.forEach(pt => {
-      const entryIdx = pt.x;
-      const entryPrice = pt.y;
-      const atr = atrValues[entryIdx];
-      if (!atr) return;
+  simulation.forEach(sim => {
+    const entryIdx  = sim.ohlcv_idx;
+    const endIdx    = sim.end_idx;
+    const entryPrice = sim.entry_price;
+    const tpPrice    = sim.tp_price;
+    const slPrice    = sim.sl_price;
+    const tpHit      = sim.tp_hit;
+    const slHit      = sim.sl_hit;
+    const isLong     = (sim.signal === 'LONG');
 
-      const isLong = (direction === 'LONG');
-      const tpPrice = isLong ? entryPrice + TP_MULT * atr : entryPrice - TP_MULT * atr;
-      const slPrice = isLong ? entryPrice - SL_MULT * atr : entryPrice + SL_MULT * atr;
+    if (entryIdx == null || endIdx == null) return;
 
-      // Tentukan window ke depan (sampai max_hold atau akhir data)
-      const endIdx = Math.min(ohlcv.length - 1, entryIdx + MAX_HOLD);
+    // Tentukan akhir garis (sampai hit atau end_idx)
+    // Backend sudah hitung end_idx berdasarkan max_hold=48
+    const tpEnd = endIdx;  // line memanjang sampai max hold (backend sudah limitasi)
+    const slEnd = endIdx;
 
-      // Periksa apakah TP atau SL tercapai lebih dulu
-      let tpHitIdx = -1, slHitIdx = -1;
-      for (let i = entryIdx + 1; i <= endIdx; i++) {
-        const h = ohlcv[i].high  || ohlcv[i].close;
-        const l = ohlcv[i].low   || ohlcv[i].close;
-        if (tpHitIdx < 0 && (isLong ? h >= tpPrice : l <= tpPrice)) tpHitIdx = i;
-        if (slHitIdx < 0 && (isLong ? l <= slPrice : h >= slPrice)) slHitIdx = i;
-      }
-
-      // Tentukan actual end untuk masing-masing line
-      const tpEnd = tpHitIdx > 0 ? tpHitIdx : endIdx;
-      const slEnd = slHitIdx > 0 ? slHitIdx : endIdx;
-      const tpHit = tpHitIdx > 0 && (slHitIdx < 0 || tpHitIdx <= slHitIdx);
-      const slHit = slHitIdx > 0 && (tpHitIdx < 0 || slHitIdx < tpHitIdx);
-
-      // Buat garis yang BERANGKAT dari harga entry lalu horizontal ke level target
-      // data[entryIdx] = entryPrice → data[entryIdx+1..to] = targetPrice
-      // Ini membuat garis "keluar" dari titik entry secara visual
-      function buildFromEntry(targetPrice, from, to) {
-        return ohlcv.map((_, i) => {
-          if (i === from) return entryPrice;          // mulai dari harga entry
-          if (i > from && i <= to) return targetPrice; // horizontal ke target
-          return null;
-        });
-      }
-
-      // TP line
-      tpSlDatasets.push({
-        label: `TP ${direction} @${tpPrice.toFixed(isLong && tpPrice > 1 ? 4 : 6)}`,
-        data: buildFromEntry(tpPrice, entryIdx, tpEnd),
-        type: 'line',
-        yAxisID: 'yPrice',
-        borderColor: tpHit
-          ? (isLong ? 'rgba(52,211,153,1.0)' : 'rgba(248,113,113,1.0)')
-          : (isLong ? 'rgba(52,211,153,0.45)' : 'rgba(248,113,113,0.45)'),
-        borderWidth: tpHit ? 2 : 1,
-        borderDash: [6, 4],
-        pointRadius: 0,
-        pointHoverRadius: 0,
-        fill: false,
-        showLine: true,
-        tension: 0,
-        spanGaps: false,
-        order: 6,
-        _meta: { type: 'tp', direction, entryIdx, tpHit, slHit, tpPrice, slPrice, atr }
+    // Buat array data: mulai dari entryPrice di entryIdx, lalu horizontal ke target
+    function lineFromEntry(targetPrice, to) {
+      return ohlcv.map((_, i) => {
+        if (i === entryIdx) return entryPrice;
+        if (i > entryIdx && i <= to) return targetPrice;
+        return null;
       });
+    }
 
-      // SL line
-      tpSlDatasets.push({
-        label: `SL ${direction} @${slPrice.toFixed(isLong && slPrice > 1 ? 4 : 6)}`,
-        data: buildFromEntry(slPrice, entryIdx, slEnd),
-        type: 'line',
-        yAxisID: 'yPrice',
-        borderColor: slHit
-          ? 'rgba(251,191,36,1.0)'
-          : (isLong ? 'rgba(248,113,113,0.45)' : 'rgba(52,211,153,0.45)'),
-        borderWidth: slHit ? 2 : 1,
-        borderDash: [3, 3],
-        pointRadius: 0,
-        pointHoverRadius: 0,
-        fill: false,
-        showLine: true,
-        tension: 0,
-        spanGaps: false,
-        order: 6,
-        _meta: { type: 'sl', direction, entryIdx, tpHit, slHit, tpPrice, slPrice, atr }
-      });
+    // Simpan untuk tooltip
+    tpSlByIdx[entryIdx] = sim;
 
-      // Dot marker di ujung TP/SL
-      const dotTP = new Array(ohlcv.length).fill(null);
-      dotTP[tpEnd] = tpPrice;
-      const dotSL = new Array(ohlcv.length).fill(null);
-      dotSL[slEnd] = slPrice;
+    // ─── TP line ───
+    const tpColor = tpHit
+      ? (isLong ? 'rgba(52,211,153,1.0)' : 'rgba(248,113,113,1.0)')
+      : (isLong ? 'rgba(52,211,153,0.4)'  : 'rgba(248,113,113,0.4)');
 
-      tpSlDatasets.push({
-        label: `_dot_tp_${direction}`,
-        data: dotTP, type: 'line', showLine: false, yAxisID: 'yPrice',
-        borderColor: isLong ? '#34d399' : '#f87171',
-        backgroundColor: tpHit
-          ? (isLong ? 'rgba(52,211,153,0.9)' : 'rgba(248,113,113,0.9)')
-          : 'rgba(100,100,100,0.4)',
-        pointRadius: 6, pointStyle: tpHit ? 'star' : 'circle',
-        pointHoverRadius: 8, fill: false, tension: 0, order: 5,
-      });
-      tpSlDatasets.push({
-        label: `_dot_sl_${direction}`,
-        data: dotSL, type: 'line', showLine: false, yAxisID: 'yPrice',
-        borderColor: '#fbbf24',
-        backgroundColor: slHit
-          ? 'rgba(251,191,36,0.9)'
-          : 'rgba(100,100,100,0.4)',
-        pointRadius: 6, pointStyle: slHit ? 'crossRot' : 'circle',
-        pointHoverRadius: 8, fill: false, tension: 0, order: 5,
-      });
+    tpSlDatasets.push({
+      label: `_tp_${sim.signal}_${entryIdx}`,
+      data: lineFromEntry(tpPrice, tpEnd),
+      type: 'line', yAxisID: 'yPrice',
+      borderColor: tpColor,
+      borderWidth: tpHit ? 2.5 : 1.5,
+      borderDash: [8, 4],
+      pointRadius: 0, pointHoverRadius: 0,
+      fill: false, showLine: true, tension: 0, spanGaps: false, order: 6,
     });
-  }
 
-  buildProjectionDatasets(longPoints,  'LONG');
-  buildProjectionDatasets(shortPoints, 'SHORT');
+    // ─── SL line ───
+    const slColor = slHit
+      ? 'rgba(251,191,36,1.0)'
+      : (isLong ? 'rgba(248,113,113,0.4)' : 'rgba(52,211,153,0.4)');
 
-  // ── Simpan lookup TP/SL per indeks candle untuk tooltip ──
-  // (gabung semua _meta dari tpSlDatasets TP)
-  const tpSlByIdx = {};
-  tpSlDatasets.forEach(ds => {
-    if (!ds._meta) return;
-    if (!tpSlByIdx[ds._meta.entryIdx]) tpSlByIdx[ds._meta.entryIdx] = {};
-    Object.assign(tpSlByIdx[ds._meta.entryIdx], ds._meta);
+    tpSlDatasets.push({
+      label: `_sl_${sim.signal}_${entryIdx}`,
+      data: lineFromEntry(slPrice, slEnd),
+      type: 'line', yAxisID: 'yPrice',
+      borderColor: slColor,
+      borderWidth: slHit ? 2.5 : 1.5,
+      borderDash: [3, 3],
+      pointRadius: 0, pointHoverRadius: 0,
+      fill: false, showLine: true, tension: 0, spanGaps: false, order: 6,
+    });
+
+    // ─── Dot marker di ujung TP ───
+    const dotTP = new Array(ohlcv.length).fill(null);
+    dotTP[tpEnd] = tpPrice;
+    tpSlDatasets.push({
+      label: `_dot_tp_${entryIdx}`,
+      data: dotTP, type: 'line', showLine: false, yAxisID: 'yPrice',
+      borderColor: isLong ? '#34d399' : '#f87171',
+      backgroundColor: tpHit
+        ? (isLong ? 'rgba(52,211,153,0.95)' : 'rgba(248,113,113,0.95)')
+        : 'rgba(80,80,100,0.5)',
+      pointRadius: tpHit ? 8 : 5,
+      pointStyle: tpHit ? 'star' : 'circle',
+      pointHoverRadius: 10, fill: false, tension: 0, order: 5,
+    });
+
+    // ─── Dot marker di ujung SL ───
+    const dotSL = new Array(ohlcv.length).fill(null);
+    dotSL[slEnd] = slPrice;
+    tpSlDatasets.push({
+      label: `_dot_sl_${entryIdx}`,
+      data: dotSL, type: 'line', showLine: false, yAxisID: 'yPrice',
+      borderColor: '#fbbf24',
+      backgroundColor: slHit ? 'rgba(251,191,36,0.95)' : 'rgba(80,80,100,0.5)',
+      pointRadius: slHit ? 8 : 5,
+      pointStyle: slHit ? 'crossRot' : 'circle',
+      pointHoverRadius: 10, fill: false, tension: 0, order: 5,
+    });
   });
 
   // ── ML Confidence line — dimap ke indeks label M15 terdekat ──

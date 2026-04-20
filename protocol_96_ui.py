@@ -1744,8 +1744,6 @@ def api_confidence_history(pair: str):
     except Exception as e:
         logger.exception(f"confidence-history error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-
-
 @app.route("/api/price-performance/<path:pair>")
 def api_price_perf_v2(pair: str):
     """
@@ -1776,54 +1774,155 @@ def api_price_perf_v2(pair: str):
                     "volume": float(row.get("Total_Volume", 0) if "Total_Volume" in row else row.get("Volume", 0)),
                 })
         
-        # Hitung simulasi PnL dari sinyal ML
+        # ─── Hitung Wilder ATR(14) dari OHLCV ───
+        import numpy as np
+        ATR_PERIOD   = 14
+        TP_ATR_MULT  = 2.0    # dari inference_config labeling.tp_atr_mult
+        SL_ATR_MULT  = 1.0    # dari inference_config labeling.sl_atr_mult
+        MAX_HOLD     = 48     # candle M15 = 12 jam (max_holding_bars)
+        FEE_SIDE     = 0.0004 # 0.04% per side
+
+        atr_vals = [None] * len(ohlcv)
+        if len(ohlcv) > ATR_PERIOD + 1:
+            trs = []
+            for i in range(1, len(ohlcv)):
+                h  = ohlcv[i]["high"]
+                l  = ohlcv[i]["low"]
+                pc = ohlcv[i-1]["close"]
+                trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+            atr = sum(trs[:ATR_PERIOD]) / ATR_PERIOD
+            atr_vals[ATR_PERIOD] = atr
+            for i in range(ATR_PERIOD, len(trs)):
+                atr = (atr * (ATR_PERIOD - 1) + trs[i]) / ATR_PERIOD
+                atr_vals[i + 1] = atr
+
+        # Buat index timestamp → indeks OHLCV untuk lookup cepat
+        ts_to_idx = {c["ts"]: i for i, c in enumerate(ohlcv)}
+
+        # ─── Kalkulasi TP/SL per sinyal berdasarkan ATR riil ───
         pnl_simulation = []
-        fee = 0.0004  # 0.04% per side
+        fee_total_pct = FEE_SIDE * 2 * leverage
+
         for h in hist:
-            if h.get("ml_signal") in ["LONG", "SHORT"]:
-                entry = h.get("close", 0)
-                conf  = h.get("ml_conf", 0)
-                signal = h.get("ml_signal")
-                # TP/SL sederhana berbasis conf (sesuaikan jika ada ATR)
-                tp_pct = 0.015 * leverage  # 1.5% x leverage
-                sl_pct = 0.008 * leverage  # 0.8% x leverage
-                pnl_simulation.append({
-                    "ts":     h.get("ts"),
-                    "signal": signal,
-                    "conf":   conf,
-                    "entry":  entry,
-                    "tp":     entry * (1 + tp_pct) if signal == "LONG" else entry * (1 - tp_pct),
-                    "sl":     entry * (1 - sl_pct) if signal == "LONG" else entry * (1 + sl_pct),
-                    "fee_pct": fee * 2 * leverage,
-                })
-        
+            sig   = h.get("ml_signal")
+            conf  = h.get("ml_conf", 0)
+            if sig not in ("LONG", "SHORT"):
+                continue
+
+            # Cari candle entry yang paling dekat
+            sig_ms = (h.get("ts") or 0) * 1000
+            best_idx, best_diff = -1, float("inf")
+            for i, c in enumerate(ohlcv):
+                diff = abs(c["ts"] - sig_ms)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_idx  = i
+
+            if best_idx < 0 or best_diff > 15 * 60 * 1000 * 2:
+                continue
+
+            entry_price = ohlcv[best_idx]["close"]
+            atr         = atr_vals[best_idx]
+            if not atr:
+                atr = entry_price * 0.005  # 0.5% fallback
+
+            is_long  = (sig == "LONG")
+            tp_price = entry_price + TP_ATR_MULT * atr if is_long else entry_price - TP_ATR_MULT * atr
+            sl_price = entry_price - SL_ATR_MULT * atr if is_long else entry_price + SL_ATR_MULT * atr
+
+            # Deteksi hit dalam MAX_HOLD candle
+            end_idx    = min(len(ohlcv) - 1, best_idx + MAX_HOLD)
+            tp_hit_idx = sl_hit_idx = -1
+            for i in range(best_idx + 1, end_idx + 1):
+                h_c = ohlcv[i]["high"]
+                l_c = ohlcv[i]["low"]
+                if tp_hit_idx < 0 and (h_c >= tp_price if is_long else l_c <= tp_price):
+                    tp_hit_idx = i
+                if sl_hit_idx < 0 and (l_c <= sl_price if is_long else h_c >= sl_price):
+                    sl_hit_idx = i
+
+            tp_hit = tp_hit_idx > 0 and (sl_hit_idx < 0 or tp_hit_idx <= sl_hit_idx)
+            sl_hit = sl_hit_idx > 0 and (tp_hit_idx < 0 or sl_hit_idx < tp_hit_idx)
+
+            if tp_hit:
+                result     = "TP_HIT"
+                exit_price = tp_price
+                pnl_raw    = (tp_price - entry_price) / entry_price if is_long else (entry_price - tp_price) / entry_price
+            elif sl_hit:
+                result     = "SL_HIT"
+                exit_price = sl_price
+                pnl_raw    = (sl_price - entry_price) / entry_price if is_long else (entry_price - sl_price) / entry_price
+            else:
+                result     = "OPEN"
+                exit_price = ohlcv[end_idx]["close"]
+                pnl_raw    = (exit_price - entry_price) / entry_price if is_long else (entry_price - exit_price) / entry_price
+
+            pnl_pct = round((pnl_raw * leverage - fee_total_pct) * 100, 2)
+
+            pnl_simulation.append({
+                "ts":          h.get("ts"),
+                "ohlcv_idx":   best_idx,
+                "signal":      sig,
+                "conf":        round(conf, 4),
+                "entry_price": round(entry_price, 8),
+                "atr":         round(atr, 8),
+                "tp_price":    round(tp_price, 8),
+                "sl_price":    round(sl_price, 8),
+                "tp_pct":      round((tp_price - entry_price) / entry_price * 100, 3),
+                "sl_pct":      round((sl_price - entry_price) / entry_price * 100, 3),
+                "end_idx":     end_idx,
+                "tp_hit":      tp_hit,
+                "sl_hit":      sl_hit,
+                "result":      result,
+                "exit_price":  round(exit_price, 8),
+                "pnl_pct":     pnl_pct,
+            })
+
         # Statistik performa
         long_signals  = [h for h in hist if h.get("ml_signal") == "LONG"]
         short_signals = [h for h in hist if h.get("ml_signal") == "SHORT"]
         flat_signals  = [h for h in hist if h.get("ml_signal") == "FLAT"]
         avg_conf      = sum(h.get("ml_conf", 0) for h in hist) / len(hist) if hist else 0
-        
+
+        # Win/loss dari simulasi
+        tp_hits = [s for s in pnl_simulation if s["result"] == "TP_HIT"]
+        sl_hits = [s for s in pnl_simulation if s["result"] == "SL_HIT"]
+        winrate = round(len(tp_hits) / len(pnl_simulation) * 100, 1) if pnl_simulation else 0
+        total_pnl = round(sum(s["pnl_pct"] for s in pnl_simulation), 2)
+
         stats = {
-            "total_signals": len(hist),
-            "long_count":    len(long_signals),
-            "short_count":   len(short_signals),
-            "flat_count":    len(flat_signals),
-            "avg_confidence": round(avg_conf * 100, 1),
-            "leverage":      leverage,
-            "hours":         hours,
+            "total_signals":   len(hist),
+            "long_count":      len(long_signals),
+            "short_count":     len(short_signals),
+            "flat_count":      len(flat_signals),
+            "avg_confidence":  round(avg_conf * 100, 1),
+            "leverage":        leverage,
+            "hours":           hours,
+            "tp_hits":         len(tp_hits),
+            "sl_hits":         len(sl_hits),
+            "winrate_pct":     winrate,
+            "total_pnl_pct":   total_pnl,
         }
-        
+
         return jsonify({
-            "success":    True,
-            "pair":       pair,
-            "ohlcv":      ohlcv,
-            "signals":    hist,
-            "simulation": pnl_simulation,
-            "stats":      stats,
+            "success":      True,
+            "pair":         pair,
+            "ohlcv":        ohlcv,
+            "signals":      hist,
+            "simulation":   pnl_simulation,
+            "stats":        stats,
+            "model_params": {
+                "tp_atr_mult":  TP_ATR_MULT,
+                "sl_atr_mult":  SL_ATR_MULT,
+                "max_hold":     MAX_HOLD,
+                "fee_per_side": FEE_SIDE,
+                "leverage":     leverage,
+            },
         })
     except Exception as e:
         logger.exception(f"price-performance error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
 
 
 
