@@ -907,14 +907,14 @@ tbody tr:last-child td { border-bottom: none; }
         </div>
 
         <!-- Legend -->
-        <div id="perfLegend" style="display:none;margin-top:12px;flex-wrap:wrap;gap:8px;align-items:center;">
-          <span style="font-size:12px;color:var(--text-2);">Sinyal harga:</span>
+        <div id="perfLegend" style="display:none;margin-top:12px;flex-wrap:wrap;gap:10px;align-items:center;">
+          <span style="font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Entry Valid (conf ≥ 72%):</span>
           <span class="signal-badge LONG">▲ LONG</span>
           <span class="signal-badge SHORT">▼ SHORT</span>
-          <span class="signal-badge FLAT">— FLAT</span>
-          <span style="font-size:12px;color:rgba(167,139,250,0.9);margin-left:10px;">- - 🧠 ML Conf % (kiri)</span>
-          <span style="font-size:12px;color:rgba(99,125,255,0.8);margin-left:4px;">— Harga Close (kanan)</span>
-          <span style="font-size:11px;color:var(--text-3);margin-left:8px;">● besar = conf ≥ 72%</span>
+          <span style="font-size:11px;color:rgba(148,163,184,0.7);margin-left:6px;">○ Weak (60–72%, skip)</span>
+          <span style="font-size:11px;color:rgba(167,139,250,0.9);margin-left:10px;">- - 🧠 ML Conf % (kiri)</span>
+          <span style="font-size:11px;color:rgba(99,125,255,0.8);margin-left:4px;">— Harga Close (kanan)</span>
+          <span style="font-size:10px;color:var(--text-3);margin-left:6px;">cooldown 48j antar sinyal searah</span>
         </div>
 
       </div>
@@ -1195,21 +1195,57 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
   });
   const closes = ohlcv.map(d => d.close);
 
-  // Scatter points untuk sinyal
-  const longPoints  = [];
-  const shortPoints = [];
-  const flatPoints  = [];
+  // ── Filter sinyal sesuai inference_config.json ──
+  // confidence_threshold_entry = 0.72 (valid entry)
+  // confidence_half_size       = 0.60 (weak, tampil kecil)
+  // min_hold_bars              = 192 (192 × 15min = 48 jam cooldown antar sinyal searah)
+  const CONF_ENTRY   = 0.72;  // Full entry marker
+  const CONF_WEAK    = 0.60;  // Weak signal (shown dim)
+  const HOLD_BAR_MS  = 192 * 15 * 60 * 1000;  // 48 jam dalam ms
 
-  ohlcv.forEach((d, i) => {
-    // s.ts dari backend = Unix seconds; d.ts = milliseconds — normalize
-    const match = signals.find(s => Math.abs((s.ts || 0) * 1000 - d.ts) < 15 * 60 * 1000);
-    if (match) {
-      const sig  = match.ml_signal || match.signal;
-      const conf = match.ml_conf   || match.conf || 0;
-      const point = { x: i, y: d.close, conf };
-      if (sig === 'LONG')       longPoints.push(point);
-      else if (sig === 'SHORT') shortPoints.push(point);
-      else if (sig === 'FLAT')  flatPoints.push(point);
+  const longPoints  = [];   // conf >= 0.72 valid entry
+  const shortPoints = [];
+  const weakPoints  = [];   // 0.60 <= conf < 0.72 (dim, referensi saja)
+
+  // Sorted signals by timestamp untuk cooldown tracking
+  const sortedSignals = [...signals].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  let lastLongTs  = -Infinity;  // ms
+  let lastShortTs = -Infinity;
+
+  sortedSignals.forEach(s => {
+    const sig  = s.ml_signal || s.signal;
+    const conf = s.ml_conf   || s.conf || 0;
+    const sMs  = (s.ts || 0) * 1000;  // konversi ke ms
+
+    if (conf < CONF_WEAK) return;  // buang noise di bawah 60%
+    if (sig === 'FLAT')   return;  // FLAT bukan sinyal entry
+
+    // Cari indeks OHLCV terdekat
+    let bestIdx = -1, bestDiff = Infinity;
+    ohlcv.forEach((d, i) => {
+      const diff = Math.abs(d.ts - sMs);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    if (bestIdx < 0 || bestDiff > 15 * 60 * 1000) return;
+
+    const price = ohlcv[bestIdx].close;
+
+    if (conf >= CONF_ENTRY) {
+      // Valid entry — terapkan cooldown min_hold_bars
+      if (sig === 'LONG') {
+        if (sMs - lastLongTs >= HOLD_BAR_MS) {
+          longPoints.push({ x: bestIdx, y: price, conf });
+          lastLongTs = sMs;
+        }
+      } else if (sig === 'SHORT') {
+        if (sMs - lastShortTs >= HOLD_BAR_MS) {
+          shortPoints.push({ x: bestIdx, y: price, conf });
+          lastShortTs = sMs;
+        }
+      }
+    } else {
+      // Weak signal (0.60–0.72): tampil kecil transparan
+      weakPoints.push({ x: bestIdx, y: price, conf, sig });
     }
   });
 
@@ -1277,52 +1313,42 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           spanGaps: true,
           order: 3,
         },
-        // Sinyal LONG
+        // Sinyal LONG (conf >= 0.72, valid entry)
         {
           label: '▲ LONG',
           data: longPoints.map(p => ({ x: p.x, y: p.y })),
           type: 'scatter',
           yAxisID: 'yPrice',
           borderColor: '#34d399',
-          backgroundColor: p => {
-            const pt = longPoints[p.dataIndex];
-            return pt && pt.conf >= 0.72 ? 'rgba(52,211,153,0.9)' : 'rgba(52,211,153,0.35)';
-          },
-          pointRadius: p => {
-            const pt = longPoints[p.dataIndex];
-            return pt && pt.conf >= 0.72 ? 10 : 6;
-          },
+          backgroundColor: 'rgba(52,211,153,0.9)',
+          pointRadius: 12,
+          pointHoverRadius: 14,
           pointStyle: 'triangle',
           order: 1,
         },
-        // Sinyal SHORT
+        // Sinyal SHORT (conf >= 0.72, valid entry)
         {
           label: '▼ SHORT',
           data: shortPoints.map(p => ({ x: p.x, y: p.y })),
           type: 'scatter',
           yAxisID: 'yPrice',
           borderColor: '#f87171',
-          backgroundColor: p => {
-            const pt = shortPoints[p.dataIndex];
-            return pt && pt.conf >= 0.72 ? 'rgba(248,113,113,0.9)' : 'rgba(248,113,113,0.35)';
-          },
-          pointRadius: p => {
-            const pt = shortPoints[p.dataIndex];
-            return pt && pt.conf >= 0.72 ? 10 : 6;
-          },
+          backgroundColor: 'rgba(248,113,113,0.9)',
+          pointRadius: 12,
+          pointHoverRadius: 14,
           pointStyle: 'triangle',
           rotation: 180,
           order: 1,
         },
-        // Sinyal FLAT
+        // Weak signals (0.60–0.72) — bukan entry, hanya referensi
         {
-          label: '— FLAT',
-          data: flatPoints.map(p => ({ x: p.x, y: p.y })),
+          label: '○ Weak (60-72%)',
+          data: weakPoints.map(p => ({ x: p.x, y: p.y })),
           type: 'scatter',
           yAxisID: 'yPrice',
-          borderColor: '#94a3b8',
-          backgroundColor: 'rgba(148,163,184,0.3)',
-          pointRadius: 5,
+          borderColor: 'rgba(148,163,184,0.5)',
+          backgroundColor: 'rgba(148,163,184,0.15)',
+          pointRadius: 4,
           pointStyle: 'circle',
           order: 2,
         },
@@ -1352,20 +1378,29 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           padding: 12,
           callbacks: {
             afterBody: function(items) {
-              const i   = items[0]?.dataIndex;
-              const sig = signals.find(s => {
-                const d = ohlcv[i];
-                return d && Math.abs((s.ts||0) * 1000 - d.ts) < 15*60*1000;
-              });
+              const i      = items[0]?.dataIndex;
+              const ohlcvD = ohlcv[i];
               const confVal = confLineData[i];
-              const lines = [];
-              if (sig) {
-                const c = ((sig.ml_conf || sig.conf || 0) * 100).toFixed(1);
-                lines.push(`Signal : ${sig.ml_signal || sig.signal || '—'}`);
-                lines.push(`Conf   : ${c}%`);
+              const lines  = [];
+
+              // Cek apakah candle ini punya entry valid
+              const inLong  = longPoints.find(p => p.x === i);
+              const inShort = shortPoints.find(p => p.x === i);
+              const inWeak  = weakPoints.find(p => p.x === i);
+
+              if (inLong) {
+                lines.push(`✅ VALID ENTRY: LONG`);
+                lines.push(`Conf   : ${(inLong.conf*100).toFixed(1)}% (≥ 72%)`);
+              } else if (inShort) {
+                lines.push(`✅ VALID ENTRY: SHORT`);
+                lines.push(`Conf   : ${(inShort.conf*100).toFixed(1)}% (≥ 72%)`);
+              } else if (inWeak) {
+                lines.push(`⚠️ Weak signal: ${inWeak.sig}`);
+                lines.push(`Conf   : ${(inWeak.conf*100).toFixed(1)}% (< 72%, skip)`);
               }
+
               if (confVal != null) lines.push(`ML Conf: ${confVal.toFixed(1)}%`);
-              if (leverage > 1) lines.push(`Lev    : ${leverage}x`);
+              if (leverage > 1)    lines.push(`Lev    : ${leverage}x`);
               return lines;
             }
           }
