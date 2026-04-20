@@ -1115,85 +1115,6 @@ def api_data():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route("/api/price-performance/<path:pair>")
-def api_price_performance(pair: str):
-    """
-    Gabungkan data OHLCV (M15) dengan sinyal ML dari confidence-history.
-    Digunakan untuk Price Performance Monitor chart.
-    """
-    pair = pair.upper()
-    hours = int(flask_request.args.get("hours", 24))
-    leverage = float(flask_request.args.get("leverage", 1.0))
-    
-    try:
-        # Ambil confidence history (sudah ada)
-        hist = signal_monitor.get_confidence_history(pair, hours=hours)
-        
-        # Ambil OHLCV M15 dari data_engine (sudah ada di aplikasi)
-        from protocol_96_enrichment import get_fully_enriched_data
-        df, _ = get_fully_enriched_data(pair, interval="15m", limit=hours*4)
-        
-        ohlcv = []
-        if df is not None and not df.empty:
-            for _, row in df.tail(hours*4).iterrows():
-                ohlcv.append({
-                    "ts":    int(row["Open_Time"].timestamp() * 1000) if hasattr(row["Open_Time"], "timestamp") else int(row["Open_Time"]),
-                    "open":  float(row["Open"]),
-                    "high":  float(row["High"]),
-                    "low":   float(row["Low"]),
-                    "close": float(row["Close"]),
-                    "volume": float(row.get("Total_Volume", 0) if "Total_Volume" in row else row.get("Volume", 0)),
-                })
-        
-        # Hitung simulasi PnL dari sinyal ML
-        pnl_simulation = []
-        fee = 0.0004  # 0.04% per side
-        for h in hist:
-            if h.get("ml_signal") in ["LONG", "SHORT"]:
-                entry = h.get("close", 0)
-                conf  = h.get("ml_conf", 0)
-                signal = h.get("ml_signal")
-                # TP/SL sederhana berbasis conf (sesuaikan jika ada ATR)
-                tp_pct = 0.015 * leverage  # 1.5% x leverage
-                sl_pct = 0.008 * leverage  # 0.8% x leverage
-                pnl_simulation.append({
-                    "ts":     h.get("ts"),
-                    "signal": signal,
-                    "conf":   conf,
-                    "entry":  entry,
-                    "tp":     entry * (1 + tp_pct) if signal == "LONG" else entry * (1 - tp_pct),
-                    "sl":     entry * (1 - sl_pct) if signal == "LONG" else entry * (1 + sl_pct),
-                    "fee_pct": fee * 2 * leverage,
-                })
-        
-        # Statistik performa
-        long_signals  = [h for h in hist if h.get("ml_signal") == "LONG"]
-        short_signals = [h for h in hist if h.get("ml_signal") == "SHORT"]
-        flat_signals  = [h for h in hist if h.get("ml_signal") == "FLAT"]
-        avg_conf      = sum(h.get("ml_conf", 0) for h in hist) / len(hist) if hist else 0
-        
-        stats = {
-            "total_signals": len(hist),
-            "long_count":    len(long_signals),
-            "short_count":   len(short_signals),
-            "flat_count":    len(flat_signals),
-            "avg_confidence": round(avg_conf * 100, 1),
-            "leverage":      leverage,
-            "hours":         hours,
-        }
-        
-        return jsonify({
-            "success":    True,
-            "pair":       pair,
-            "ohlcv":      ohlcv,
-            "signals":    hist,
-            "simulation": pnl_simulation,
-            "stats":      stats,
-        })
-    except Exception as e:
-        logger.exception(f"price-performance error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
 # ==========================================
 # 💰 TRADE ENTRY MANAGEMENT ENDPOINTS
 # ==========================================
@@ -1614,85 +1535,6 @@ def export_excel():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route("/api/price-performance/<path:pair>")
-def api_price_performance(pair: str):
-    """
-    Gabungkan data OHLCV (M15) dengan sinyal ML dari confidence-history.
-    Digunakan untuk Price Performance Monitor chart.
-    """
-    pair = pair.upper()
-    hours = int(flask_request.args.get("hours", 24))
-    leverage = float(flask_request.args.get("leverage", 1.0))
-    
-    try:
-        # Ambil confidence history (sudah ada)
-        hist = signal_monitor.get_confidence_history(pair, hours=hours)
-        
-        # Ambil OHLCV M15 dari data_engine (sudah ada di aplikasi)
-        from protocol_96_enrichment import get_fully_enriched_data
-        df, _ = get_fully_enriched_data(pair, interval="15m", limit=hours*4)
-        
-        ohlcv = []
-        if df is not None and not df.empty:
-            for _, row in df.tail(hours*4).iterrows():
-                ohlcv.append({
-                    "ts":    int(row["Open_Time"].timestamp() * 1000) if hasattr(row["Open_Time"], "timestamp") else int(row["Open_Time"]),
-                    "open":  float(row["Open"]),
-                    "high":  float(row["High"]),
-                    "low":   float(row["Low"]),
-                    "close": float(row["Close"]),
-                    "volume": float(row.get("Total_Volume", 0) if "Total_Volume" in row else row.get("Volume", 0)),
-                })
-        
-        # Hitung simulasi PnL dari sinyal ML
-        pnl_simulation = []
-        fee = 0.0004  # 0.04% per side
-        for h in hist:
-            if h.get("ml_signal") in ["LONG", "SHORT"]:
-                entry = h.get("close", 0)
-                conf  = h.get("ml_conf", 0)
-                signal = h.get("ml_signal")
-                # TP/SL sederhana berbasis conf (sesuaikan jika ada ATR)
-                tp_pct = 0.015 * leverage  # 1.5% x leverage
-                sl_pct = 0.008 * leverage  # 0.8% x leverage
-                pnl_simulation.append({
-                    "ts":     h.get("ts"),
-                    "signal": signal,
-                    "conf":   conf,
-                    "entry":  entry,
-                    "tp":     entry * (1 + tp_pct) if signal == "LONG" else entry * (1 - tp_pct),
-                    "sl":     entry * (1 - sl_pct) if signal == "LONG" else entry * (1 + sl_pct),
-                    "fee_pct": fee * 2 * leverage,
-                })
-        
-        # Statistik performa
-        long_signals  = [h for h in hist if h.get("ml_signal") == "LONG"]
-        short_signals = [h for h in hist if h.get("ml_signal") == "SHORT"]
-        flat_signals  = [h for h in hist if h.get("ml_signal") == "FLAT"]
-        avg_conf      = sum(h.get("ml_conf", 0) for h in hist) / len(hist) if hist else 0
-        
-        stats = {
-            "total_signals": len(hist),
-            "long_count":    len(long_signals),
-            "short_count":   len(short_signals),
-            "flat_count":    len(flat_signals),
-            "avg_confidence": round(avg_conf * 100, 1),
-            "leverage":      leverage,
-            "hours":         hours,
-        }
-        
-        return jsonify({
-            "success":    True,
-            "pair":       pair,
-            "ohlcv":      ohlcv,
-            "signals":    hist,
-            "simulation": pnl_simulation,
-            "stats":      stats,
-        })
-    except Exception as e:
-        logger.exception(f"price-performance error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
 # ==========================================
 # 📤 CSV ANALYSIS ENDPOINT
 # ==========================================
@@ -1905,7 +1747,7 @@ def api_confidence_history(pair: str):
 
 
 @app.route("/api/price-performance/<path:pair>")
-def api_price_performance(pair: str):
+def api_price_perf_v2(pair: str):
     """
     Gabungkan data OHLCV (M15) dengan sinyal ML dari confidence-history.
     Digunakan untuk Price Performance Monitor chart.
@@ -1982,6 +1824,8 @@ def api_price_performance(pair: str):
     except Exception as e:
         logger.exception(f"price-performance error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
 
 # ==========================================
 # 🚀 MAIN
