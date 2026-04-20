@@ -1316,8 +1316,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
         // Sinyal LONG (conf >= 0.72, valid entry)
         {
           label: '▲ LONG',
-          data: longPoints.map(p => ({ x: p.x, y: p.y })),
-          type: 'scatter',
+          data: ohlcv.map((_, i) => { const pt = longPoints.find(p => p.x === i); return pt ? pt.y : null; }),
+          type: 'line',
+          showLine: false,
           yAxisID: 'yPrice',
           borderColor: '#34d399',
           backgroundColor: 'rgba(52,211,153,0.9)',
@@ -1329,8 +1330,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
         // Sinyal SHORT (conf >= 0.72, valid entry)
         {
           label: '▼ SHORT',
-          data: shortPoints.map(p => ({ x: p.x, y: p.y })),
-          type: 'scatter',
+          data: ohlcv.map((_, i) => { const pt = shortPoints.find(p => p.x === i); return pt ? pt.y : null; }),
+          type: 'line',
+          showLine: false,
           yAxisID: 'yPrice',
           borderColor: '#f87171',
           backgroundColor: 'rgba(248,113,113,0.9)',
@@ -1343,8 +1345,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
         // Weak signals (0.60–0.72) — bukan entry, hanya referensi
         {
           label: '○ Weak (60-72%)',
-          data: weakPoints.map(p => ({ x: p.x, y: p.y })),
-          type: 'scatter',
+          data: ohlcv.map((_, i) => { const pt = weakPoints.find(p => p.x === i); return pt ? pt.y : null; }),
+          type: 'line',
+          showLine: false,
           yAxisID: 'yPrice',
           borderColor: 'rgba(148,163,184,0.5)',
           backgroundColor: 'rgba(148,163,184,0.15)',
