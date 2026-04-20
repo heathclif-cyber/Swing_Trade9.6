@@ -854,28 +854,36 @@ tbody tr:last-child td { border-bottom: none; }
         <!-- Stat Cards -->
         <div class="perf-stat-grid" id="perfStatGrid" style="display:none;">
           <div class="perf-stat-card">
-            <div class="perf-stat-label" title="Total sinyal entry yang valid (conf ≥ 72%)">Total Valid Entry</div>
+            <div class="perf-stat-label" title="Total sinyal entry valid conf ≥ 72%">Valid Entry</div>
             <div class="perf-stat-value blue" id="statTotalSignals">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">🐂 VALID LONG</div>
+            <div class="perf-stat-label">🐂 LONG</div>
             <div class="perf-stat-value green" id="statLongCount">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">🐻 VALID SHORT</div>
+            <div class="perf-stat-label">🐻 SHORT</div>
             <div class="perf-stat-value red" id="statShortCount">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">○ WEAK (Skip)</div>
+            <div class="perf-stat-label">○ Weak (Skip)</div>
             <div class="perf-stat-value" id="statFlatCount" style="color:var(--text-2);">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">Avg Confidence</div>
-            <div class="perf-stat-value purple" id="statAvgConf">—</div>
+            <div class="perf-stat-label" title="Win = TP kena sebelum SL">Win Rate (sim)</div>
+            <div class="perf-stat-value" id="statWinRate" style="color:#a78bfa;">—</div>
           </div>
           <div class="perf-stat-card">
-            <div class="perf-stat-label">Leverage</div>
-            <div class="perf-stat-value blue" id="statLeverage">—</div>
+            <div class="perf-stat-label" title="Total PnL termasuk fee, leverage">Total PnL (sim)</div>
+            <div class="perf-stat-value" id="statTotalPnl">—</div>
+          </div>
+          <div class="perf-stat-card">
+            <div class="perf-stat-label">✅ TP Hit</div>
+            <div class="perf-stat-value green" id="statTpHits">—</div>
+          </div>
+          <div class="perf-stat-card">
+            <div class="perf-stat-label">🔴 SL Hit</div>
+            <div class="perf-stat-value red" id="statSlHits">—</div>
           </div>
         </div>
 
@@ -1568,7 +1576,10 @@ function updatePerfStats(stats, filteredCounts) {
   if (!stats) return;
   const grid = document.getElementById('perfStatGrid');
   grid.style.display = 'grid';
-  
+
+  // Hitung total valid dari simulation (LONG+SHORT yang masuk simulasi)
+  const totalValid = (stats.tp_hits ?? 0) + (stats.sl_hits ?? 0) + ((filteredCounts?.longCount ?? 0) + (filteredCounts?.shortCount ?? 0) - (stats.tp_hits ?? 0) - (stats.sl_hits ?? 0));
+
   if (filteredCounts) {
     document.getElementById('statTotalSignals').textContent = filteredCounts.longCount + filteredCounts.shortCount;
     document.getElementById('statLongCount').textContent    = filteredCounts.longCount;
@@ -1580,10 +1591,28 @@ function updatePerfStats(stats, filteredCounts) {
     document.getElementById('statShortCount').textContent   = stats.short_count   ?? '—';
     document.getElementById('statFlatCount').textContent    = stats.flat_count    ?? '—';
   }
-  
-  document.getElementById('statAvgConf').textContent      = (stats.avg_confidence ?? '—') + '%';
-  document.getElementById('statLeverage').textContent     = (stats.leverage ?? '—') + 'x';
+
+  // Win Rate
+  const wr = stats.winrate_pct;
+  const wrEl = document.getElementById('statWinRate');
+  if (wr != null) {
+    wrEl.textContent = wr + '%';
+    wrEl.style.color = wr >= 55 ? '#34d399' : wr >= 45 ? '#a78bfa' : '#f87171';
+  } else { wrEl.textContent = '—'; }
+
+  // Total PnL
+  const pnl = stats.total_pnl_pct;
+  const pnlEl = document.getElementById('statTotalPnl');
+  if (pnl != null) {
+    pnlEl.textContent = (pnl > 0 ? '+' : '') + pnl + '%';
+    pnlEl.style.color = pnl > 0 ? '#34d399' : '#f87171';
+  } else { pnlEl.textContent = '—'; }
+
+  // TP/SL Hits
+  document.getElementById('statTpHits').textContent = stats.tp_hits ?? '—';
+  document.getElementById('statSlHits').textContent = stats.sl_hits ?? '—';
 }
+
 
 // Ensure the old script tag end matches
 </script>
