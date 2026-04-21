@@ -27,14 +27,14 @@
       "lstm_hidden": 128,
       "lstm_layers": 2,
       "description": "LightGBM + LSTM stacking ensemble v2 (65 fitur, structural filter, calibrated)",
-      "f1_macro": 0.061630861172089144,
-      "winrate": 0.6255,
-      "trade_per_month": 14.58,
-      "pnl_lev3x": 5320.02,
-      "pnl_lev5x": 9046.57,
-      "max_drawdown": 0.1524,
+      "f1_macro": 0.06187704185848513,
+      "winrate": 0.623,
+      "trade_per_month": 117.37,
+      "pnl_lev3x": 79750.07,
+      "pnl_lev5x": 135084.26,
+      "max_drawdown": 0.2503,
       "max_consecutive_loss": 8,
-      "trained_date": "2026-04-20",
+      "trained_date": "2026-04-21",
       "status": "active"
     }
   }

@@ -6,292 +6,292 @@
     {
       "rank": 1,
       "feature": "h4_trend",
-      "mean_abs_shap": 0.9425911278145865
+      "mean_abs_shap": 0.9670364029693167
     },
     {
       "rank": 2,
       "feature": "price_in_range",
-      "mean_abs_shap": 0.7299510867769277
+      "mean_abs_shap": 0.7361651787340092
     },
     {
       "rank": 3,
       "feature": "ema_7_h4",
-      "mean_abs_shap": 0.664809445289236
+      "mean_abs_shap": 0.6584794611242111
     },
     {
       "rank": 4,
       "feature": "trend_strength",
-      "mean_abs_shap": 0.15116950796960327
+      "mean_abs_shap": 0.14722399945841452
     },
     {
       "rank": 5,
-      "feature": "ema_21_h4",
-      "mean_abs_shap": 0.12402958573564841
+      "feature": "ema_50_m15",
+      "mean_abs_shap": 0.12064377206392513
     },
     {
       "rank": 6,
       "feature": "Fib_618",
-      "mean_abs_shap": 0.11223225590983571
+      "mean_abs_shap": 0.1204325708315889
     },
     {
       "rank": 7,
-      "feature": "ema_50_m15",
-      "mean_abs_shap": 0.11097197074788849
+      "feature": "ema_21_h4",
+      "mean_abs_shap": 0.1192177966542759
     },
     {
       "rank": 8,
       "feature": "Buy_Liq",
-      "mean_abs_shap": 0.0697244089650699
+      "mean_abs_shap": 0.06898037980945187
     },
     {
       "rank": 9,
       "feature": "PDL",
-      "mean_abs_shap": 0.06471926338209433
+      "mean_abs_shap": 0.06536883465847891
     },
     {
       "rank": 10,
-      "feature": "dist_swing_high",
-      "mean_abs_shap": 0.056999826006957216
+      "feature": "Sell_Liq",
+      "mean_abs_shap": 0.057259386481172736
     },
     {
       "rank": 11,
-      "feature": "Sell_Liq",
-      "mean_abs_shap": 0.05638032689193187
+      "feature": "PWL",
+      "mean_abs_shap": 0.05275450920945668
     },
     {
       "rank": 12,
-      "feature": "time_to_funding_norm",
-      "mean_abs_shap": 0.05288610163944251
+      "feature": "dist_swing_high",
+      "mean_abs_shap": 0.05183343202844702
     },
     {
       "rank": 13,
-      "feature": "PWL",
-      "mean_abs_shap": 0.049634925874362024
+      "feature": "hour_sin",
+      "mean_abs_shap": 0.051034889246279073
     },
     {
       "rank": 14,
-      "feature": "hour_sin",
-      "mean_abs_shap": 0.04873411878022187
+      "feature": "time_to_funding_norm",
+      "mean_abs_shap": 0.05059181422617875
     },
     {
       "rank": 15,
       "feature": "log_ret_20",
-      "mean_abs_shap": 0.04797067050643141
+      "mean_abs_shap": 0.04934855683379604
     },
     {
       "rank": 16,
-      "feature": "ema_50_h4",
-      "mean_abs_shap": 0.044814146685374485
+      "feature": "hour_cos",
+      "mean_abs_shap": 0.046049499898453895
     },
     {
       "rank": 17,
-      "feature": "hour_cos",
-      "mean_abs_shap": 0.04344712242423184
+      "feature": "ema_50_h4",
+      "mean_abs_shap": 0.04353338357355928
     },
     {
       "rank": 18,
       "feature": "PWH",
-      "mean_abs_shap": 0.03866882458748517
+      "mean_abs_shap": 0.04269718254419434
     },
     {
       "rank": 19,
       "feature": "dow_cos",
-      "mean_abs_shap": 0.031180343550886766
+      "mean_abs_shap": 0.0326281782513709
     },
     {
       "rank": 20,
       "feature": "dow_sin",
-      "mean_abs_shap": 0.029241618767693683
+      "mean_abs_shap": 0.02943028514955348
     },
     {
       "rank": 21,
       "feature": "Fib_786",
-      "mean_abs_shap": 0.026444570820734592
+      "mean_abs_shap": 0.025598947040526874
     },
     {
       "rank": 22,
-      "feature": "symbol",
-      "mean_abs_shap": 0.025214102778766897
+      "feature": "ema_200_m15",
+      "mean_abs_shap": 0.024298713947099006
     },
     {
       "rank": 23,
-      "feature": "cvd",
-      "mean_abs_shap": 0.025079997351493643
+      "feature": "PDH",
+      "mean_abs_shap": 0.023547391049105103
     },
     {
       "rank": 24,
-      "feature": "PDH",
-      "mean_abs_shap": 0.024530179117978848
+      "feature": "ema_21_m15",
+      "mean_abs_shap": 0.023201268919589416
     },
     {
       "rank": 25,
-      "feature": "ema_200_m15",
-      "mean_abs_shap": 0.023630938787051223
+      "feature": "symbol",
+      "mean_abs_shap": 0.022713997133336983
     },
     {
       "rank": 26,
       "feature": "stochrsi_k",
-      "mean_abs_shap": 0.02298531647059647
+      "mean_abs_shap": 0.022488446529330304
     },
     {
       "rank": 27,
-      "feature": "ema_21_m15",
-      "mean_abs_shap": 0.02258689089724716
+      "feature": "cvd",
+      "mean_abs_shap": 0.022266883009331547
     },
     {
       "rank": 28,
-      "feature": "bars_since_BOS",
-      "mean_abs_shap": 0.021819748541422473
+      "feature": "atr_14_m15",
+      "mean_abs_shap": 0.022243813461994732
     },
     {
       "rank": 29,
-      "feature": "vol_regime",
-      "mean_abs_shap": 0.0205198458116358
+      "feature": "bars_since_BOS",
+      "mean_abs_shap": 0.022204929368199445
     },
     {
       "rank": 30,
-      "feature": "low",
-      "mean_abs_shap": 0.020221030811345526
+      "feature": "open_interest",
+      "mean_abs_shap": 0.019201360949071197
     },
     {
       "rank": 31,
-      "feature": "ema_200_h4",
-      "mean_abs_shap": 0.020139633120828566
+      "feature": "vol_regime",
+      "mean_abs_shap": 0.0191450350172439
     },
     {
       "rank": 32,
-      "feature": "atr_14_m15",
-      "mean_abs_shap": 0.019591181797402334
+      "feature": "ema_200_h4",
+      "mean_abs_shap": 0.01827245431734343
     },
     {
       "rank": 33,
-      "feature": "open_interest",
-      "mean_abs_shap": 0.019025093100900087
+      "feature": "vol_ratio_20",
+      "mean_abs_shap": 0.017632988130848487
     },
     {
       "rank": 34,
-      "feature": "vol_ratio_20",
-      "mean_abs_shap": 0.01753800841123641
+      "feature": "atr_14_h4",
+      "mean_abs_shap": 0.016543108326636188
     },
     {
       "rank": 35,
-      "feature": "close",
-      "mean_abs_shap": 0.016886631252437372
+      "feature": "high",
+      "mean_abs_shap": 0.01553665980444604
     },
     {
       "rank": 36,
-      "feature": "VAH",
-      "mean_abs_shap": 0.016578065492032827
+      "feature": "rsi_6",
+      "mean_abs_shap": 0.013911784356146914
     },
     {
       "rank": 37,
-      "feature": "ema_7_m15",
-      "mean_abs_shap": 0.015893890439766946
+      "feature": "close",
+      "mean_abs_shap": 0.013614495048727542
     },
     {
       "rank": 38,
-      "feature": "atr_14_h4",
-      "mean_abs_shap": 0.015292138986041632
+      "feature": "VAH",
+      "mean_abs_shap": 0.012913003552090494
     },
     {
       "rank": 39,
-      "feature": "POC",
-      "mean_abs_shap": 0.014871934606261612
+      "feature": "ema_7_m15",
+      "mean_abs_shap": 0.012848790507878375
     },
     {
       "rank": 40,
-      "feature": "rsi_6",
-      "mean_abs_shap": 0.014671577255604744
+      "feature": "dist_swing_low",
+      "mean_abs_shap": 0.012516690702164575
     },
     {
       "rank": 41,
-      "feature": "dist_swing_low",
-      "mean_abs_shap": 0.012623733786911525
+      "feature": "MSB_BOS",
+      "mean_abs_shap": 0.01238874406210005
     },
     {
       "rank": 42,
-      "feature": "log_ret_5",
-      "mean_abs_shap": 0.011865153873065951
+      "feature": "POC",
+      "mean_abs_shap": 0.012321008209775374
     },
     {
       "rank": 43,
-      "feature": "MSB_BOS",
-      "mean_abs_shap": 0.011792871431060632
+      "feature": "log_ret_1",
+      "mean_abs_shap": 0.011379103612466288
     },
     {
       "rank": 44,
-      "feature": "high",
-      "mean_abs_shap": 0.011329760259926543
+      "feature": "log_ret_5",
+      "mean_abs_shap": 0.01093625886471703
     },
     {
       "rank": 45,
-      "feature": "log_ret_1",
-      "mean_abs_shap": 0.010797760464141045
+      "feature": "low",
+      "mean_abs_shap": 0.010851616617347924
     },
     {
       "rank": 46,
-      "feature": "open",
-      "mean_abs_shap": 0.009609113692828528
+      "feature": "VAL",
+      "mean_abs_shap": 0.009647360460701446
     },
     {
       "rank": 47,
       "feature": "swing_momentum",
-      "mean_abs_shap": 0.009202740026478142
+      "mean_abs_shap": 0.008295767056990285
     },
     {
       "rank": 48,
-      "feature": "VAL",
-      "mean_abs_shap": 0.00882210911292199
+      "feature": "open",
+      "mean_abs_shap": 0.007766017305823618
     },
     {
       "rank": 49,
       "feature": "stochrsi_d",
-      "mean_abs_shap": 0.008235833668041922
+      "mean_abs_shap": 0.007554839548007106
     },
     {
       "rank": 50,
       "feature": "SFP_sweep",
-      "mean_abs_shap": 0.007434813783780499
+      "mean_abs_shap": 0.007256790255859436
     },
     {
       "rank": 51,
-      "feature": "market_session",
-      "mean_abs_shap": 0.006824144805613904
+      "feature": "volume",
+      "mean_abs_shap": 0.0069409543559413285
     },
     {
       "rank": 52,
       "feature": "FVG_up",
-      "mean_abs_shap": 0.006694006058895161
+      "mean_abs_shap": 0.00685774290780406
     },
     {
       "rank": 53,
-      "feature": "FVG_down",
-      "mean_abs_shap": 0.005994314438530107
+      "feature": "market_session",
+      "mean_abs_shap": 0.006804625722190643
     },
     {
       "rank": 54,
-      "feature": "volume",
-      "mean_abs_shap": 0.005780684141781773
+      "feature": "FVG_down",
+      "mean_abs_shap": 0.006039353076327314
     },
     {
       "rank": 55,
       "feature": "volume_delta",
-      "mean_abs_shap": 0.0024349236250636717
+      "mean_abs_shap": 0.0028192423351709405
     },
     {
       "rank": 56,
       "feature": "buy_volume",
-      "mean_abs_shap": 0.0024001564248936234
+      "mean_abs_shap": 0.0019677674909363944
     },
     {
       "rank": 57,
       "feature": "sell_volume",
-      "mean_abs_shap": 0.00043587424683214906
+      "mean_abs_shap": 0.000621435764130588
     },
     {
       "rank": 58,
       "feature": "CHoCH",
-      "mean_abs_shap": 5.052818833234962e-05
+      "mean_abs_shap": 0.0001488182379987766
     },
     {
       "rank": 59,
