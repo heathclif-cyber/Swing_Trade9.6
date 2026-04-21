@@ -267,7 +267,7 @@ tbody tr:last-child td { border-bottom: none; }
 .alert-banner.danger  { background: var(--accent-red); color: #fff; }
 /* ── SYSTEM HEALTH BANNER ──────────────────────────────────────────────────── */
 .system-health-bar {
-    display: none; position: sticky; top: 0; z-index: 800;
+    display: none; position: relative;
     background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35);
     border-radius: var(--radius-md); padding: 10px 18px; margin-bottom: 14px;
     color: #fbbf24; font-size: 12.5px; font-weight: 600;
@@ -716,13 +716,6 @@ tbody tr:last-child td { border-bottom: none; }
 </div>
 <!-- ALERT -->
 <div class="alert-banner" id="alertBanner"></div>
-<!-- SYSTEM HEALTH BANNER -->
-<div class="system-health-bar" id="systemHealthBar">
-    <span>⚠️ DATA WARNING</span>
-    <span class="health-errors" id="healthErrorText">Memeriksa status data...</span>
-    <span id="healthCheckedAt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap;"></span>
-</div>
-
 <!-- STICKY FLOATING HEADER WRAPPER -->
 <div class="header-sticky-wrapper" id="floatingHeader">
 <div style="max-width:1520px;margin:0 auto;padding:0 18px;">
@@ -754,6 +747,13 @@ tbody tr:last-child td { border-bottom: none; }
 </div><!-- /.header-sticky-wrapper -->
 
 <div class="app-container" id="dashboardContent" style="padding-top:10px;">
+
+    <!-- SYSTEM HEALTH BANNER -->
+    <div class="system-health-bar" id="systemHealthBar">
+        <span>⚠️ DATA WARNING</span>
+        <span class="health-errors" id="healthErrorText">Memeriksa status data...</span>
+        <span id="healthCheckedAt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap;"></span>
+    </div>
 
     <div class="section glass-card" id="sectionScanner" style="padding:20px;">
         <div class="section-header section-collapsible open" onclick="toggleSection('scannerContent', this)">
@@ -1593,6 +1593,8 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
         yPrice: {
           type: 'linear',
           position: 'right',
+          beginAtZero: false,
+          grace: '5%',
           ticks: {
             color: 'rgba(99,125,255,0.6)',
             font: { size: 11 },
