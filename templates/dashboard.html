@@ -1417,18 +1417,30 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     data: {
       labels,
       datasets: [
-        // Harga Close
+        // Harga Wicks (High/Low)
         {
-          label: `${coin} Close`,
-          data: closes,
+          type: 'bar',
+          label: `${coin} Candles`,
+          data: ohlcv.map(d => [d.low, d.high]),
           yAxisID: 'yPrice',
-          borderColor: 'rgba(99,125,255,0.9)',
-          borderWidth: 1.5,
-          backgroundColor: gradient,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          pointHoverRadius: 4,
+          backgroundColor: ohlcv.map(d => d.close >= d.open ? '#34d399' : '#f87171'),
+          barPercentage: 0.1,
+          categoryPercentage: 0.8,
+          order: 4,
+        },
+        // Harga Body (Open/Close)
+        {
+          type: 'bar',
+          label: `_ignore`,
+          data: ohlcv.map(d => {
+             // Beri sedikit body jika open == close agar garis horizontal tetap terlihat
+             if (d.open === d.close) return [d.open, d.open + (d.open * 0.0001)];
+             return [d.open, d.close];
+          }),
+          yAxisID: 'yPrice',
+          backgroundColor: ohlcv.map(d => d.close >= d.open ? 'rgba(52,211,153, 0.9)' : 'rgba(248,113,113, 0.9)'),
+          barPercentage: 0.7,
+          categoryPercentage: 0.8,
           order: 4,
         },
         // ML Confidence %
@@ -1510,7 +1522,22 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           titleColor: '#fff',
           bodyColor: 'rgba(255,255,255,0.7)',
           padding: 12,
+          filter: function(tooltipItem) {
+             // Sembunyikan dataset body (ignore) dan dot dari tooltip
+             return !tooltipItem.dataset.label.startsWith('_');
+          },
           callbacks: {
+            label: function(ctx) {
+              if (ctx.dataset.label.includes('Candles')) {
+                const c = ohlcv[ctx.dataIndex];
+                const fmt = v => v >= 1 ? v.toFixed(2) : v.toFixed(6);
+                return `O: ${fmt(c.open)}  H: ${fmt(c.high)}  L: ${fmt(c.low)}  C: ${fmt(c.close)}`;
+              }
+              if (ctx.dataset.label === '🧠 ML Conf %') {
+                return `🧠 ML Conf %: ${ctx.parsed.y.toFixed(1)}%`;
+              }
+              return ctx.dataset.label + ': ' + ctx.formattedValue;
+            },
             afterBody: function(items) {
               const i      = items[0]?.dataIndex;
               const ohlcvD = ohlcv[i];
