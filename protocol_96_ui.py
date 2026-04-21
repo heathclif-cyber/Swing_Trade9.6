@@ -107,7 +107,8 @@ def _get_enriched_data(pair: str, force_refresh: bool = False):
     df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
     df_m15 = None
     try:
-        _raw = get_klines_rest(pair, '15m', limit=300)
+        # Fetch 4h data for ML
+        _raw = get_klines_rest(pair, '4h', limit=300)
         df_m15 = _normalize_m15_columns(_raw)
     except Exception as _em:
         logger.warning(f'[Cache] Gagal fetch M15 untuk {pair}: {_em}')
@@ -630,11 +631,11 @@ def api_test_signal():
             total_qty  = sum(e["qty"] for e in entry_list)
             avg_entry  = (total_cost / total_qty) if total_qty > 0 else None
 
-            df_m15_raw = enrichment.get_klines_rest(pair, '15m', limit=300) if hasattr(enrichment, 'get_klines_rest') else None
+            df_m15_raw = enrichment.get_klines_rest(pair, '4h', limit=300) if hasattr(enrichment, 'get_klines_rest') else None
             if df_m15_raw is None:
                 from data_engine import DataEngine as _DE
                 _de = _DE()
-                df_m15_raw = _de.get_klines_rest(pair, '15m', limit=300)
+                df_m15_raw = _de.get_klines_rest(pair, '4h', limit=300)
             df_m15_norm = _normalize_m15_columns(df_m15_raw)
             ml_result = _ui_ml_engine.predict(symbol=pair, df_m15=df_m15_norm)
 
@@ -1760,7 +1761,7 @@ def api_price_perf_v2(pair: str):
         
         # Ambil OHLCV M15 dari data_engine (sudah ada di aplikasi)
         from protocol_96_enrichment import get_fully_enriched_data
-        df, _ = get_fully_enriched_data(pair, interval="15m", limit=hours*4)
+        df, _ = get_fully_enriched_data(pair, interval="4h", limit=hours*4)
         
         ohlcv = []
         if df is not None and not df.empty:

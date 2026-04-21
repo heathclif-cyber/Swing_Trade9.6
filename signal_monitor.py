@@ -31,7 +31,7 @@ CONF_FULL      = INFERENCE_CFG["inference"]["confidence_full_size"]
 CONF_HALF      = INFERENCE_CFG["inference"]["confidence_half_size"]
 MIN_HOLD_BARS  = INFERENCE_CFG["inference"].get("min_hold_bars", 96)   # bar M15 — min holding window
 MAX_HOLD_BARS  = INFERENCE_CFG["inference"].get("max_hold_bars", 96)   # bar M15 — max holding window
-TIMEFRAME_MIN  = 15  # menit per bar M15
+TIMEFRAME_MIN  = 240  # menit per bar 4H
 # Hold window dalam jam (untuk tampilan Telegram)
 _MIN_HOLD_H    = round(MIN_HOLD_BARS * TIMEFRAME_MIN / 60, 1)
 _MAX_HOLD_H    = round(MAX_HOLD_BARS * TIMEFRAME_MIN / 60, 1)
@@ -403,7 +403,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         # Fetch M15 untuk ML engine
         import data_engine
         try:
-            df_m15 = data_engine.get_klines_rest(symbol, '15m', limit=300)
+            df_m15 = data_engine.get_klines_rest(symbol, '4h', limit=300)
             if df_m15 is not None:
                 df_m15 = _normalize_m15_columns(df_m15)
         except Exception as e:

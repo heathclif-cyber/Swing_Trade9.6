@@ -44,7 +44,7 @@ try:
         'close': np.random.rand(300),
         'volume': np.random.rand(300),
     })
-    df_mock.index = pd.date_range('2023-01-01', periods=300, freq='15min', tz='UTC')
+    df_mock.index = pd.date_range('2023-01-01', periods=300, freq='4h', tz='UTC')
     out_df = calculate_features_realtime('BTCUSDT', df_mock)
     print(f"Generated features count: {len(out_df.columns)}")
 except Exception as e:

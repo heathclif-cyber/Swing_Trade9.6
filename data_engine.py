@@ -102,7 +102,7 @@ def apply_base_indicators(df: pd.DataFrame) -> pd.DataFrame:
 def fetch_oi(symbol: str, limit: int = 500) -> pd.DataFrame:
     try:
         url = "https://fapi.binance.com/futures/data/openInterestHist"
-        params = {"symbol": symbol, "period": "15m", "limit": limit}
+        params = {"symbol": symbol, "period": "4h", "limit": limit}
         resp = requests.get(url, params=params, timeout=10, verify=False)
         if resp.status_code == 200:
             data = resp.json()
