@@ -11,7 +11,7 @@
     "confidence_half_size": 0.6,
     "min_hold_bars": 16,
     "max_hold_bars": 48,
-    "timeframe": "15m",
+    "timeframe": "4H",
     "seq_len": 32,
     "label_map": {
       "SHORT": 0,
