@@ -292,11 +292,17 @@ SIGNAL_CONF_MIN      = INFERENCE_CFG["inference"]["confidence_half_size"]  # was
 SIGNAL_FLIP_CONF_MIN = 0.65   # 65% — minimum untuk flip arah (lebih ketat)
 
 # Jumlah bar M15 berurutan yang harus konsisten sebelum flip diterima.
-# 1 bar = 15 menit. Default 1 bar = 15 menit lock-in.
-FLIP_CONFIRM_BARS    = 1
+# Minimal 2 bar = 30 menit lock-in sebelum sinyal flip diterima.
+FLIP_CONFIRM_BARS    = 2
 
 # Cooldown setelah flip expired — minimal 1 jam sebelum entry baru
 FLIP_COOLDOWN_SECS   = 3600
+
+# ─── ANTI-SPAM: Cooldown sinyal arah SAMA ────────────────────────────────
+# Setelah sinyal LONG atau SHORT dikirim, tunggu X detik sebelum boleh
+# kirim sinyal arah YANG SAMA lagi — mencegah spam tiap 15 menit.
+# Default: 4 jam (model M15 yang kuat tidak akan flip terus dalam 4 jam).
+SAME_DIRECTION_COOLDOWN_SECS = int(os.environ.get("SIGNAL_COOLDOWN_HOURS", "4")) * 3600
 
 
 def _check_signal_stability(state: dict, new_direction: str, confidence: float, now_ts: float) -> str:
@@ -313,10 +319,19 @@ def _check_signal_stability(state: dict, new_direction: str, confidence: float, 
     """
     last_direction = state.get("last_signal_direction")  # LONG / SHORT / None
 
-    # --- Case 1: Tidak ada perubahan arah → langsung SEND (update strength)
+    # --- Case 1: Tidak ada perubahan arah → cek same-direction cooldown dulu
     if last_direction == new_direction:
         state["pending_direction"]  = None
         state["pending_conf_count"] = 0
+        # Cek apakah sudah melewati cooldown untuk arah yang sama
+        last_sent_ts = state.get(f"last_{new_direction.lower()}_sent_ts")
+        if last_sent_ts and (now_ts - last_sent_ts) < SAME_DIRECTION_COOLDOWN_SECS:
+            remaining_m = int((SAME_DIRECTION_COOLDOWN_SECS - (now_ts - last_sent_ts)) / 60)
+            logger.info(
+                f"  [StabilityGate] SAME-DIR COOLDOWN {new_direction} — "
+                f"{remaining_m} mnt lagi ({SAME_DIRECTION_COOLDOWN_SECS//3600} jam cooldown)"
+            )
+            return "COOLDOWN"
         return "SEND"
 
     # --- Case 2: Arah baru (flip atau entry pertama)
@@ -790,8 +805,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     state["last_long_signal"]      = new_signal_L
                     state["last_signal"]           = new_signal_L
                     state["last_signal_direction"] = "LONG"
-                    state["last_signal_ts"]        = time.time()
+                    state["last_signal_ts"]        = now_ts
                     state["last_signal_conf"]      = ml_conf_L
+                    state["last_long_sent_ts"]     = now_ts  # anti-spam cooldown
                     _save_alert_state(_alert_state)
                     return
 
@@ -838,8 +854,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     state["last_short_signal"]     = new_signal_S
                     state["last_signal"]           = new_signal_S
                     state["last_signal_direction"] = "SHORT"
-                    state["last_signal_ts"]        = time.time()
+                    state["last_signal_ts"]        = now_ts
                     state["last_signal_conf"]      = ml_conf_S
+                    state["last_short_sent_ts"]    = now_ts  # anti-spam cooldown
                     _save_alert_state(_alert_state)
                     return
 
