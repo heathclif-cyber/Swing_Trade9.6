@@ -58,6 +58,9 @@
     --shadow-sm:  0 2px 8px rgba(0,0,0,0.06);
     --shadow-md:  0 4px 20px rgba(0,0,0,0.1);
 }
+[data-theme="light"] .header {
+    background: rgba(238,242,250,0.92);
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body {
@@ -81,10 +84,31 @@ body {
 }
 /* ── LAYOUT ─────────────────────────────────────────────────────────────── */
 .app-container { max-width: 1520px; margin: 0 auto; padding: 12px 18px; }
+/* ── FLOATING STICKY HEADER ─────────────────────────────────────────────── */
+/* Wrapper sticky — bungkus header agar tidak ikut scroll */
+.header-sticky-wrapper {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 900;
+    /* Shadow bawah untuk kedalaman saat scroll */
+    filter: drop-shadow(0 4px 20px rgba(0,0,0,0.5));
+}
+/* Kompensasi ketinggian header fixed agar konten tidak tertutup */
+body { padding-top: 72px; }
 /* ── HEADER ─────────────────────────────────────────────────────────────── */
 .header {
     display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 8px; padding: 10px 16px; margin-bottom: 12px;
+    flex-wrap: wrap; gap: 8px; padding: 10px 16px; margin-bottom: 0;
+    /* Frosted glass dengan background solid agar konten tidak tembus */
+    background: rgba(10,14,26,0.90);
+    backdrop-filter: blur(30px) saturate(1.8);
+    -webkit-backdrop-filter: blur(30px) saturate(1.8);
+    box-shadow: 0 2px 20px rgba(0,0,0,0.5), 0 1px 0 var(--glass-border);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    border-bottom: 1px solid var(--glass-border);
 }
 .header-left { display: flex; align-items: center; gap: 14px; }
 .header-logo {
@@ -699,32 +723,37 @@ tbody tr:last-child td { border-bottom: none; }
     <span id="healthCheckedAt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap;"></span>
 </div>
 
-<div class="app-container" id="dashboardContent">
-    <!-- HEADER -->
-    <header class="glass header">
-        <div class="header-left">
-            <div class="header-logo">🛡️</div>
-            <div>
-                <div class="header-title">Protocol 9.6</div>
-                <div class="header-sub">Structural Guardian · Quantitative Swing Engine</div>
-            </div>
+<!-- STICKY FLOATING HEADER WRAPPER -->
+<div class="header-sticky-wrapper" id="floatingHeader">
+<div style="max-width:1520px;margin:0 auto;padding:0 18px;">
+<header class="glass header" id="mainHeader">
+    <div class="header-left">
+        <div class="header-logo">🛡️</div>
+        <div>
+            <div class="header-title">Protocol 9.6</div>
+            <div class="header-sub">Structural Guardian · Quantitative Swing Engine</div>
         </div>
-        <div class="header-right">
-            <select id="pairSelect" class="select-styled" onchange="changePair()"><option value="">LOADING...</option></select>
-            <div class="live-badge"><span class="live-dot"></span><span id="headerTimestamp">—</span></div>
-            <button class="btn btn-icon" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
-            <button class="btn" id="btnEntry" onclick="openEntryModal()">💰 Entry</button>
-            <button class="btn btn-primary" id="btnRefresh" onclick="fetchData()">🔄 Refresh</button>
-            <button class="btn" id="btnPdf" onclick="downloadPDF()">📄 PDF</button>
-            <div style="display:flex;border:1px solid var(--glass-border);border-radius:22px;overflow:hidden;">
-                <select id="csvYears" class="select-styled" style="border:none;border-radius:0;padding:8px 12px;">
-                    <option value="0.1">250 Candle</option><option value="0.5">6 Bulan</option>
-                    <option value="1">1 Tahun</option><option value="2">2 Tahun</option><option value="3">3 Tahun</option>
-                </select>
-                <button id="btnCsv" onclick="downloadCSV()" class="btn btn-green" style="border-radius:0;border:none;padding:8px 16px;">📥 HARVEST</button>
-            </div>
+    </div>
+    <div class="header-right">
+        <select id="pairSelect" class="select-styled" onchange="changePair()"><option value="">LOADING...</option></select>
+        <div class="live-badge"><span class="live-dot"></span><span id="headerTimestamp">—</span></div>
+        <button class="btn btn-icon" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
+        <button class="btn" id="btnEntry" onclick="openEntryModal()">💰 Entry</button>
+        <button class="btn btn-primary" id="btnRefresh" onclick="fetchData()">🔄 Refresh</button>
+        <button class="btn" id="btnPdf" onclick="downloadPDF()">📄 PDF</button>
+        <div style="display:flex;border:1px solid var(--glass-border);border-radius:22px;overflow:hidden;">
+            <select id="csvYears" class="select-styled" style="border:none;border-radius:0;padding:8px 12px;">
+                <option value="0.1">250 Candle</option><option value="0.5">6 Bulan</option>
+                <option value="1">1 Tahun</option><option value="2">2 Tahun</option><option value="3">3 Tahun</option>
+            </select>
+            <button id="btnCsv" onclick="downloadCSV()" class="btn btn-green" style="border-radius:0;border:none;padding:8px 16px;">📥 HARVEST</button>
         </div>
-    </header>
+    </div>
+</header>
+</div><!-- /.inner max-width (header) -->
+</div><!-- /.header-sticky-wrapper -->
+
+<div class="app-container" id="dashboardContent" style="padding-top:10px;">
 
     <div class="section glass-card" id="sectionScanner" style="padding:20px;">
         <div class="section-header section-collapsible open" onclick="toggleSection('scannerContent', this)">
@@ -1207,10 +1236,10 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
   // ── Filter sinyal sesuai inference_config.json ──
   // confidence_threshold_entry = 0.72 (valid entry)
   // confidence_half_size       = 0.60 (weak, tampil kecil)
-  // min_hold_bars              = 192 (192 × 15min = 48 jam cooldown antar sinyal searah)
+  // min_hold_bars              = 96 (96 × 15min = 24 jam cooldown antar sinyal searah)
   const CONF_ENTRY   = 0.72;  // Full entry marker
   const CONF_WEAK    = 0.60;  // Weak signal (shown dim)
-  const HOLD_BAR_MS  = 192 * 15 * 60 * 1000;  // 48 jam dalam ms
+  const HOLD_BAR_MS  = 96 * 15 * 60 * 1000;  // 24 jam dalam ms (sinkron min_hold_bars=96 dari inference_config)
 
   const longPoints  = [];   // conf >= 0.72 valid entry
   const shortPoints = [];

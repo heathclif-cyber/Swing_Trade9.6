@@ -1731,7 +1731,7 @@ def api_confidence_history(pair: str):
     Format: [{ts, ml_signal, ml_conf, ml_size, close}, ...]
     """
     pair = pair.upper()
-    hours = int(flask_request.args.get("hours", 12))
+    hours = int(flask_request.args.get("hours", 72))
     try:
         hist = signal_monitor.get_confidence_history(pair, hours=hours)
         return jsonify({
@@ -1751,7 +1751,7 @@ def api_price_perf_v2(pair: str):
     Digunakan untuk Price Performance Monitor chart.
     """
     pair = pair.upper()
-    hours = int(flask_request.args.get("hours", 24))
+    hours = int(flask_request.args.get("hours", 72))
     leverage = float(flask_request.args.get("leverage", 1.0))
     
     try:
@@ -1800,11 +1800,14 @@ def api_price_perf_v2(pair: str):
         ts_to_idx = {c["ts"]: i for i, c in enumerate(ohlcv)}
 
         # ─── Kalkulasi TP/SL — HANYA untuk sinyal yang lolos filter ───
-        # Filter sama dengan frontend:
-        #   1. conf >= 0.72 (confidence_threshold_entry)
-        #   2. cooldown min_hold_bars = 192 candles × 15min = 172800 detik antar sinyal searah
-        CONF_THRESHOLD = 0.72
-        COOLDOWN_SEC   = 192 * 15 * 60  # 48 jam
+        # Filter sama dengan frontend dan inference_config:
+        #   1. conf >= confidence_threshold_entry dari inference_config
+        #   2. cooldown min_hold_bars dari inference_config (dalam detik)
+        from core.helpers import load_inference_config as _lic
+        _icfg       = _lic()["inference"]
+        CONF_THRESHOLD = _icfg.get("confidence_threshold_entry", 0.72)
+        _min_hold   = _icfg.get("min_hold_bars", 96)   # bar M15
+        COOLDOWN_SEC = _min_hold * 15 * 60              # detik
 
         pnl_simulation = []
         fee_total_pct  = FEE_SIDE * 2 * leverage

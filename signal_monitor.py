@@ -29,6 +29,12 @@ from core.helpers import load_inference_config
 INFERENCE_CFG  = load_inference_config()
 CONF_FULL      = INFERENCE_CFG["inference"]["confidence_full_size"]
 CONF_HALF      = INFERENCE_CFG["inference"]["confidence_half_size"]
+MIN_HOLD_BARS  = INFERENCE_CFG["inference"].get("min_hold_bars", 96)   # bar M15 — min holding window
+MAX_HOLD_BARS  = INFERENCE_CFG["inference"].get("max_hold_bars", 96)   # bar M15 — max holding window
+TIMEFRAME_MIN  = 15  # menit per bar M15
+# Hold window dalam jam (untuk tampilan Telegram)
+_MIN_HOLD_H    = round(MIN_HOLD_BARS * TIMEFRAME_MIN / 60, 1)
+_MAX_HOLD_H    = round(MAX_HOLD_BARS * TIMEFRAME_MIN / 60, 1)
 # ────────────────────────────────────────────────────────────────────────
 
 logger = logging.getLogger("SignalMonitor")
@@ -506,9 +512,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["entry_pos_side"]     = None
                 _save_alert_state(_alert_state)
 
-            # ── [12-JAM REMINDER] Kirim update status 12 jam setelah entry ──
-            ENTRY_REMINDER_HOURS = 12
-            ENTRY_REMINDER_SECS  = ENTRY_REMINDER_HOURS * 3600
+            # ── [72-JAM REMINDER] Kirim update status 72 jam setelah entry ──
+            # Disesuaikan dengan max_hold_bars dari inference_config (default 96 bar = 24 jam M15)
+            ENTRY_REMINDER_HOURS = _MAX_HOLD_H  # Sinkron dengan model max_hold_bars
+            ENTRY_REMINDER_SECS  = int(ENTRY_REMINDER_HOURS * 3600)
             entry_ts = state.get("entry_recorded_ts")
             if (is_active and entry_ts is not None
                     and not state.get("entry_expired_sent")
@@ -550,7 +557,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     _save_alert_state(_alert_state)
 
                 elif not state.get("entry_reminder_12h"):
-                    # === REMINDER 12 JAM — Sinyal masih searah (HALF/FULL) ===
+                    # === REMINDER DINAMIS — Kirim berdasarkan ENTRY_REMINDER_HOURS dari inference_config ===
                     lvl_pos    = lvl_S if pos_side == "SHORT" else lvl_L
                     signal_ok  = cur_ml_signal in ("LONG", "SHORT") and cur_ml_size in ("HALF", "FULL")
                     status_str = (
@@ -561,26 +568,28 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     tp1 = lvl_pos['tp1']
                     sl  = lvl_pos['sl_structure']
                     _send_telegram(
-                        f"⏰ <b>REMINDER 12 JAM — {symbol} ({pos_side})</b>\n"
+                        f"⏰ <b>REMINDER {ENTRY_REMINDER_HOURS:.0f} JAM — {symbol} ({pos_side})</b>\n"
                         f"{'─'*30}\n"
                         f"📅 {wib_now}\n"
                         f"⌛ Posisi dibuka <b>{elapsed_h:.1f} jam</b> lalu\n"
                         f"{'─'*30}\n"
-                        f"💲 Harga saat ini: <b>${close_price:.6f}</b>\n"
-                        f"💰 PnL Floating  : <b>{get_pnl()}</b>\n"
+                        f"💲 Harga saat ini : <b>${close_price:.6f}</b>\n"
+                        f"📌 Avg Entry      : <b>${avg_entry:.6f}</b>\n"
+                        f"💰 PnL Floating   : <b>{get_pnl()}</b>\n"
                         f"{'─'*30}\n"
                         f"{status_str}\n\n"
                         f"🎯 TP1 : ${tp1:.6f} (+{lvl_pos['dist_tp1']:.2f}%)\n"
                         f"🛡️ SL  : ${sl:.6f} | R:R {lvl_pos['rr1']:.2f}×\n\n"
                         f"📊 ML Conf: {variables.get('ml_confidence', 0)*100:.1f}% "
                         f"| Size: {cur_ml_size}\n"
+                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> "
+                        f"({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar M15)\n"
                         f"{'─'*30}\n"
                         f"<i>Cek kembali posisi dan pertimbangkan management risiko.</i>"
                     )
-                    state["entry_reminder_12h"] = True
-                    # Geser window ke 12 jam berikutnya — reset flag agar siklus 12h berulang
+                    # Geser window ke ENTRY_REMINDER_HOURS berikutnya — reset flag agar siklus berulang
                     state["entry_recorded_ts"]  = now_ts
-                    state["entry_reminder_12h"] = False  # reset agar 12 jam berikutnya bisa kirim lagi
+                    state["entry_reminder_12h"] = False  # reset agar periode berikutnya bisa kirim lagi
                     _save_alert_state(_alert_state)
 
             # ── SL WICK FAKEOUT ALERT ──
@@ -756,7 +765,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"🚀 <b>SINYAL LONG — {symbol}</b>\n"
                         f"{'─'*28}\n"
                         f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
-                        f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
+                        f"{'─'*28}\n"
+                        f"💲 <b>HARGA ENTRY SEKARANG: ${close_price:.6f}</b>\n"
+                        f"⚠️ Validasi harga sebelum entry — sinyal valid di harga ini!\n"
                         f"{'─'*28}\n"
                         f"🤖 ML: <b>{result['long'].get('ml_signal','?')}</b> | Conf: <b>{ml_conf_L*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
                         f"📊 Proba — LONG: {result['long'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['long'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['long'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
@@ -770,11 +781,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
                         f"{hold_str}"
                         f"R:R Quality: {rr_q}\n"
+                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> ({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar M15)\n"
                         + (f"📊 Trailing SL: {trailing_str}\n" if trailing_str else "")
                         + f"🔬 StochRSI: {stoch_str}\n"
                         f"{'─'*28}\n"
-                        f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
-                        f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
+                        f"⚡ Jangan entry jika harga sudah jauh dari <b>${close_price:.6f}</b>!"
                     )
                     state["last_long_signal"]      = new_signal_L
                     state["last_signal"]           = new_signal_L
@@ -805,7 +816,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"📉 <b>SINYAL SHORT — {symbol}</b>\n"
                         f"{'─'*28}\n"
                         f"⏳ <b>Waktu Sinyal:</b> {wib}\n"
-                        f"💲 <b>Harga Entry:</b> <b>${close_price:.6f}</b>\n"
+                        f"{'─'*28}\n"
+                        f"💲 <b>HARGA ENTRY SEKARANG: ${close_price:.6f}</b>\n"
+                        f"⚠️ Validasi harga sebelum entry — sinyal valid di harga ini!\n"
                         f"{'─'*28}\n"
                         f"🤖 ML: <b>{result['short'].get('ml_signal','?')}</b> | Conf: <b>{ml_conf_S*100:.1f}%</b> | Size: <b>{size_label}</b>\n"
                         f"📊 Proba — LONG: {result['short'].get('ml_proba',{}).get('LONG',0)*100:.1f}% | SHORT: {result['short'].get('ml_proba',{}).get('SHORT',0)*100:.1f}% | FLAT: {result['short'].get('ml_proba',{}).get('FLAT',0)*100:.1f}%\n"
@@ -818,9 +831,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"  TP2: ${lvl_S['tp2']:.6f} ({lvl_S['dist_tp2']:+.2f}%) | R:R {lvl_S['rr2']}×\n"
                         f"  TP3: ${lvl_S['tp3']:.6f} ({lvl_S['dist_tp3']:+.2f}%) | R:R {lvl_S['rr3']}×\n\n"
                         f"R:R Quality: {rr_q}\n"
+                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> ({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar M15)\n"
                         f"{'─'*28}\n"
-                        f"⚠️ <i>Validasi harga sebelum entry! Sinyal ini valid di <b>${close_price:.6f}</b>. "
-                        f"Jangan entry jika harga saat ini sudah jauh dari level tersebut.</i>"
+                        f"⚡ Jangan entry jika harga sudah jauh dari <b>${close_price:.6f}</b>!"
                     )
                     state["last_short_signal"]     = new_signal_S
                     state["last_signal"]           = new_signal_S
@@ -831,8 +844,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     return
 
             # ── [CONFIDENCE HISTORY] Catat confidence score tiap siklus ──
-            # Simpan hanya 12 jam (48 titik @ 15 menit). Auto-purge data lama.
-            _HIST_TTL_SECS = 12 * 3600  # 12 jam
+            # Simpan 72 jam (288 titik @ 15 menit). Auto-purge data lama.
+            _HIST_TTL_SECS = 72 * 3600  # 72 jam
             _hist_all = _alert_state.setdefault("confidence_history", {})
             _hist_sym = _hist_all.setdefault(symbol, [])
             _hist_sym.append({
@@ -841,8 +854,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "ml_conf":    variables.get("ml_confidence", 0.0),
                 "ml_size":    variables.get("ml_size",       "SKIP"),
                 "close":      close_price,
+                "min_hold_h": _MIN_HOLD_H,
+                "max_hold_h": _MAX_HOLD_H,
             })
-            # Purge data yang lebih lama dari 24 jam
+            # Purge data yang lebih lama dari 72 jam
             cutoff = now_ts - _HIST_TTL_SECS
             _hist_all[symbol] = [p for p in _hist_sym if p["ts"] >= cutoff]
             _save_alert_state(_alert_state)
@@ -915,13 +930,13 @@ def start_background_monitor() -> threading.Thread | None:
     return t
 
 
-def get_confidence_history(symbol: str, hours: int = 12) -> list:
+def get_confidence_history(symbol: str, hours: int = 72) -> list:
     """
     Kembalikan history confidence score untuk symbol tertentu.
-    Data sudah otomatis dipurge tiap siklus — hanya 12 jam terakhir.
-    hours: window waktu yang diminta (default 12, max 12).
+    Data disimpan 72 jam (288 titik @ 15 menit). Auto-purge tiap siklus.
+    hours: window waktu yang diminta (default 72, max 72).
     """
-    cutoff = time.time() - (min(hours, 12) * 3600)
+    cutoff = time.time() - (min(hours, 72) * 3600)
     with _state_lock:
         hist_all = _alert_state.get("confidence_history", {})
         hist = hist_all.get(symbol.upper(), [])

@@ -1081,7 +1081,7 @@ function renderConfidenceChart(pair, data, customWidth = 280) {
     return `
     <div style="background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:10px 12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">📊 ML Confidence — 12 Jam Terakhir</span>
+            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">📊 ML Confidence — 72 Jam Terakhir</span>
             <span style="font-size:10px;color:var(--text-3)">${n} titik data</span>
         </div>
         <svg width="${W}" height="${H}" style="overflow:visible;display:block">
