@@ -1777,9 +1777,9 @@ def api_price_perf_v2(pair: str):
         # ─── Hitung Wilder ATR(14) dari OHLCV ───
         import numpy as np
         ATR_PERIOD   = 14
-        TP_ATR_MULT  = 2.0    # dari inference_config labeling.tp_atr_mult
-        SL_ATR_MULT  = 1.0    # dari inference_config labeling.sl_atr_mult
-        MAX_HOLD     = 48     # candle M15 = 12 jam (max_holding_bars)
+        TP_ATR_MULT  = 2.0    # TP = close ± 2 × ATR_14  (sama untuk LONG & SHORT)
+        SL_ATR_MULT  = 1.0    # SL = close ∓ 1 × ATR_14  (sama untuk LONG & SHORT)
+        MAX_HOLD     = 96     # candle M15 = 24 jam (sinkron min_hold_bars dari inference_config)
         FEE_SIDE     = 0.0004 # 0.04% per side
 
         atr_vals = [None] * len(ohlcv)
@@ -1860,6 +1860,9 @@ def api_price_perf_v2(pair: str):
                 atr = entry_price * 0.005  # 0.5% fallback
 
             is_long  = (sig == "LONG")
+            # Formula simetris LONG & SHORT — menggunakan ATR_14 yang sama:
+            # LONG : TP = close + 2×ATR  |  SL = close - 1×ATR
+            # SHORT: TP = close - 2×ATR  |  SL = close + 1×ATR
             tp_price = entry_price + TP_ATR_MULT * atr if is_long else entry_price - TP_ATR_MULT * atr
             sl_price = entry_price - SL_ATR_MULT * atr if is_long else entry_price + SL_ATR_MULT * atr
 
