@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 import warnings
 import numpy as np
 import pandas as pd
@@ -12,29 +13,32 @@ warnings.filterwarnings("ignore")
 
 logger = logging.getLogger("ml_signal")
 
-# ── Constants ──
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# ── Pastikan project root di sys.path ──
+_PROJECT_ROOT = str(Path(__file__).parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from core.helpers import load_inference_config
 
 INFERENCE_CFG = load_inference_config()
 ML_DIR   = Path(__file__).parent.parent / "models"
-SEQ_LEN  = INFERENCE_CFG["inference"]["seq_len"]
+SEQ_LEN  = INFERENCE_CFG["inference"]["seq_len"]   # 32
 
 SYMBOL_MAP = {
     'SOLUSDT': 0, 'ETHUSDT': 1, 'BNBUSDT': 2, 'XRPUSDT': 3, 'DOGEUSDT': 4,
     'TONUSDT': 5, 'ADAUSDT': 6, 'TRXUSDT': 7, 'SHIBUSDT': 8, 'AVAXUSDT': 9,
     'LINKUSDT': 10, 'DOTUSDT': 11, 'SUIUSDT': 12, 'POLUSDT': 13, 'NEARUSDT': 14,
     'PEPEUSDT': 15, 'TAOUSDT': 16, 'APTOSUSDT': 17, 'ARBUSDT': 18, 'WLFIUSDT': 19,
+    '1000SHIBUSDT': 8, '1000PEPEUSDT': 15,
 }
 
 LABEL_MAP_INV = INFERENCE_CFG["inference"]["label_map_inv"]
 LABEL_MAP = {int(k): v for k, v in LABEL_MAP_INV.items()}
 
 
-# ── LSTM Architecture (hardcoded, harus identik dengan training) ──
+# ── LSTM Architecture (harus identik dengan training v3) ──
 class TradingLSTM(nn.Module):
-    def __init__(self, n_features=58, hidden_size=128, num_layers=2, dropout=0.3):
+    def __init__(self, n_features=71, hidden_size=128, num_layers=2, dropout=0.3):
         super().__init__()
         self.lstm = nn.LSTM(
             input_size    = n_features,
@@ -60,7 +64,7 @@ class TradingLSTM(nn.Module):
 class MLSignalEngine:
     """
     Load semua model sekali saat startup, reuse untuk setiap prediksi.
-    Ganti model aktif = edit model_registry.json, panggil reload().
+    v3: n_features=71, seq_len=32, tambah calibrator.pkl.
     """
 
     def __init__(self):
@@ -71,30 +75,49 @@ class MLSignalEngine:
         with open(registry_path) as f:
             registry = json.load(f)
 
-        active     = registry.get('active_model', registry.get('active'))
-        cfg        = registry['models'][active]
-        self.cfg   = cfg
-        model_type = cfg['type']
+        active   = registry.get('active_model', registry.get('active'))
+        cfg      = registry['models'][active]
+        self.cfg = cfg
 
-        # overrides from inference config
+        # File paths dari inference_config (source of truth)
         mf = INFERENCE_CFG.get("model_files", {})
-        lgbm_file = mf.get("lgbm", cfg.get('lgbm', 'lgbm_baseline.pkl'))
-        scaler_file = mf.get("scaler", cfg.get('scaler', 'lstm_scaler.pkl'))
-        meta_file = mf.get("meta", cfg.get('meta', 'ensemble_meta.pkl'))
-        lstm_file = mf.get("lstm", cfg.get('lstm', 'lstm_best.pt'))
+        lgbm_file       = mf.get("lgbm",       cfg.get('lgbm',       'lgbm_baseline.pkl'))
+        scaler_file     = mf.get("scaler",      cfg.get('scaler',     'lstm_scaler.pkl'))
+        meta_file       = mf.get("meta",        cfg.get('meta',       'ensemble_meta.pkl'))
+        lstm_file       = mf.get("lstm",        cfg.get('lstm',       'lstm_best.pt'))
+        calibrator_file = mf.get("calibrator",  cfg.get('calibrator', 'calibrator.pkl'))
 
         self.lgbm_model   = joblib.load(ML_DIR / lgbm_file)
         self.lstm_scaler  = joblib.load(ML_DIR / scaler_file)
         self.meta_learner = joblib.load(ML_DIR / meta_file)
-        
-        n_feats = INFERENCE_CFG.get("model_architecture", {}).get("n_features", cfg.get('n_features', 58))
-        self.lstm_model   = self._load_lstm(ML_DIR / lstm_file, n_feats)
-        self.device       = torch.device('cpu')
 
-        print(f"[MLSignalEngine] Active: {active} | type={model_type} | F1={cfg.get('f1_macro', '?')}")
+        # [v3] Calibrator (isotonic)
+        cal_path = ML_DIR / calibrator_file
+        if cal_path.exists():
+            self.calibrator = joblib.load(cal_path)
+            logger.info(f"[MLSignalEngine] Calibrator loaded: {calibrator_file}")
+        else:
+            self.calibrator = None
+            logger.warning("[MLSignalEngine] calibrator.pkl tidak ditemukan — calibration dilewati")
+
+        # n_features dari inference_config (71 untuk v3)
+        n_feats = INFERENCE_CFG.get("model_architecture", {}).get("n_features", 71)
+        self.lstm_model = self._load_lstm(ML_DIR / lstm_file, n_feats)
+        self.device     = torch.device('cpu')
+
+        logger.info(
+            f"[MLSignalEngine] Active: {active} | n_features={n_feats} "
+            f"| seq_len={SEQ_LEN} | F1={cfg.get('f1_macro', '?')}"
+        )
 
     def _load_lstm(self, path: Path, n_features: int) -> TradingLSTM:
-        model = TradingLSTM(n_features=n_features)
+        arch = INFERENCE_CFG.get("model_architecture", {})
+        model = TradingLSTM(
+            n_features  = n_features,
+            hidden_size = arch.get("lstm_hidden",  128),
+            num_layers  = arch.get("lstm_layers",  2),
+            dropout     = arch.get("lstm_dropout", 0.3),
+        )
         state = torch.load(path, map_location='cpu', weights_only=True)
         model.load_state_dict(state)
         model.eval()
@@ -108,14 +131,14 @@ class MLSignalEngine:
     def predict(
         self,
         symbol: str,
-        df_m15: pd.DataFrame,
+        df_m15: pd.DataFrame,      # nama parameter dipertahankan untuk kompatibilitas caller
         funding_rate: float = None,
         btc_dominance: float = None,
         fear_greed: float = None,
     ) -> dict:
         """
-        Input : df_m15 — DataFrame M15 minimal 300 bar
-                         kolom wajib: open/high/low/close/volume/taker_buy_volume
+        Input : df_m15 — DataFrame H1 minimal 300 bar
+                         (nama parameter lama dipertahankan agar caller tidak perlu diubah)
         Output: dict {
             'signal':     'LONG' / 'SHORT' / 'FLAT',
             'confidence': float (0-1),
@@ -136,70 +159,75 @@ class MLSignalEngine:
                 'proba': {}, 'model_type': 'error', 'symbol': symbol,
             }
 
-    def _predict_ensemble(self, symbol, df_m15, funding_rate, btc_dominance, fear_greed):
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent))
-        from ml_feature_calculator import calculate_features_realtime
+    def _predict_ensemble(self, symbol, df_h1, funding_rate, btc_dominance, fear_greed):
+        from ml.ml_feature_calculator import calculate_features_realtime
 
-        # 1. Feature engineering
+        # 1. Feature engineering (71 fitur H1)
         features_df = calculate_features_realtime(
-            symbol, df_m15, funding_rate, btc_dominance, fear_greed
+            symbol, df_h1, funding_rate, btc_dominance, fear_greed
         )
 
         # 2. Handle NaN
         features_df = features_df.ffill().fillna(0)
 
-        # 3. Tambah symbol encoding
-        features_df['symbol'] = SYMBOL_MAP.get(symbol, 0)
+        # 3. Symbol encoding
+        features_df['symbol'] = SYMBOL_MAP.get(symbol.upper(), 0)
 
         # 4. LightGBM — 1 row terakhir
-        # FIX #1: Hapus forced OB_price injection.
-        # Gunakan feature_name_ dari model .pkl sebagai source of truth.
-        X_lgbm = features_df.iloc[[-1]].copy()
+        X_lgbm         = features_df.iloc[[-1]].copy()
         lgbm_feat_cols = self.lgbm_model.feature_name_
-        # Tambah kolom yang missing dengan 0 (jika ada mismatch minor)
         for col in lgbm_feat_cols:
             if col not in X_lgbm.columns:
-                logger.warning(f"[{symbol}] Kolom LGBM '{col}' tidak ada di features_df — diisi 0.0")
+                logger.warning(f"[{symbol}] Kolom LGBM '{col}' tidak ada — diisi 0.0")
                 X_lgbm[col] = 0.0
-        lgbm_proba = self.lgbm_model.predict_proba(
-            X_lgbm[lgbm_feat_cols]
-        )  # (1, 3)
+        lgbm_proba = self.lgbm_model.predict_proba(X_lgbm[lgbm_feat_cols])  # (1, 3)
 
         # 5. LSTM — seq_len row terakhir
-        seq_len    = self.cfg.get('seq_len', SEQ_LEN)
-        n_features = self.cfg.get('n_features', 58)
+        n_features = INFERENCE_CFG.get("model_architecture", {}).get("n_features", 71)
+        lstm_cols  = features_df.columns.tolist()[:n_features]
+        X_seq      = features_df[lstm_cols].iloc[-SEQ_LEN:].values.astype(np.float32)
 
-        # Ambil kolom fitur tanpa OB_price (58 kolom)
-        lstm_cols = [c for c in features_df.columns if c != 'OB_price'][:n_features]
-        X_seq     = features_df[lstm_cols].iloc[-seq_len:].values.astype(np.float32)
-
-        if len(X_seq) < seq_len:
-            logger.warning(f"[{symbol}] Tidak cukup bar untuk LSTM ({len(X_seq)}/{seq_len}) — menggunakan zero-padding")
-            # FIX: Zero-padding lebih aman daripada repeat-first-row
-            # agar fitur lag/momentum tidak terdistorsi
-            pad = np.zeros((seq_len - len(X_seq), X_seq.shape[1]), dtype=np.float32)
+        if len(X_seq) < SEQ_LEN:
+            logger.warning(
+                f"[{symbol}] Bar tidak cukup untuk LSTM ({len(X_seq)}/{SEQ_LEN}) — zero-padding"
+            )
+            pad   = np.zeros((SEQ_LEN - len(X_seq), X_seq.shape[1]), dtype=np.float32)
             X_seq = np.vstack([pad, X_seq])
 
-        X_seq_scaled = self.lstm_scaler.transform(X_seq)           # (seq_len, n_features)
-        seq_tensor   = torch.FloatTensor(X_seq_scaled).unsqueeze(0) # (1, seq_len, n_features)
+        X_seq_scaled = self.lstm_scaler.transform(X_seq)             # (seq_len, n_features)
+        seq_tensor   = torch.FloatTensor(X_seq_scaled).unsqueeze(0)  # (1, seq_len, n_features)
 
         with torch.no_grad():
             logits     = self.lstm_model(seq_tensor)
-            lstm_proba = torch.softmax(logits, dim=1).numpy()       # (1, 3)
+            lstm_proba = torch.softmax(logits, dim=1).numpy()        # (1, 3)
 
         # 6. Ensemble meta-learner
-        meta_input   = np.hstack([lgbm_proba, lstm_proba])          # (1, 6)
-        signal_int   = self.meta_learner.predict(meta_input)[0]
-        signal_proba = self.meta_learner.predict_proba(meta_input)[0]  # (3,)
+        meta_input = np.hstack([lgbm_proba, lstm_proba])             # (1, 6)
+        meta_proba = self.meta_learner.predict_proba(meta_input)     # (1, 3)
 
+        # 7. [v3] Calibrator (isotonic)
+        if self.calibrator is not None:
+            try:
+                cal_proba = self.calibrator.transform(meta_proba)    # (1, 3)
+                # Normalisasi agar sum = 1
+                row_sum   = cal_proba.sum(axis=1, keepdims=True)
+                cal_proba = cal_proba / np.where(row_sum > 0, row_sum, 1)
+                signal_proba = cal_proba[0]
+            except Exception as e:
+                logger.warning(f"[{symbol}] Calibrator.transform gagal ({e}) — pakai meta_proba")
+                signal_proba = meta_proba[0]
+        else:
+            signal_proba = meta_proba[0]
+
+        # 8. Signal = argmax probabilitas terkalibrasi
+        signal_int = int(np.argmax(signal_proba))
         signal     = LABEL_MAP[signal_int]
         confidence = float(signal_proba[signal_int])
 
-        # 7. Position size berdasarkan confidence
-        conf_half = INFERENCE_CFG["inference"]["confidence_half_size"]
-        conf_full = INFERENCE_CFG["inference"]["confidence_full_size"]
-        
+        # 9. Position size berdasarkan confidence
+        conf_half = INFERENCE_CFG["inference"]["confidence_half_size"]   # 0.60
+        conf_full = INFERENCE_CFG["inference"]["confidence_full_size"]   # 0.75
+
         if signal == 'FLAT' or confidence < conf_half:
             size = 'SKIP'
         elif confidence >= conf_full:

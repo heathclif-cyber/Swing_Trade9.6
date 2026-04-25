@@ -1,6 +1,6 @@
 """
 Protocol 9.6 — Signal Monitor
-Background thread yang berjalan setiap 15 menit untuk memantau sinyal buy/sell
+Background thread yang berjalan setiap 1 jam untuk memantau sinyal buy/sell
 dan mengirimkan notifikasi Telegram secara otomatis.
 
 [REFACTOR] Single Source of Truth:
@@ -29,9 +29,9 @@ from core.helpers import load_inference_config
 INFERENCE_CFG  = load_inference_config()
 CONF_FULL      = INFERENCE_CFG["inference"]["confidence_full_size"]
 CONF_HALF      = INFERENCE_CFG["inference"]["confidence_half_size"]
-MIN_HOLD_BARS  = INFERENCE_CFG["inference"].get("min_hold_bars", 96)   # bar M15 — min holding window
-MAX_HOLD_BARS  = INFERENCE_CFG["inference"].get("max_hold_bars", 96)   # bar M15 — max holding window
-TIMEFRAME_MIN  = 240  # menit per bar 4H
+MIN_HOLD_BARS  = INFERENCE_CFG["inference"].get("min_hold_bars", 96)   # bar H1 — min holding window
+MAX_HOLD_BARS  = INFERENCE_CFG["inference"].get("max_hold_bars", 96)   # bar H1 — max holding window
+TIMEFRAME_MIN  = 60  # menit per bar H1
 # Hold window dalam jam (untuk tampilan Telegram)
 _MIN_HOLD_H    = round(MIN_HOLD_BARS * TIMEFRAME_MIN / 60, 1)
 _MAX_HOLD_H    = round(MAX_HOLD_BARS * TIMEFRAME_MIN / 60, 1)
@@ -42,7 +42,7 @@ logger = logging.getLogger("SignalMonitor")
 # ============================================================
 # CONSTANTS — tidak bergantung env vars
 # ============================================================
-POLL_INTERVAL_SECONDS = 15 * 60   # 15 menit
+POLL_INTERVAL_SECONDS = 60 * 60   # 1 jam (H1)
 # CATATAN: Threshold FULL/HALF kini bersifat adaptif (dari P7 result['variables'])
 # Nilai di bawah hanya sebagai fallback jika variabel adaptif tidak tersedia.
 # App-level fallback for scoring engine. ML confidence thresholds → INFERENCE_CFG
@@ -50,10 +50,10 @@ SIGNAL_THRESHOLD_FULL = 48        # ADJ score default FULL SIZE ENTRY (bull mode
 SIGNAL_THRESHOLD_HALF = 33        # ADJ score default HALF SIZE ENTRY (bull mode)
 
 MONITOR_PAIRS = [
-    'SOLUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT',
-    'TONUSDT', 'ADAUSDT', 'TRXUSDT', 'SHIBUSDT', 'AVAXUSDT',
-    'LINKUSDT', 'DOTUSDT', 'SUIUSDT', 'POLUSDT', 'NEARUSDT',
-    'PEPEUSDT', 'TAOUSDT', 'APTOSUSDT', 'ARBUSDT', 'WLFIUSDT'
+    'SOLUSDT',    'ETHUSDT',     'BNBUSDT',   'XRPUSDT',   'DOGEUSDT',
+    'TONUSDT',    'ADAUSDT',     'TRXUSDT',   '1000SHIBUSDT', 'AVAXUSDT',
+    'LINKUSDT',   'DOTUSDT',     'SUIUSDT',   'POLUSDT',    'NEARUSDT',
+    '1000PEPEUSDT', 'TAOUSDT',   'ARBUSDT',
 ]
 
 # ── Thread safety ──────────────────────────────────────────
@@ -125,17 +125,9 @@ def _get_pg_conn():
 
 
 def _load_trade_entries() -> dict:
-    """Load trade entries dari PostgreSQL.
-
-    STRICT MODE (DATABASE_URL aktif): baca HANYA dari PostgreSQL.
-    Jika koneksi atau query gagal, log DATABASE ERROR dan return {}.
-    JANGAN fallback ke JSON agar kondisi database rusak langsung terdeteksi.
-
-    DEVELOPMENT (tanpa DATABASE_URL): fallback ke file JSON lokal.
-    """
+    """Load trade entries dari PostgreSQL."""
     db = _db_url()
     if db:
-        # ── STRICT: PostgreSQL only ──
         conn = _get_pg_conn()
         if conn is None:
             logger.error(
@@ -157,7 +149,6 @@ def _load_trade_entries() -> dict:
             try: conn.close()
             except: pass
             return {}
-    # ── DEVELOPMENT: fallback ke file JSON lokal ──
     path = os.environ.get(
         "TRADE_DATA_PATH",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "trade_entries.json")
@@ -171,17 +162,9 @@ def _load_trade_entries() -> dict:
     return {}
 
 def _load_alert_state() -> dict:
-    """Load alert state dari PostgreSQL.
-
-    STRICT MODE (DATABASE_URL aktif): baca HANYA dari PostgreSQL.
-    Jika gagal, log DATABASE ERROR dan return {}.
-    JANGAN fallback ke JSON.
-
-    DEVELOPMENT (tanpa DATABASE_URL): return {} (state ephemeral di memory).
-    """
+    """Load alert state dari PostgreSQL."""
     db = _db_url()
     if db:
-        # ── STRICT: PostgreSQL only ──
         conn = _get_pg_conn()
         if conn is None:
             logger.error(
@@ -205,16 +188,9 @@ def _load_alert_state() -> dict:
     return {}
 
 def _save_alert_state(state: dict) -> None:
-    """Simpan _alert_state ke PostgreSQL.
-
-    STRICT MODE (DATABASE_URL aktif): tulis HANYA ke PostgreSQL.
-    Jika gagal, log DATABASE ERROR. JANGAN fallback ke JSON.
-
-    DEVELOPMENT (tanpa DATABASE_URL): fallback ke file JSON lokal.
-    """
+    """Simpan _alert_state ke PostgreSQL."""
     db = _db_url()
     if db:
-        # ── STRICT: PostgreSQL only ──
         conn = _get_pg_conn()
         if conn is None:
             logger.error(
@@ -238,7 +214,6 @@ def _save_alert_state(state: dict) -> None:
             try: conn.close()
             except: pass
             return
-    # ── DEVELOPMENT: fallback ke file JSON lokal ──
     path = os.environ.get(
         "ALERT_STATE_PATH",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "alert_state.json")
@@ -253,7 +228,7 @@ def _save_alert_state(state: dict) -> None:
 # ============================================================
 # SIGNAL EVALUATION
 # ============================================================
-def _normalize_m15_columns(df):
+def _normalize_h1_columns(df):
     import pandas as pd
     col_map = {
         'Open':           'open',
@@ -267,15 +242,12 @@ def _normalize_m15_columns(df):
     }
     df = df.copy()
     df.columns = [col_map.get(c, c.lower()) for c in df.columns]
-    # Hapus kolom duplikat — pertahankan yang pertama
     df = df.loc[:, ~df.columns.duplicated(keep='first')]
-    # Set DatetimeIndex dari open_time (Unix ms → UTC datetime)
     if 'open_time' in df.columns:
         df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True)
         df = df.set_index('open_time')
         df.index.name = 'timestamp'
     elif not isinstance(df.index, pd.DatetimeIndex):
-        # Fallback: coba konversi index yang ada
         try:
             df.index = pd.to_datetime(df.index, unit='ms', utc=True)
             df.index.name = 'timestamp'
@@ -286,44 +258,19 @@ def _normalize_m15_columns(df):
 # ============================================================
 # SIGNAL STABILITY — Anti-flip & Confirmation Buffer
 # ============================================================
-# Threshold confidence minimum untuk mengirim sinyal baru / flip.
-# Sinyal < threshold → SKIP, tidak dikirim ke Telegram.
 SIGNAL_CONF_MIN      = INFERENCE_CFG["inference"]["confidence_half_size"]  # was: 0.55
 SIGNAL_FLIP_CONF_MIN = 0.65   # 65% — minimum untuk flip arah (lebih ketat)
-
-# Jumlah bar M15 berurutan yang harus konsisten sebelum flip diterima.
-# Minimal 2 bar = 30 menit lock-in sebelum sinyal flip diterima.
 FLIP_CONFIRM_BARS    = 2
-
-# Cooldown setelah flip expired — minimal 1 jam sebelum entry baru
 FLIP_COOLDOWN_SECS   = 3600
-
-# ─── ANTI-SPAM: Cooldown sinyal arah SAMA ────────────────────────────────
-# Setelah sinyal LONG atau SHORT dikirim, tunggu X detik sebelum boleh
-# kirim sinyal arah YANG SAMA lagi — mencegah spam tiap 15 menit.
-# Default: 4 jam (model M15 yang kuat tidak akan flip terus dalam 4 jam).
 SAME_DIRECTION_COOLDOWN_SECS = int(os.environ.get("SIGNAL_COOLDOWN_HOURS", "4")) * 3600
 
 
 def _check_signal_stability(state: dict, new_direction: str, confidence: float, now_ts: float) -> str:
-    """
-    Gate sebelum sinyal dikirim ke Telegram.
-    Mengembalikan:
-      'SEND'    — sinyal stabil, boleh dikirim
-      'SKIP'    — confidence terlalu rendah, abaikan
-      'HOLD'    — belum cukup bar konfirmasi, tahan dulu
-      'COOLDOWN'— baru saja flip, tunggu cooldown
+    last_direction = state.get("last_signal_direction")
 
-    State keys yang digunakan/diubah:
-      pending_direction, pending_conf_count, last_flip_ts
-    """
-    last_direction = state.get("last_signal_direction")  # LONG / SHORT / None
-
-    # --- Case 1: Tidak ada perubahan arah → cek same-direction cooldown dulu
     if last_direction == new_direction:
         state["pending_direction"]  = None
         state["pending_conf_count"] = 0
-        # Cek apakah sudah melewati cooldown untuk arah yang sama
         last_sent_ts = state.get(f"last_{new_direction.lower()}_sent_ts")
         if last_sent_ts and (now_ts - last_sent_ts) < SAME_DIRECTION_COOLDOWN_SECS:
             remaining_m = int((SAME_DIRECTION_COOLDOWN_SECS - (now_ts - last_sent_ts)) / 60)
@@ -334,10 +281,7 @@ def _check_signal_stability(state: dict, new_direction: str, confidence: float, 
             return "COOLDOWN"
         return "SEND"
 
-    # --- Case 2: Arah baru (flip atau entry pertama)
     is_flip = last_direction is not None
-
-    # Cek confidence minimum
     min_conf = SIGNAL_FLIP_CONF_MIN if is_flip else SIGNAL_CONF_MIN
     if confidence < min_conf:
         logger.info(
@@ -348,18 +292,15 @@ def _check_signal_stability(state: dict, new_direction: str, confidence: float, 
         state["pending_conf_count"] = 0
         return "SKIP"
 
-    # Cek cooldown setelah flip
     last_flip_ts = state.get("last_flip_ts")
     if is_flip and last_flip_ts and (now_ts - last_flip_ts) < FLIP_COOLDOWN_SECS:
         remaining = int((FLIP_COOLDOWN_SECS - (now_ts - last_flip_ts)) / 60)
         logger.info(f"  [StabilityGate] COOLDOWN — {remaining} mnt tersisa setelah flip terakhir")
         return "COOLDOWN"
 
-    # Cek confirmation buffer (hanya untuk flip)
     if is_flip and FLIP_CONFIRM_BARS > 1:
         pending = state.get("pending_direction")
         if pending != new_direction:
-            # Reset counter — arah baru mulai akumulasi
             state["pending_direction"]  = new_direction
             state["pending_conf_count"] = 1
             logger.info(
@@ -376,7 +317,6 @@ def _check_signal_stability(state: dict, new_direction: str, confidence: float, 
                     f"bar {count}/{FLIP_CONFIRM_BARS}"
                 )
                 return "HOLD"
-            # Cukup bar konfirmasi → izinkan SEND
             logger.info(
                 f"  [StabilityGate] SEND — flip {last_direction}→{new_direction} "
                 f"CONFIRMED setelah {count} bar, conf {confidence*100:.1f}%"
@@ -386,7 +326,6 @@ def _check_signal_stability(state: dict, new_direction: str, confidence: float, 
             state["last_flip_ts"]       = now_ts
             return "SEND"
 
-    # Entry pertama (no flip) → langsung SEND
     return "SEND"
 
 
@@ -395,22 +334,21 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         import algo_scoring  # lazy import
 
         # ── [SSOT] Semua data dari satu sumber ──────────────
-        df, data_meta = enrichment.get_fully_enriched_data(symbol, interval="4h", limit=250)
+        df, data_meta = enrichment.get_fully_enriched_data(symbol, interval="1h", limit=500)
         if df is None or df.empty or len(df) < 22:
             logger.warning(f"[{symbol}] Insufficient data")
             return
 
-        # Fetch M15 untuk ML engine
+        # Fetch H1 untuk ML engine
         import data_engine
         try:
-            df_m15 = data_engine.get_klines_rest(symbol, '4h', limit=300)
+            df_m15 = data_engine.get_klines_rest(symbol, '1h', limit=500)
             if df_m15 is not None:
-                df_m15 = _normalize_m15_columns(df_m15)
+                df_m15 = _normalize_h1_columns(df_m15)
         except Exception as e:
-            logger.warning(f"Failed to fetch M15 for {symbol}: {e}")
+            logger.warning(f"Failed to fetch H1 for {symbol}: {e}")
             df_m15 = None
 
-        # ── [SYSTEM HEALTH] Data tidak lengkap → catat di state, BUKAN Telegram ──
         with _state_lock:
             sys_errors = _alert_state.setdefault("system_errors", {})
             if data_meta.get("data_incomplete"):
@@ -422,15 +360,14 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 }
                 _save_alert_state(_alert_state)
                 logger.warning(f"[{symbol}] Data incomplete: {missing} — dicatat ke system_errors, skip evaluasi ML")
-                return  # Skip evaluasi jika data tidak lengkap
+                return 
             else:
-                # Clear error jika data sudah kembali normal
                 if symbol in sys_errors:
                     del sys_errors[symbol]
                     _save_alert_state(_alert_state)
 
         coin_data     = trade_entries.get(symbol, {})
-        pos_side      = str(coin_data.get("position_side", "LONG")).upper()  # ✅ FIX: key adalah "position_side"
+        pos_side      = str(coin_data.get("position_side", "LONG")).upper()
         entry_list    = coin_data.get("entries", [])
         sales_list    = coin_data.get("sales", [])
         total_cost    = sum(e["price"] * e["qty"] for e in entry_list)
@@ -463,10 +400,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
         trailing  = result.get("trailing_sl", {})
         variables = result.get("variables", {})
 
-        # [P7] Adaptive thresholds dari scoring engine
         thr_full   = variables.get("thr_full",   SIGNAL_THRESHOLD_FULL)
         thr_half   = variables.get("thr_half",   SIGNAL_THRESHOLD_HALF)
-        thr_full_S = variables.get("thr_full_S", SIGNAL_THRESHOLD_FULL)   # Threshold SHORT (bisa berbeda)
+        thr_full_S = variables.get("thr_full_S", SIGNAL_THRESHOLD_FULL)
         thr_half_S = variables.get("thr_half_S", SIGNAL_THRESHOLD_HALF)
         macro_trend      = variables.get("macro_trend", "UNKNOWN")
         threshold_regime = variables.get("threshold_regime", "UNKNOWN")
@@ -481,10 +417,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "last_long_signal":    None,
                 "last_short_signal":   None,
                 "last_signal":         None,
-                "last_signal_direction": None,  # [StabilityGate] arah terakhir yang DIKIRIM
-                "pending_direction":   None,    # [StabilityGate] arah yang sedang diakumulasi
-                "pending_conf_count":  0,       # [StabilityGate] jumlah bar konfirmasi
-                "last_flip_ts":        None,    # [StabilityGate] ts terakhir flip berhasil
+                "last_signal_direction": None,
+                "pending_direction":   None,
+                "pending_conf_count":  0,
+                "last_flip_ts":        None,
                 "exit_alerted":        False,
                 "tp1_alerted":         False,
                 "tp2_alerted":         False,
@@ -495,17 +431,13 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "entry_pos_side":      None,
             })
 
-            # Helper untuk PnL dinamis
             def get_pnl():
                 if not avg_entry: return "N/A"
                 if pos_side == "SHORT":
                     return f"{((avg_entry/close_price)-1)*100:+.2f}%"
                 return f"{((close_price/avg_entry)-1)*100:+.2f}%"
 
-            # ── [ENTRY TRACKER] Deteksi posisi baru / reset saat posisi tutup ──
-            #  Saat user mencatat entry (is_active baru menjadi True), catat timestamp.
             if is_active and state.get("entry_recorded_ts") is None:
-                # Gunakan tanggal entry terbaru dari data aktual user (lebih akurat dari now_ts)
                 _last_entry_date = entry_list[-1].get("date") if entry_list else None
                 try:
                     from datetime import datetime as _dt
@@ -520,27 +452,22 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 _save_alert_state(_alert_state)
                 logger.info(f"[{symbol}] Entry dicatat — pos_side={pos_side} entry_ts={_entry_ts}")
             elif not is_active and state.get("entry_recorded_ts") is not None:
-                # Posisi ditutup — reset tracker
                 state["entry_recorded_ts"]  = None
                 state["entry_reminder_12h"] = False
                 state["entry_expired_sent"] = False
                 state["entry_pos_side"]     = None
                 _save_alert_state(_alert_state)
 
-            # ── [72-JAM REMINDER] Kirim update status 72 jam setelah entry ──
-            # Disesuaikan dengan max_hold_bars dari inference_config (default 96 bar = 24 jam M15)
-            ENTRY_REMINDER_HOURS = _MAX_HOLD_H  # Sinkron dengan model max_hold_bars
+            ENTRY_REMINDER_HOURS = _MAX_HOLD_H
             ENTRY_REMINDER_SECS  = int(ENTRY_REMINDER_HOURS * 3600)
             entry_ts = state.get("entry_recorded_ts")
             if (is_active and entry_ts is not None
                     and not state.get("entry_expired_sent")
                     and (now_ts - entry_ts) >= ENTRY_REMINDER_SECS):
 
-                # Tentukan current ML signal berdasarkan posisi user
                 cur_ml_signal = variables.get("ml_signal", "FLAT")
                 cur_ml_size   = variables.get("ml_size",   "SKIP")
 
-                # Deteksi apakah sinyal berbalik arah dari posisi user
                 recorded_side  = state.get("entry_pos_side", pos_side)
                 signal_reversed = (
                     (recorded_side == "LONG"  and cur_ml_signal == "SHORT") or
@@ -551,7 +478,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 wib_now   = datetime.now(timezone(timedelta(hours=8))).strftime("%d %b %Y %H:%M WITA")
 
                 if signal_reversed:
-                    # === SIGNAL EXPIRED ===
                     lvl_pos = lvl_S if recorded_side == "SHORT" else lvl_L
                     _send_telegram(
                         f"🔄 <b>SIGNAL EXPIRED — {symbol}</b>\n"
@@ -572,7 +498,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     _save_alert_state(_alert_state)
 
                 elif not state.get("entry_reminder_12h"):
-                    # === REMINDER DINAMIS — Kirim berdasarkan ENTRY_REMINDER_HOURS dari inference_config ===
                     lvl_pos    = lvl_S if pos_side == "SHORT" else lvl_L
                     signal_ok  = cur_ml_signal in ("LONG", "SHORT") and cur_ml_size in ("HALF", "FULL")
                     status_str = (
@@ -598,16 +523,14 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"📊 ML Conf: {variables.get('ml_confidence', 0)*100:.1f}% "
                         f"| Size: {cur_ml_size}\n"
                         f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> "
-                        f"({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar M15)\n"
+                        f"({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar H1)\n"
                         f"{'─'*30}\n"
                         f"<i>Cek kembali posisi dan pertimbangkan management risiko.</i>"
                     )
-                    # Geser window ke ENTRY_REMINDER_HOURS berikutnya — reset flag agar siklus berulang
                     state["entry_recorded_ts"]  = now_ts
-                    state["entry_reminder_12h"] = False  # reset agar periode berikutnya bisa kirim lagi
+                    state["entry_reminder_12h"] = False
                     _save_alert_state(_alert_state)
 
-            # ── SL WICK FAKEOUT ALERT ──
             if is_active and sl_wick.get("sl_touched_wick") and not state.get("wick_alerted"):
                 verdict = sl_wick.get("verdict", "N/A")
                 action  = sl_wick.get("action", "")
@@ -645,7 +568,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["wick_alerted"] = False
                 _save_alert_state(_alert_state)
 
-            # ── TRACKING TAKE PROFIT 1, 2, 3 ─────────────────
             if is_active:
                 high_price = float(df.iloc[-1]["High"])
                 low_price  = float(df.iloc[-1]["Low"])
@@ -704,12 +626,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["tp1_alerted"], state["tp2_alerted"], state["tp3_alerted"] = False, False, False
                 _save_alert_state(_alert_state)
 
-            # ── EXIT SIGNALS ───────────────────────────────
             exit_signals = exit_r.get("signals", [])
             hard_exits   = [e for e in exit_signals if e[0] == "❌"]
 
             if is_active and hard_exits and not state["exit_alerted"]:
-                pnl_str   = get_pnl()  # Gunakan fungsi PnL dinamis SSOT
+                pnl_str   = get_pnl()
                 exit_lines = "\n".join(
                     f"  {icon} {name}: {val} ({cond})"
                     for icon, name, val, cond in exit_signals[:5]
@@ -730,9 +651,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 state["exit_alerted"] = False
                 _save_alert_state(_alert_state)
 
-            # ── TRAILING SL — Update state untuk UI (tanpa Telegram) ──
-            # Trailing SL info tersedia di UI via /api/system_health & /api/data
-            # Telegram hanya untuk TP hits (sudah di atas) dan SL hit (di bawah)
             trailing_L = trailing.get("long", {})
             trailing_S = trailing.get("short", {})
             active_tsl = None
@@ -749,7 +667,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             else:
                 state["last_trailing_stage"] = "NONE"
 
-            # ── LONG SIGNAL ────────────────────────────────
             new_signal_L = None
             ml_size_L    = result['long'].get('ml_size', 'SKIP')
             ml_conf_L    = result['long'].get('ml_confidence', 0.0)
@@ -796,7 +713,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"  TP3: ${lvl_L['tp3']:.6f} (+{lvl_L['dist_tp3']:.2f}%) | R:R {lvl_L['rr3']}×\n"
                         f"{hold_str}"
                         f"R:R Quality: {rr_q}\n"
-                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> ({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar M15)\n"
+                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> ({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar H1)\n"
                         + (f"📊 Trailing SL: {trailing_str}\n" if trailing_str else "")
                         + f"🔬 StochRSI: {stoch_str}\n"
                         f"{'─'*28}\n"
@@ -807,11 +724,10 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     state["last_signal_direction"] = "LONG"
                     state["last_signal_ts"]        = now_ts
                     state["last_signal_conf"]      = ml_conf_L
-                    state["last_long_sent_ts"]     = now_ts  # anti-spam cooldown
+                    state["last_long_sent_ts"]     = now_ts
                     _save_alert_state(_alert_state)
                     return
 
-            # ── SHORT SIGNAL ───────────────────────────────
             new_signal_S = None
             ml_size_S    = result['short'].get('ml_size', 'SKIP')
             ml_conf_S    = result['short'].get('ml_confidence', 0.0)
@@ -847,7 +763,7 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"  TP2: ${lvl_S['tp2']:.6f} ({lvl_S['dist_tp2']:+.2f}%) | R:R {lvl_S['rr2']}×\n"
                         f"  TP3: ${lvl_S['tp3']:.6f} ({lvl_S['dist_tp3']:+.2f}%) | R:R {lvl_S['rr3']}×\n\n"
                         f"R:R Quality: {rr_q}\n"
-                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> ({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar M15)\n"
+                        f"⏱️ Hold Window: <b>{_MIN_HOLD_H:.0f}–{_MAX_HOLD_H:.0f} jam</b> ({MIN_HOLD_BARS}–{MAX_HOLD_BARS} bar H1)\n"
                         f"{'─'*28}\n"
                         f"⚡ Jangan entry jika harga sudah jauh dari <b>${close_price:.6f}</b>!"
                     )
@@ -856,13 +772,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     state["last_signal_direction"] = "SHORT"
                     state["last_signal_ts"]        = now_ts
                     state["last_signal_conf"]      = ml_conf_S
-                    state["last_short_sent_ts"]    = now_ts  # anti-spam cooldown
+                    state["last_short_sent_ts"]    = now_ts
                     _save_alert_state(_alert_state)
                     return
 
-            # ── [CONFIDENCE HISTORY] Catat confidence score tiap siklus ──
-            # Simpan 72 jam (288 titik @ 15 menit). Auto-purge data lama.
-            _HIST_TTL_SECS = 72 * 3600  # 72 jam
+            _HIST_TTL_SECS = 72 * 3600
             _hist_all = _alert_state.setdefault("confidence_history", {})
             _hist_sym = _hist_all.setdefault(symbol, [])
             _hist_sym.append({
@@ -874,7 +788,6 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 "min_hold_h": _MIN_HOLD_H,
                 "max_hold_h": _MAX_HOLD_H,
             })
-            # Purge data yang lebih lama dari 72 jam
             cutoff = now_ts - _HIST_TTL_SECS
             _hist_all[symbol] = [p for p in _hist_sym if p["ts"] >= cutoff]
             _save_alert_state(_alert_state)
@@ -897,12 +810,11 @@ def _monitor_loop() -> None:
     global _alert_state
     _alert_state = _load_alert_state()
 
-    # Startup notification
     wib = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
     _send_telegram(
         f"🤖 <b>Protocol 9.6 Signal Monitor AKTIF</b>\n"
         f"{'─'*28}\n"
-        f"✅ Monitoring {len(MONITOR_PAIRS)} pair setiap 15 menit\n"
+        f"✅ Monitoring {len(MONITOR_PAIRS)} pair setiap 1 jam\n"
         f"Pairs: {', '.join(MONITOR_PAIRS)}\n\n"
         f"Notifikasi akan dikirim otomatis saat:\n"
         f"  🚀 Sinyal LONG (ML Size: FULL/HALF)\n"
@@ -920,7 +832,7 @@ def _monitor_loop() -> None:
 
             for sym in all_pairs:
                 _evaluate_pair(sym, entries)
-                time.sleep(3)  # anti rate-limit
+                time.sleep(3)
 
             elapsed = time.time() - t0
             sleep_t = max(0, POLL_INTERVAL_SECONDS - elapsed)
@@ -950,8 +862,7 @@ def start_background_monitor() -> threading.Thread | None:
 def get_confidence_history(symbol: str, hours: int = 72) -> list:
     """
     Kembalikan history confidence score untuk symbol tertentu.
-    Data disimpan 72 jam (288 titik @ 15 menit). Auto-purge tiap siklus.
-    hours: window waktu yang diminta (default 72, max 72).
+    Data disimpan 72 jam. Auto-purge tiap siklus.
     """
     cutoff = time.time() - (min(hours, 72) * 3600)
     with _state_lock:
@@ -964,18 +875,13 @@ def get_confidence_history(symbol: str, hours: int = 72) -> list:
 # TEST FUNCTION — Kirim notifikasi test PENDLE ke Telegram
 # ============================================================
 def test_send_pendle_notification() -> dict:
-    """
-    One-shot test: fetch PENDLE data, score, dan kirim notifikasi
-    ke Telegram tanpa menjalankan full monitoring loop.
-    Return dict dengan status dan detail.
-    """
     import algo_scoring
 
     symbol = "PENDLEUSDT"
     logger.info(f"[TEST] Fetching data for {symbol}...")
 
     # [SSOT] Gunakan enrichment terpusat
-    df, data_meta = enrichment.get_fully_enriched_data(symbol, interval="4h", limit=250)
+    df, data_meta = enrichment.get_fully_enriched_data(symbol, interval="1h", limit=500)
     if df is None or len(df) < 22:
         return {"ok": False, "error": "Insufficient kline data", "symbol": symbol}
 
@@ -1022,14 +928,12 @@ def test_send_pendle_notification() -> dict:
     wib = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
     macro_icon = "📈" if macro_trend == "UPTREND" else ("↔️" if macro_trend == "SIDEWAYS" else "📉")
 
-    # Gate summary
     def _gate_short_label(gate: dict) -> str:
         status = gate.get("status", "CLEAR")
         if status == "CLEAR":   return "✅ CLEAR"
         if status == "WARNING": return "⚠️ WARNING"
         return "❌ BLOCKED"
 
-    # L2 zone label
     _l2_labels = {
         "SWEET_SPOT": "✅ Sweet Spot (1-5%)",
         "SKIP": "⚡ Terlalu Dekat (<1%)",
@@ -1038,10 +942,8 @@ def test_send_pendle_notification() -> dict:
     }
     l2_label = _l2_labels.get(l2_zone, f"N/A")
 
-    # Trailing SL hint (tidak aktif karena tidak ada posisi open)
     trailing_note = "Tidak ada posisi aktif — trailing SL belum relevan"
 
-    # Momentum
     hold_str = ""
     if mom_hold.get("signal"):
         reasons = " · ".join(mom_hold.get("reasons", [])[:2])
@@ -1057,8 +959,8 @@ def test_send_pendle_notification() -> dict:
         f"💰 Harga: <b>${close_price:.6f}</b>\n"
         f"\n"
         f"━━ 📊 SKOR ━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"  LONG : <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%) → <b>{code_L}</b>\n"  # [FIX v2.0]
-        f"  SHORT: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%) → <b>{code_S}</b>\n"  # [FIX v2.0]
+        f"  LONG : <b>{adj_L:.0f}/78 pts</b> ({result['long']['pct']:.1f}%) → <b>{code_L}</b>\n"
+        f"  SHORT: <b>{adj_S:.0f}/78 pts</b> ({result['short']['pct']:.1f}%) → <b>{code_S}</b>\n"
         f"  Threshold LONG : FULL≥{thr_full} | HALF≥{thr_half}\n"
         f"  Threshold SHORT: FULL≥{thr_full_S} | HALF≥{thr_half_S} | Regime: {threshold_regime}\n"
         f"\n"

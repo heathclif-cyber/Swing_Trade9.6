@@ -1,32 +1,123 @@
 {
-  "ADAUSDT": {
-    "_data_warn_ts": 1776564829.4993408,
-    "last_trailing_stage": "NONE"
-  },
-  "SOLUSDT": {
-    "_data_warn_ts": 1776564836.712451,
-    "last_trailing_stage": "NONE"
-  },
-  "DOGEUSDT": {
-    "_data_warn_ts": 1776564843.750559,
-    "last_trailing_stage": "NONE"
-  },
-  "XRPUSDT": {
-    "_data_warn_ts": 1776564855.90817,
-    "last_trailing_stage": "NONE"
-  },
-  "SUIUSDT": {
-    "_data_warn_ts": 1776564862.756191,
-    "last_trailing_stage": "NONE"
-  },
-  "PENDLEUSDT": {
-    "_data_warn_ts": 1776564880.5115943
-  },
-  "ETHUSDT": {
-    "_data_warn_ts": 1776564886.587215,
-    "last_trailing_stage": "NONE"
-  },
-  "LINKUSDT": {
-    "_data_warn_ts": 1776564892.7101967
+  "system_errors": {
+    "SUIUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:21",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "ETHUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "ARBUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "NEARUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "AVAXUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "DOTUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "ADAUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "PENDLEUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "TRXUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "TAOUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "POLUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:22",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "BNBUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:23",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "LINKUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:23",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "SOLUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:23",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "XRPUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:23",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "TONUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:23",
+      "missing": [
+        "FundingRate"
+      ]
+    },
+    "DOGEUSDT": {
+      "message": "Data tidak tersedia: FundingRate",
+      "time": "09:23",
+      "missing": [
+        "FundingRate"
+      ]
+    }
   }
 }
