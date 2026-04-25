@@ -20,14 +20,14 @@ FEATURE_COLS = [
     'Buy_Liq', 'Sell_Liq', 'SFP_sweep',
     # Derivatives
     'open_interest', 'funding_rate',
-    # EMA H1 (ATR-normalized)  ← v3: ganti m15 → h1
+    # EMA H1 (ATR-normalized)
     'ema_7_h1', 'ema_21_h1', 'ema_50_h1', 'ema_200_h1',
     # EMA H4 (ATR-normalized)
     'ema_7_h4', 'ema_21_h4', 'ema_50_h4', 'ema_200_h4',
     # Momentum
     'rsi_6', 'stochrsi_k', 'stochrsi_d',
     # Volatility
-    'atr_14_h1', 'atr_14_h4',   # ← v3: ganti m15 → h1
+    'atr_14_h1', 'atr_14_h4',
     # Key levels (ATR-normalized)
     'PDH', 'PDL', 'PWH', 'PWL',
     'Fib_618', 'Fib_786',
@@ -47,10 +47,19 @@ FEATURE_COLS = [
     # Structural features
     'dist_swing_high', 'dist_swing_low', 'price_in_range',
     'swing_momentum', 'h4_trend', 'trend_strength', 'vol_regime',
-    # Smart money features (v3 baru — 9 fitur)
+    # Smart money features v3 (9 fitur)
     'cvd_div_h4', 'cvd_slope_h4', 'vol_efficiency', 'absorption_z',
     'funding_price_div', 'rsi_h4', 'rsi_divergence',
     'wyckoff_phase', 'spring_upthrust',
+    # Smart money features v4 (14 fitur baru)
+    'ofi_raw', 'ofi_acceleration', 'ofi_z_score', 'ofi_h4_delta',
+    'vwdp', 'vwdp_smooth',
+    'hidden_divergence',
+    'cvd_momentum_adv',
+    'absorption_at_swing',
+    'spread_to_volume',
+    'ultra_high_vol',
+    'no_demand', 'no_supply', 'effort_vs_result',
 ]
 
 SYMBOL_MAP = {
@@ -91,9 +100,13 @@ def calc_rsi(close, period=6):
 
 def calculate_features_realtime(symbol, df_h1, funding_rate=None, btc_dominance=None, fear_greed=None):
     """
-    Hitung 71 fitur v3 dari DataFrame H1.
+    Hitung 85 fitur v4 dari DataFrame H1.
     df_h1 harus memiliki DatetimeIndex UTC dan kolom lowercase:
       open, high, low, close, volume, taker_buy_volume (opsional)
+
+    Fitur mencakup:
+      - 71 fitur Smart Money v3 (OHLCV, volume flow, market structure, EMA, dll.)
+      - 14 fitur Smart Money v4 baru (OFI, VWDP, hidden divergence, VSA, dll.)
     """
     # ── Guard: pastikan DatetimeIndex UTC ──
     if not isinstance(df_h1.index, pd.DatetimeIndex):
@@ -404,7 +417,108 @@ def calculate_features_realtime(symbol, df_h1, funding_rate=None, btc_dominance=
     upthrust = (df['high'] > swing_hi.shift(1)) & (df['close'] < swing_hi.shift(1))
     out['spring_upthrust'] = np.where(spring, 1, np.where(upthrust, -1, 0)).astype(float)
 
-    # ── End smart money features ──────────────────────────────────────────
+    # ── End smart money v3 features ───────────────────────────────────────
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 23. SMART MONEY FEATURES V4 (14 fitur baru)
+    # ══════════════════════════════════════════════════════════════════════
+
+    # 23a. Order Flow Imbalance (OFI) — menggunakan taker buy/sell volume
+    # OFI = buy_volume jika harga naik, -sell_volume jika harga turun
+    # Proxy smart money agression per bar
+    price_up   = df['close'] >= df['close'].shift(1)
+    price_dn   = df['close'] < df['close'].shift(1)
+    ofi        = pd.Series(0.0, index=df.index)
+    ofi[price_up] = out['buy_volume'][price_up]
+    ofi[price_dn] = -out['sell_volume'][price_dn]
+    out['ofi_raw'] = ofi / (out['atr_14_h1'].replace(0, 1e-8) * 1e6 + 1e-8)  # normalize scale
+
+    # 23b. OFI Acceleration — perubahan OFI antar bar (percepatan order flow)
+    out['ofi_acceleration'] = out['ofi_raw'].diff()
+
+    # 23c. OFI Z-Score — posisi OFI relatif terhadap distribusi rolling 20 bar
+    ofi_mean = out['ofi_raw'].rolling(20).mean()
+    ofi_std  = out['ofi_raw'].rolling(20).std().replace(0, 1e-8)
+    out['ofi_z_score'] = (out['ofi_raw'] - ofi_mean) / ofi_std
+
+    # 23d. OFI H4 Delta — rata-rata OFI per 4 bar H1 (ekuivalen H4)
+    # Positif = net buy pressure pada H4, negatif = net sell
+    ofi_h4_sum     = out['ofi_raw'].rolling(4).sum()
+    ofi_h4_prev    = ofi_h4_sum.shift(4)
+    out['ofi_h4_delta'] = ofi_h4_sum - ofi_h4_prev
+
+    # 23e. Volume-Weighted Direction Pressure (VWDP)
+    # VWDP = sum(sign(close - open) * volume) / rolling_volume
+    # Mengukur arah volume-weighted. Mendekati +1 = semua bar bullish bervolume tinggi
+    bar_direction = np.sign(df['close'] - df['open'])
+    directed_vol  = bar_direction * df['volume']
+    rolling_vol   = df['volume'].rolling(14).sum().replace(0, 1e-8)
+    out['vwdp']   = directed_vol.rolling(14).sum() / rolling_vol
+
+    # 23f. VWDP Smooth — EMA(14) dari VWDP untuk sinyal lebih bersih
+    out['vwdp_smooth'] = calc_ema(out['vwdp'], 14)
+
+    # 23g. Hidden Divergence — berlawanan arah dengan regular divergence
+    # Hidden bullish  (+1): price higher low, RSI lower low   → trend continuation up
+    # Hidden bearish  (-1): price lower high, RSI higher high → trend continuation dn
+    _lk2       = 14
+    ph_high    = df['close'].rolling(_lk2).max().shift(1)
+    pl_low     = df['close'].rolling(_lk2).min().shift(1)
+    rsi_ph     = out['rsi_6'].rolling(_lk2).max().shift(1)
+    rsi_pl     = out['rsi_6'].rolling(_lk2).min().shift(1)
+    hid_bull   = (df['close'] > pl_low) & (out['rsi_6'] < rsi_pl)   # higher low price + lower RSI
+    hid_bear   = (df['close'] < ph_high) & (out['rsi_6'] > rsi_ph)  # lower high price + higher RSI
+    out['hidden_divergence'] = np.where(hid_bull, 1, np.where(hid_bear, -1, 0)).astype(float)
+
+    # 23h. CVD Momentum Advanced — percepatan CVD rolling vs MA
+    # Mengukur apakah CVD sedang mempercepat atau melambat
+    cvd_ma14        = out['cvd'].rolling(14).mean()
+    cvd_ma5         = out['cvd'].rolling(5).mean()
+    out['cvd_momentum_adv'] = (cvd_ma5 - cvd_ma14) / atr_safe
+
+    # 23i. Absorption At Swing — volume anomali tinggi tepat di dekat swing level
+    # Volume besar di dekat swing level → kemungkinan absorption atau reversal
+    near_swing_hi    = (df['high'] - swing_hi).abs() < out['atr_14_h1']
+    near_swing_lo    = (df['low']  - swing_lo).abs() < out['atr_14_h1']
+    near_swing       = near_swing_hi | near_swing_lo
+    vol_z            = (df['volume'] - df['volume'].rolling(20).mean()) / \
+                       (df['volume'].rolling(20).std().replace(0, 1e-8))
+    out['absorption_at_swing'] = np.where(near_swing, vol_z, 0.0).astype(float)
+
+    # 23j. Spread to Volume — candle range relatif terhadap volume (VSA style)
+    # Rendah = churn/absorption, Tinggi = effisien / trending
+    candle_range2  = (df['high'] - df['low']).replace(0, 1e-8)
+    spread_raw     = candle_range2 / (df['volume'].replace(0, 1e-8))
+    spr_mean       = spread_raw.rolling(20).mean()
+    spr_std        = spread_raw.rolling(20).std().replace(0, 1e-8)
+    out['spread_to_volume'] = (spread_raw - spr_mean) / spr_std
+
+    # 23k. Ultra High Volume — flag boolean (sebagai float) jika volume > mean + 3σ
+    vol_mean  = df['volume'].rolling(20).mean()
+    vol_std   = df['volume'].rolling(20).std().replace(0, 1e-8)
+    out['ultra_high_vol'] = ((df['volume'] - vol_mean) / vol_std > 3.0).astype(float)
+
+    # 23l. No Demand Bar (VSA)
+    # No Demand: bar range sempit, volume rendah (<50% MA), close di 1/3 bawah
+    narrow_range = candle_range2 < candle_range2.rolling(20).mean() * 0.7
+    low_vol      = df['volume'] < df['volume'].rolling(20).mean() * 0.5
+    close_low    = (df['close'] - df['low']) < (df['high'] - df['low']) * 0.4
+    out['no_demand'] = (narrow_range & low_vol & close_low).astype(float)
+
+    # 23m. No Supply Bar (VSA)
+    # No Supply: bar range sempit, volume rendah (<50% MA), close di 1/3 atas
+    close_high   = (df['close'] - df['low']) > (df['high'] - df['low']) * 0.6
+    out['no_supply'] = (narrow_range & low_vol & close_high).astype(float)
+
+    # 23n. Effort vs Result (VSA)
+    # = volume tinggi tapi harga tidak bergerak jauh (effort tanpa result)
+    # Positif = effort > result (absorption), negatif = result > effort (breakout)
+    norm_vol      = (df['volume'] - vol_mean) / (vol_std + 1e-8)
+    norm_range    = (candle_range2 - candle_range2.rolling(20).mean()) / \
+                    (candle_range2.rolling(20).std().replace(0, 1e-8) + 1e-8)
+    out['effort_vs_result'] = norm_vol - norm_range
+
+    # ── End smart money v4 features ───────────────────────────────────────
 
     return out[FEATURE_COLS]
 

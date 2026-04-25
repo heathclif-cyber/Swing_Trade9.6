@@ -238,6 +238,28 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
     else:
         ml_error = "ml_engine tidak tersedia" if ml_engine is None else "df_m15 tidak tersedia"
 
+    # ── Volatility Circuit Breaker ────────────────────────────────────────
+    # Jika volatility saat ini > 2.5× rata-rata 24 jam → paksa FLAT
+    # Tujuan: proteksi dari event-driven volatility (flash crash, news shock, dll.)
+    _vcb_active = False
+    _vcb_reason = ""
+    if 'ATR_14' in df.columns and len(df) >= 24:
+        _atr_col = df['ATR_14'].dropna()
+        if len(_atr_col) >= 24:
+            _atr_now     = float(_atr_col.iloc[-1])
+            _atr_avg_24h = float(_atr_col.iloc[-24:].mean())
+            if _atr_avg_24h > 0:
+                _vol_regime = _atr_now / _atr_avg_24h
+                if _vol_regime > 2.5:
+                    _vcb_active = True
+                    _vcb_reason = f"ATR {_atr_now:.6f} = {_vol_regime:.1f}× avg24h {_atr_avg_24h:.6f} (VCB threshold 2.5×)"
+                    logger.warning(f"[{symbol}] ⚠️ VOLATILITY CIRCUIT BREAKER AKTIF — {_vcb_reason}")
+                    if ml_signal != 'FLAT':
+                        ml_signal = 'FLAT'
+                        ml_size   = 'SKIP'
+                        ml_conf   = 0.0
+                        ml_error  = f"VCB: {_vcb_reason}"
+
     # ── Decision ────────────────────────────────────────────────────────────
     long_active  = ml_signal == 'LONG'  and ml_size != 'SKIP'
     short_active = ml_signal == 'SHORT' and ml_size != 'SKIP'
@@ -463,6 +485,8 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
             'ml_size':       ml_size,
             'ml_proba':      ml_proba,
             'ml_error':      ml_error,
+            'vcb_active':    _vcb_active,
+            'vcb_reason':    _vcb_reason,
             'is_altcoin':          bool(not ('BTC' in symbol or 'ETH' in symbol)),
             'is_active_pos':       bool(is_active),
             'entry_price':         entry_val if is_active else None,

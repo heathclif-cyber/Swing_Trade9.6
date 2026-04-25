@@ -36,34 +36,44 @@
     "fee_per_side": 0.0004
   },
   "coins_validated": {
-    "recommended": [
-      "ETHUSDT",
-      "TONUSDT",
+    "high_priority": [
+      "1000PEPEUSDT",
+      "DOGEUSDT",
+      "1000SHIBUSDT",
       "ADAUSDT",
-      "SUIUSDT",
-      "POLUSDT"
+      "TRXUSDT",
+      "ETHUSDT"
     ],
-    "acceptable": [
-      "BNBUSDT",
-      "XRPUSDT",
+    "medium_priority": [
+      "POLUSDT",
+      "SUIUSDT",
       "LINKUSDT",
+      "SOLUSDT",
+      "XRPUSDT",
       "DOTUSDT",
-      "NEARUSDT"
+      "TONUSDT",
+      "ARBUSDT",
+      "AVAXUSDT"
     ],
     "caution": [
-      "SOLUSDT",
-      "DOGEUSDT",
-      "TRXUSDT",
-      "1000SHIBUSDT",
-      "AVAXUSDT",
-      "1000PEPEUSDT"
-    ]
+      "TAOUSDT",
+      "NEARUSDT"
+    ],
+    "oos_validation": {
+      "period": "2025-05 to 2026-04",
+      "mean_winrate": 0.7718,
+      "mean_max_dd_lev3x": 0.1445
+    }
   },
   "backtest_summary": {
-    "mean_winrate": 0.773,
+    "mean_winrate": 0.7718,
     "mean_trade_per_month": 39.46,
-    "mean_drawdown_lev3x": 0.2902,
-    "max_consecutive_loss": 10
+    "mean_drawdown_lev3x": 0.1445,
+    "max_consecutive_loss": 10,
+    "oos_period": "2025-05 to 2026-04",
+    "n_features": 85,
+    "labeling": "swing_based_h4",
+    "base_timeframe": "1h"
   },
   "backtest_per_coin": {
     "SOLUSDT": {

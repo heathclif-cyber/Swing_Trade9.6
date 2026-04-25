@@ -182,10 +182,25 @@ class MLSignalEngine:
                 X_lgbm[col] = 0.0
         lgbm_proba = self.lgbm_model.predict_proba(X_lgbm[lgbm_feat_cols])  # (1, 3)
 
-        # 5. LSTM — seq_len row terakhir
-        n_features = INFERENCE_CFG.get("model_architecture", {}).get("n_features", 71)
-        lstm_cols  = features_df.columns.tolist()[:n_features]
-        X_seq      = features_df[lstm_cols].iloc[-SEQ_LEN:].values.astype(np.float32)
+        # 5. LSTM — seq_len row terakhir, kolom harus sesuai urutan canonical
+        # WAJIB pakai feat_cols dari feature_cols_v2.json, bukan slice df.columns
+        feat_cols_path = ML_DIR / INFERENCE_CFG.get("model_files", {}).get("features", "feature_cols_v2.json")
+        try:
+            with open(feat_cols_path) as _f:
+                feat_cols_canonical = json.load(_f)
+        except Exception as _e:
+            logger.warning(f"[{symbol}] Gagal baca feat_cols_canonical ({_e}) — fallback ke columns[:n_features]")
+            n_features = INFERENCE_CFG.get("model_architecture", {}).get("n_features", 85)
+            feat_cols_canonical = features_df.columns.tolist()[:n_features]
+
+        # Pastikan semua kolom canonical ada di features_df
+        missing_cols = [c for c in feat_cols_canonical if c not in features_df.columns]
+        if missing_cols:
+            logger.warning(f"[{symbol}] {len(missing_cols)} kolom canonical tidak ada di features_df: {missing_cols[:5]} — diisi 0.0")
+            for c in missing_cols:
+                features_df[c] = 0.0
+
+        X_seq = features_df[feat_cols_canonical].iloc[-SEQ_LEN:].values.astype(np.float32)
 
         if len(X_seq) < SEQ_LEN:
             logger.warning(
