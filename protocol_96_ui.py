@@ -1664,6 +1664,20 @@ def api_system_health():
         return jsonify({"status": "unknown", "errors": {}, "error_count": 0}), 500
 
 
+@app.route("/api/reset-confidence-history", methods=["POST"])
+def api_reset_confidence_history():
+    """Reset confidence history — hapus data lama dari alert_state."""
+    try:
+        with signal_monitor._state_lock:
+            if 'confidence_history' in signal_monitor._alert_state:
+                del signal_monitor._alert_state['confidence_history']
+                signal_monitor._save_alert_state(signal_monitor._alert_state)
+                return jsonify({"ok": True, "message": "confidence_history dihapus"})
+            return jsonify({"ok": True, "message": "confidence_history tidak ada"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/scanner")
 def api_scanner():
     """Market Scanner: Evaluasi skor LONG dan SHORT untuk semua koin secara paralel."""
