@@ -4,14 +4,14 @@
     "ensemble_v2": {
       "version": "v3",
       "status": "active",
-      "f1_macro": 0.09532154631363526,
-      "winrate": 0.7773,
-      "trade_per_month": 40.21,
-      "pnl_lev3x": 66605.62,
-      "pnl_lev5x": 111009.37,
-      "max_drawdown": 0.216,
+      "f1_macro": 0.0831194296054307,
+      "winrate": 0.773,
+      "trade_per_month": 39.46,
+      "pnl_lev5x": 134317.02,
+      "max_drawdown": 0.2902,
       "max_consecutive_loss": 10,
-      "trained_date": "2026-04-24"
+      "trained_date": "2026-04-25",
+      "pnl_lev3x": 80590.21
     }
   }
 }

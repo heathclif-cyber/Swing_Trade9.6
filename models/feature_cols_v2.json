@@ -69,5 +69,19 @@
   "rsi_h4",
   "rsi_divergence",
   "wyckoff_phase",
-  "spring_upthrust"
+  "spring_upthrust",
+  "ofi_raw",
+  "ofi_acceleration",
+  "ofi_z_score",
+  "ofi_h4_delta",
+  "vwdp",
+  "vwdp_smooth",
+  "hidden_divergence",
+  "cvd_momentum_adv",
+  "absorption_at_swing",
+  "spread_to_volume",
+  "ultra_high_vol",
+  "no_demand",
+  "no_supply",
+  "effort_vs_result"
 ]

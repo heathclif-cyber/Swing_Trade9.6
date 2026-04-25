@@ -1,5 +1,5 @@
 {
-  "run_id": "run_20260424_182730",
+  "run_id": "run_20260425_170112",
   "coins": [
     "SOLUSDT",
     "ETHUSDT",
@@ -20,64 +20,64 @@
     "TAOUSDT",
     "ARBUSDT"
   ],
-  "mean_f1_macro": 0.7393,
-  "std_f1_macro": 0.0461,
+  "mean_f1_macro": 0.7246,
+  "std_f1_macro": 0.0399,
   "folds": [
     {
       "fold": 1,
-      "f1_macro": 0.7542,
-      "f1_SHORT": 0.6906,
-      "f1_FLAT": 0.8974,
-      "f1_LONG": 0.6745
+      "f1_macro": 0.7518,
+      "f1_SHORT": 0.6804,
+      "f1_FLAT": 0.9026,
+      "f1_LONG": 0.6725
     },
     {
       "fold": 2,
-      "f1_macro": 0.7445,
-      "f1_SHORT": 0.6915,
-      "f1_FLAT": 0.9005,
-      "f1_LONG": 0.6415
+      "f1_macro": 0.7406,
+      "f1_SHORT": 0.6845,
+      "f1_FLAT": 0.8881,
+      "f1_LONG": 0.6491
     },
     {
       "fold": 3,
-      "f1_macro": 0.7583,
-      "f1_SHORT": 0.6866,
-      "f1_FLAT": 0.9046,
-      "f1_LONG": 0.6837
+      "f1_macro": 0.7288,
+      "f1_SHORT": 0.6692,
+      "f1_FLAT": 0.8878,
+      "f1_LONG": 0.6294
     },
     {
       "fold": 4,
-      "f1_macro": 0.759,
-      "f1_SHORT": 0.6867,
-      "f1_FLAT": 0.9063,
-      "f1_LONG": 0.6839
+      "f1_macro": 0.7309,
+      "f1_SHORT": 0.659,
+      "f1_FLAT": 0.888,
+      "f1_LONG": 0.6458
     },
     {
       "fold": 5,
-      "f1_macro": 0.7644,
-      "f1_SHORT": 0.6862,
-      "f1_FLAT": 0.9145,
-      "f1_LONG": 0.6927
+      "f1_macro": 0.7453,
+      "f1_SHORT": 0.677,
+      "f1_FLAT": 0.8986,
+      "f1_LONG": 0.6602
     },
     {
       "fold": 6,
-      "f1_macro": 0.7553,
-      "f1_SHORT": 0.7085,
-      "f1_FLAT": 0.9084,
-      "f1_LONG": 0.649
+      "f1_macro": 0.7391,
+      "f1_SHORT": 0.6683,
+      "f1_FLAT": 0.902,
+      "f1_LONG": 0.6471
     },
     {
       "fold": 7,
-      "f1_macro": 0.7607,
-      "f1_SHORT": 0.6863,
-      "f1_FLAT": 0.9129,
-      "f1_LONG": 0.6829
+      "f1_macro": 0.7397,
+      "f1_SHORT": 0.6535,
+      "f1_FLAT": 0.8984,
+      "f1_LONG": 0.6673
     },
     {
       "fold": 8,
-      "f1_macro": 0.6181,
-      "f1_SHORT": 0.4978,
-      "f1_FLAT": 0.8715,
-      "f1_LONG": 0.4849
+      "f1_macro": 0.6207,
+      "f1_SHORT": 0.5257,
+      "f1_FLAT": 0.8677,
+      "f1_LONG": 0.4687
     }
   ]
 }
