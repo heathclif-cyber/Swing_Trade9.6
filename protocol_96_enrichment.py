@@ -6,7 +6,7 @@ Prinsip: "1 Sumber Data, 1 Otak"
 SATU-SATUNYA fungsi yang boleh dipanggil oleh signal_monitor.py dan
 protocol_96_ui.py untuk mendapatkan data siap-pakai adalah:
 
-    df, meta = get_fully_enriched_data(symbol, interval="4h", limit=250)
+    df, meta = get_fully_enriched_data(symbol, interval="1h", limit=500)
 
 Tidak ada modul lain yang boleh merakit klines + indikator + makro sendiri.
 """
@@ -618,8 +618,8 @@ def enrich_dataset(df_base: pd.DataFrame, df_macro_h4: pd.DataFrame,
 # ============================================================
 # ✅ MASTER FUNCTION — Single Source of Truth
 # ============================================================
-def get_fully_enriched_data(symbol: str, interval: str = "4h",
-                             limit: int = 250) -> tuple[pd.DataFrame, dict]:
+def get_fully_enriched_data(symbol: str, interval: str = "1h",
+                             limit: int = 500) -> tuple[pd.DataFrame, dict]:
     """
     SATU-SATUNYA fungsi yang boleh dipanggil oleh signal_monitor.py
     dan protocol_96_ui.py untuk mendapatkan DataFrame siap-scoring.

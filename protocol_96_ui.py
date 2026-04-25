@@ -61,10 +61,10 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 # ⚙️ USER CONFIGURATION
 # ==========================================
 AVAILABLE_PAIRS = [
-    'SOLUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT',
-    'TONUSDT', 'ADAUSDT', 'TRXUSDT', 'SHIBUSDT', 'AVAXUSDT',
-    'LINKUSDT', 'DOTUSDT', 'SUIUSDT', 'POLUSDT', 'NEARUSDT',
-    'PEPEUSDT', 'TAOUSDT', 'APTOSUSDT', 'ARBUSDT', 'WLFIUSDT'
+    'SOLUSDT',      'ETHUSDT',    'BNBUSDT',      'XRPUSDT',   'DOGEUSDT',
+    'TONUSDT',      'ADAUSDT',    'TRXUSDT',       '1000SHIBUSDT', 'AVAXUSDT',
+    'LINKUSDT',     'DOTUSDT',    'SUIUSDT',       'POLUSDT',   'NEARUSDT',
+    '1000PEPEUSDT', 'TAOUSDT',   'ARBUSDT',
 ]
 COIN_PAIR = AVAILABLE_PAIRS[0]
 ALLOCATED_CAPITAL = 200
@@ -104,14 +104,14 @@ def _get_enriched_data(pair: str, force_refresh: bool = False):
     if not force_refresh and cached and (now - cached["ts"]) < _CACHE_TTL:
         return cached["df"], cached["meta"], cached["m15"]
     # Fetch baru
-    df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
+    df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="1h", limit=500)
     df_m15 = None
     try:
-        # Fetch 4h data for ML
-        _raw = get_klines_rest(pair, '4h', limit=300)
+        # Fetch 1h data for ML
+        _raw = get_klines_rest(pair, '1h', limit=500)
         df_m15 = _normalize_m15_columns(_raw)
     except Exception as _em:
-        logger.warning(f'[Cache] Gagal fetch M15 untuk {pair}: {_em}')
+        logger.warning(f'[Cache] Gagal fetch H1 untuk {pair}: {_em}')
     _enrichment_cache[pair] = {"df": df_quant, "meta": data_meta, "m15": df_m15, "ts": now}
     return df_quant, data_meta, df_m15
 
@@ -623,7 +623,7 @@ def api_test_signal():
         signal_monitor._evaluate_pair(pair, trade_entries)
 
         # Ambil data via SSOT — tidak lagi pakai private function signal_monitor
-        df, data_meta = enrichment.get_fully_enriched_data(pair, interval="4h", limit=250)
+        df, data_meta = enrichment.get_fully_enriched_data(pair, interval="1h", limit=500)
         if len(df) >= 22:
             coin_data  = trade_entries.get(pair, {})
             entry_list = coin_data.get("entries", [])
@@ -631,11 +631,11 @@ def api_test_signal():
             total_qty  = sum(e["qty"] for e in entry_list)
             avg_entry  = (total_cost / total_qty) if total_qty > 0 else None
 
-            df_m15_raw = enrichment.get_klines_rest(pair, '4h', limit=300) if hasattr(enrichment, 'get_klines_rest') else None
+            df_m15_raw = enrichment.get_klines_rest(pair, '1h', limit=500) if hasattr(enrichment, 'get_klines_rest') else None
             if df_m15_raw is None:
                 from data_engine import DataEngine as _DE
                 _de = _DE()
-                df_m15_raw = _de.get_klines_rest(pair, '4h', limit=300)
+                df_m15_raw = _de.get_klines_rest(pair, '1h', limit=500)
             df_m15_norm = _normalize_m15_columns(df_m15_raw)
             ml_result = _ui_ml_engine.predict(symbol=pair, df_m15=df_m15_norm)
 
@@ -1761,11 +1761,11 @@ def api_price_perf_v2(pair: str):
         
         # Ambil OHLCV M15 dari data_engine (sudah ada di aplikasi)
         from protocol_96_enrichment import get_fully_enriched_data
-        df, _ = get_fully_enriched_data(pair, interval="4h", limit=hours*4)
+        df, _ = get_fully_enriched_data(pair, interval="1h", limit=hours)
         
         ohlcv = []
         if df is not None and not df.empty:
-            for _, row in df.tail(hours*4).iterrows():
+            for _, row in df.tail(hours).iterrows():
                 ohlcv.append({
                     "ts":    int(row["Open_Time"].timestamp() * 1000) if hasattr(row["Open_Time"], "timestamp") else int(row["Open_Time"]),
                     "open":  float(row["Open"]),
