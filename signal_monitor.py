@@ -42,19 +42,14 @@ logger = logging.getLogger("SignalMonitor")
 # ============================================================
 # CONSTANTS — tidak bergantung env vars
 # ============================================================
-POLL_INTERVAL_SECONDS = 60 * 60   # 1 jam (H1)
-# CATATAN: Threshold FULL/HALF kini bersifat adaptif (dari P7 result['variables'])
-# Nilai di bawah hanya sebagai fallback jika variabel adaptif tidak tersedia.
-# App-level fallback for scoring engine. ML confidence thresholds → INFERENCE_CFG
-SIGNAL_THRESHOLD_FULL = 48        # ADJ score default FULL SIZE ENTRY (bull mode)
-SIGNAL_THRESHOLD_HALF = 33        # ADJ score default HALF SIZE ENTRY (bull mode)
-
-MONITOR_PAIRS = [
-    'SOLUSDT',    'ETHUSDT',     'BNBUSDT',   'XRPUSDT',   'DOGEUSDT',
-    'TONUSDT',    'ADAUSDT',     'TRXUSDT',   '1000SHIBUSDT', 'AVAXUSDT',
-    'LINKUSDT',   'DOTUSDT',     'SUIUSDT',   'POLUSDT',    'NEARUSDT',
-    '1000PEPEUSDT', 'TAOUSDT',   'ARBUSDT',
-]
+MONITOR_PAIRS = INFERENCE_CFG.get("monitor", {}).get("pairs", [
+    '1000PEPEUSDT', 'DOGEUSDT',  '1000SHIBUSDT', 'ADAUSDT',
+    'TRXUSDT',      'ETHUSDT',   'POLUSDT',       'SUIUSDT',
+    'LINKUSDT',     'SOLUSDT',   'XRPUSDT',       'DOTUSDT',
+    'TONUSDT',      'ARBUSDT',   'AVAXUSDT',      'TAOUSDT',
+    'NEARUSDT',     'BNBUSDT',
+])
+POLL_INTERVAL_SECONDS = INFERENCE_CFG.get("monitor", {}).get("poll_interval_secs", 3600)
 
 # ── Thread safety ──────────────────────────────────────────
 _alert_state: dict = {}
@@ -258,11 +253,18 @@ def _normalize_h1_columns(df):
 # ============================================================
 # SIGNAL STABILITY — Anti-flip & Confirmation Buffer
 # ============================================================
-SIGNAL_CONF_MIN      = INFERENCE_CFG["inference"]["confidence_half_size"]  # was: 0.55
-SIGNAL_FLIP_CONF_MIN = 0.65   # 65% — minimum untuk flip arah (lebih ketat)
-FLIP_CONFIRM_BARS    = 2
-FLIP_COOLDOWN_SECS   = 3600
-SAME_DIRECTION_COOLDOWN_SECS = int(os.environ.get("SIGNAL_COOLDOWN_HOURS", "4")) * 3600
+# ── Signal stability gate — dibaca dari inference_config.json ──
+_stab_cfg = INFERENCE_CFG.get("signal_stability", {})
+SIGNAL_CONF_MIN      = INFERENCE_CFG["inference"]["confidence_half_size"]
+SIGNAL_FLIP_CONF_MIN = _stab_cfg.get("flip_conf_min",      0.65)
+FLIP_CONFIRM_BARS    = _stab_cfg.get("flip_confirm_bars",   2)
+FLIP_COOLDOWN_SECS   = _stab_cfg.get("flip_cooldown_secs", 3600)
+SAME_DIRECTION_COOLDOWN_SECS = int(
+    os.environ.get(
+        "SIGNAL_COOLDOWN_HOURS",
+        str(_stab_cfg.get("same_dir_cooldown_hours", 4))
+    )
+) * 3600
 
 
 def _check_signal_stability(state: dict, new_direction: str, confidence: float, now_ts: float) -> str:

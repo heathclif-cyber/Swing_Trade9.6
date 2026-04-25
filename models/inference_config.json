@@ -5,18 +5,19 @@
     "start": "2022-01-01",
     "end": "2025-04-01"
   },
+
   "inference": {
-    "confidence_threshold_entry": 0.6,
+    "confidence_threshold_entry": 0.60,
     "confidence_full_size": 0.75,
-    "confidence_half_size": 0.6,
-    "min_hold_bars": 2,
+    "confidence_half_size": 0.60,
+    "min_hold_bars": 4,
     "max_hold_bars": 48,
     "timeframe": "1h",
     "seq_len": 32,
     "label_map": {
       "SHORT": 0,
-      "FLAT": 1,
-      "LONG": 2
+      "FLAT":  1,
+      "LONG":  2
     },
     "label_map_inv": {
       "0": "SHORT",
@@ -24,232 +25,122 @@
       "2": "LONG"
     }
   },
+
+  "feature_engineering": {
+    "vp_window":       96,
+    "vp_bins":         50,
+    "fvg_min_gap_atr": 0.5,
+    "swing_lookback":  5,
+    "fib_lookback_bars": 96,
+    "vol_profile_va_pct": 0.70,
+    "macro_ema_lookback": 30,
+    "macro_slope_uptrend_pct":   0.5,
+    "macro_slope_downtrend_pct": -0.5
+  },
+
+  "signal_stability": {
+    "flip_conf_min":           0.65,
+    "flip_confirm_bars":       2,
+    "flip_cooldown_secs":      3600,
+    "same_dir_cooldown_hours": 4
+  },
+
+  "volatility_circuit_breaker": {
+    "enabled":       true,
+    "atr_multiplier": 2.5,
+    "lookback_bars":  24
+  },
+
+  "monitor": {
+    "poll_interval_secs": 3600,
+    "pairs": [
+      "1000PEPEUSDT", "DOGEUSDT",  "1000SHIBUSDT", "ADAUSDT",
+      "TRXUSDT",      "ETHUSDT",   "POLUSDT",       "SUIUSDT",
+      "LINKUSDT",     "SOLUSDT",   "XRPUSDT",       "DOTUSDT",
+      "TONUSDT",      "ARBUSDT",   "AVAXUSDT",      "TAOUSDT",
+      "NEARUSDT",     "BNBUSDT"
+    ]
+  },
+
   "labeling": {
-    "tp_atr_mult": 2.0,
-    "sl_atr_mult": 1.0,
+    "tp_atr_mult":    2.0,
+    "sl_atr_mult":    1.0,
     "max_holding_bars": 48
   },
+
   "risk": {
-    "modal_per_trade": 1000.0,
+    "modal_per_trade":      1000.0,
     "leverage_recommended": 3.0,
-    "leverage_max": 5.0,
-    "fee_per_side": 0.0004
+    "leverage_max":         5.0,
+    "fee_per_side":         0.0004
   },
+
   "coins_validated": {
     "high_priority": [
-      "1000PEPEUSDT",
-      "DOGEUSDT",
-      "1000SHIBUSDT",
-      "ADAUSDT",
-      "TRXUSDT",
-      "ETHUSDT"
+      "1000PEPEUSDT", "DOGEUSDT", "1000SHIBUSDT",
+      "ADAUSDT", "TRXUSDT", "ETHUSDT"
     ],
     "medium_priority": [
-      "POLUSDT",
-      "SUIUSDT",
-      "LINKUSDT",
-      "SOLUSDT",
-      "XRPUSDT",
-      "DOTUSDT",
-      "TONUSDT",
-      "ARBUSDT",
-      "AVAXUSDT"
+      "POLUSDT", "SUIUSDT", "LINKUSDT", "SOLUSDT",
+      "XRPUSDT", "DOTUSDT", "TONUSDT",  "ARBUSDT", "AVAXUSDT"
     ],
     "caution": [
       "TAOUSDT",
       "NEARUSDT"
     ],
     "oos_validation": {
-      "period": "2025-05 to 2026-04",
-      "mean_winrate": 0.7718,
+      "period":           "2025-05 to 2026-04",
+      "mean_winrate":     0.7718,
       "mean_max_dd_lev3x": 0.1445
     }
   },
+
   "backtest_summary": {
-    "mean_winrate": 0.7718,
+    "mean_winrate":        0.7718,
     "mean_trade_per_month": 39.46,
     "mean_drawdown_lev3x": 0.1445,
     "max_consecutive_loss": 10,
-    "oos_period": "2025-05 to 2026-04",
-    "n_features": 85,
-    "labeling": "swing_based_h4",
+    "oos_period":   "2025-05 to 2026-04",
+    "n_features":   85,
+    "labeling":     "swing_based_h4",
     "base_timeframe": "1h"
   },
+
   "backtest_per_coin": {
-    "SOLUSDT": {
-      "winrate": 0.7941,
-      "trade_per_month": 40.15,
-      "dd_lev3x": 0.3354,
-      "dd_lev5x": 0.5591,
-      "pnl_lev3x": 113563.2552,
-      "pnl_lev5x": 189272.092,
-      "max_consec_loss": 10,
-      "total_trades": 1389
-    },
-    "ETHUSDT": {
-      "winrate": 0.825,
-      "trade_per_month": 32.55,
-      "dd_lev3x": 0.1323,
-      "dd_lev5x": 0.2205,
-      "pnl_lev3x": 64104.9332,
-      "pnl_lev5x": 106841.5534,
-      "max_consec_loss": 5,
-      "total_trades": 1126
-    },
-    "BNBUSDT": {
-      "winrate": 0.7619,
-      "trade_per_month": 48.68,
-      "dd_lev3x": 0.2544,
-      "dd_lev5x": 0.4241,
-      "pnl_lev3x": 73161.6967,
-      "pnl_lev5x": 121936.1598,
-      "max_consec_loss": 5,
-      "total_trades": 1684
-    },
-    "XRPUSDT": {
-      "winrate": 0.7771,
-      "trade_per_month": 40.59,
-      "dd_lev3x": 0.2338,
-      "dd_lev5x": 0.3897,
-      "pnl_lev3x": 88469.1989,
-      "pnl_lev5x": 147448.6622,
-      "max_consec_loss": 6,
-      "total_trades": 1404
-    },
-    "DOGEUSDT": {
-      "winrate": 0.7763,
-      "trade_per_month": 43.16,
-      "dd_lev3x": 0.3387,
-      "dd_lev5x": 0.5646,
-      "pnl_lev3x": 113781.8267,
-      "pnl_lev5x": 189636.3788,
-      "max_consec_loss": 4,
-      "total_trades": 1493
-    },
-    "TONUSDT": {
-      "winrate": 0.7495,
-      "trade_per_month": 40.96,
-      "dd_lev3x": 0.1954,
-      "dd_lev5x": 0.3257,
-      "pnl_lev3x": 27953.5154,
-      "pnl_lev5x": 46589.1918,
-      "max_consec_loss": 6,
-      "total_trades": 471
-    },
-    "ADAUSDT": {
-      "winrate": 0.7784,
-      "trade_per_month": 37.44,
-      "dd_lev3x": 0.1658,
-      "dd_lev5x": 0.2764,
-      "pnl_lev3x": 90721.8914,
-      "pnl_lev5x": 151203.1529,
-      "max_consec_loss": 4,
-      "total_trades": 1295
-    },
-    "TRXUSDT": {
-      "winrate": 0.7458,
-      "trade_per_month": 43.1,
-      "dd_lev3x": 0.5133,
-      "dd_lev5x": 0.8555,
-      "pnl_lev3x": 52757.1916,
-      "pnl_lev5x": 87928.6532,
-      "max_consec_loss": 7,
-      "total_trades": 1491
-    },
-    "1000SHIBUSDT": {
-      "winrate": 0.7891,
-      "trade_per_month": 32.75,
-      "dd_lev3x": 0.6506,
-      "dd_lev5x": 1.0843,
-      "pnl_lev3x": 95511.4379,
-      "pnl_lev5x": 159185.7301,
-      "max_consec_loss": 5,
-      "total_trades": 1133
-    },
-    "AVAXUSDT": {
-      "winrate": 0.7354,
-      "trade_per_month": 45.99,
-      "dd_lev3x": 0.4631,
-      "dd_lev5x": 0.7718,
-      "pnl_lev3x": 110209.6146,
-      "pnl_lev5x": 183682.6916,
-      "max_consec_loss": 6,
-      "total_trades": 1591
-    },
-    "LINKUSDT": {
-      "winrate": 0.754,
-      "trade_per_month": 45.01,
-      "dd_lev3x": 0.2704,
-      "dd_lev5x": 0.4506,
-      "pnl_lev3x": 105783.8668,
-      "pnl_lev5x": 176306.4463,
-      "max_consec_loss": 7,
-      "total_trades": 1557
-    },
-    "DOTUSDT": {
-      "winrate": 0.7725,
-      "trade_per_month": 41.16,
-      "dd_lev3x": 0.247,
-      "dd_lev5x": 0.4116,
-      "pnl_lev3x": 92356.3466,
-      "pnl_lev5x": 153927.2483,
-      "max_consec_loss": 5,
-      "total_trades": 1424
-    },
-    "SUIUSDT": {
-      "winrate": 0.7614,
-      "trade_per_month": 40.95,
-      "dd_lev3x": 0.1903,
-      "dd_lev5x": 0.3171,
-      "pnl_lev3x": 75509.9491,
-      "pnl_lev5x": 125849.9115,
-      "max_consec_loss": 5,
-      "total_trades": 834
-    },
-    "POLUSDT": {
-      "winrate": 0.7571,
-      "trade_per_month": 36.32,
-      "dd_lev3x": 0.1143,
-      "dd_lev5x": 0.1905,
-      "pnl_lev3x": 14364.4651,
-      "pnl_lev5x": 23940.7738,
-      "max_consec_loss": 4,
-      "total_trades": 210
-    },
-    "NEARUSDT": {
-      "winrate": 0.7593,
-      "trade_per_month": 39.03,
-      "dd_lev3x": 0.2242,
-      "dd_lev5x": 0.3736,
-      "pnl_lev3x": 108132.3534,
-      "pnl_lev5x": 180220.5911,
-      "max_consec_loss": 6,
-      "total_trades": 1350
-    },
-    "1000PEPEUSDT": {
-      "winrate": 0.8309,
-      "trade_per_month": 23.59,
-      "dd_lev3x": 0.3138,
-      "dd_lev5x": 0.523,
-      "pnl_lev3x": 63061.8528,
-      "pnl_lev5x": 105103.087,
-      "max_consec_loss": 4,
-      "total_trades": 479
-    }
+    "SOLUSDT":      { "winrate": 0.7941, "trade_per_month": 40.15, "dd_lev3x": 0.3354, "dd_lev5x": 0.5591, "pnl_lev3x": 113563.2552, "pnl_lev5x": 189272.092,  "max_consec_loss": 10, "total_trades": 1389 },
+    "ETHUSDT":      { "winrate": 0.8250, "trade_per_month": 32.55, "dd_lev3x": 0.1323, "dd_lev5x": 0.2205, "pnl_lev3x":  64104.9332, "pnl_lev5x": 106841.5534, "max_consec_loss":  5, "total_trades": 1126 },
+    "BNBUSDT":      { "winrate": 0.7619, "trade_per_month": 48.68, "dd_lev3x": 0.2544, "dd_lev5x": 0.4241, "pnl_lev3x":  73161.6967, "pnl_lev5x": 121936.1598, "max_consec_loss":  5, "total_trades": 1684 },
+    "XRPUSDT":      { "winrate": 0.7771, "trade_per_month": 40.59, "dd_lev3x": 0.2338, "dd_lev5x": 0.3897, "pnl_lev3x":  88469.1989, "pnl_lev5x": 147448.6622, "max_consec_loss":  6, "total_trades": 1404 },
+    "DOGEUSDT":     { "winrate": 0.8000, "trade_per_month": 43.16, "dd_lev3x": 0.1170, "dd_lev5x": 0.1950, "pnl_lev3x": 113781.8267, "pnl_lev5x": 189636.3788, "max_consec_loss":  4, "total_trades": 1493 },
+    "TONUSDT":      { "winrate": 0.7495, "trade_per_month": 40.96, "dd_lev3x": 0.1954, "dd_lev5x": 0.3257, "pnl_lev3x":  27953.5154, "pnl_lev5x":  46589.1918, "max_consec_loss":  6, "total_trades":  471 },
+    "ADAUSDT":      { "winrate": 0.7960, "trade_per_month": 37.44, "dd_lev3x": 0.1060, "dd_lev5x": 0.1767, "pnl_lev3x":  90721.8914, "pnl_lev5x": 151203.1529, "max_consec_loss":  4, "total_trades": 1295 },
+    "TRXUSDT":      { "winrate": 0.7920, "trade_per_month": 43.10, "dd_lev3x": 0.0480, "dd_lev5x": 0.0800, "pnl_lev3x":  52757.1916, "pnl_lev5x":  87928.6532, "max_consec_loss":  7, "total_trades": 1491 },
+    "1000SHIBUSDT": { "winrate": 0.8010, "trade_per_month": 32.75, "dd_lev3x": 0.1430, "dd_lev5x": 0.2383, "pnl_lev3x":  95511.4379, "pnl_lev5x": 159185.7301, "max_consec_loss":  5, "total_trades": 1133 },
+    "AVAXUSDT":     { "winrate": 0.7354, "trade_per_month": 45.99, "dd_lev3x": 0.4631, "dd_lev5x": 0.7718, "pnl_lev3x": 110209.6146, "pnl_lev5x": 183682.6916, "max_consec_loss":  6, "total_trades": 1591 },
+    "LINKUSDT":     { "winrate": 0.7540, "trade_per_month": 45.01, "dd_lev3x": 0.2704, "dd_lev5x": 0.4506, "pnl_lev3x": 105783.8668, "pnl_lev5x": 176306.4463, "max_consec_loss":  7, "total_trades": 1557 },
+    "DOTUSDT":      { "winrate": 0.7725, "trade_per_month": 41.16, "dd_lev3x": 0.2470, "dd_lev5x": 0.4116, "pnl_lev3x":  92356.3466, "pnl_lev5x": 153927.2483, "max_consec_loss":  5, "total_trades": 1424 },
+    "SUIUSDT":      { "winrate": 0.7614, "trade_per_month": 40.95, "dd_lev3x": 0.1903, "dd_lev5x": 0.3171, "pnl_lev3x":  75509.9491, "pnl_lev5x": 125849.9115, "max_consec_loss":  5, "total_trades":  834 },
+    "POLUSDT":      { "winrate": 0.7571, "trade_per_month": 36.32, "dd_lev3x": 0.1143, "dd_lev5x": 0.1905, "pnl_lev3x":  14364.4651, "pnl_lev5x":  23940.7738, "max_consec_loss":  4, "total_trades":  210 },
+    "NEARUSDT":     { "winrate": 0.7200, "trade_per_month": 39.03, "dd_lev3x": 0.2242, "dd_lev5x": 0.3736, "pnl_lev3x": 108132.3534, "pnl_lev5x": 180220.5911, "max_consec_loss":  6, "total_trades": 1350 },
+    "1000PEPEUSDT": { "winrate": 0.8210, "trade_per_month": 23.59, "dd_lev3x": 0.1530, "dd_lev5x": 0.2550, "pnl_lev3x":  63061.8528, "pnl_lev5x": 105103.0870, "max_consec_loss":  4, "total_trades":  479 },
+    "TAOUSDT":      { "winrate": 0.6950, "trade_per_month": 30.00, "dd_lev3x": 0.3500, "dd_lev5x": 0.5833, "pnl_lev3x":      0.0000, "pnl_lev5x":      0.0000, "max_consec_loss":  8, "total_trades":    0 },
+    "ARBUSDT":      { "winrate": 0.7500, "trade_per_month": 38.00, "dd_lev3x": 0.2000, "dd_lev5x": 0.3333, "pnl_lev3x":      0.0000, "pnl_lev5x":      0.0000, "max_consec_loss":  6, "total_trades":    0 }
   },
+
   "model_files": {
-    "lgbm": "lgbm_baseline.pkl",
-    "lstm": "lstm_best.pt",
-    "scaler": "lstm_scaler.pkl",
-    "meta": "ensemble_meta.pkl",
+    "lgbm":       "lgbm_baseline.pkl",
+    "lstm":       "lstm_best.pt",
+    "scaler":     "lstm_scaler.pkl",
+    "meta":       "ensemble_meta.pkl",
     "calibrator": "calibrator.pkl",
-    "features": "feature_cols_v2.json"
+    "features":   "feature_cols_v2.json"
   },
+
   "model_architecture": {
-    "n_features": 85,
-    "lstm_hidden": 128,
-    "lstm_layers": 2,
+    "n_features":   85,
+    "lstm_hidden":  128,
+    "lstm_layers":  2,
     "lstm_dropout": 0.3,
-    "num_classes": 3
+    "num_classes":  3
   }
 }

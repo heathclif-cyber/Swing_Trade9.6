@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 from core.helpers import (
     safe_float, json_safe, _has_col, _last_val,
-    get_atr_multiplier, get_market_session, get_macro_trend, get_aging_status
+    get_atr_multiplier, get_market_session, get_macro_trend, get_aging_status,
+    load_inference_config,
 )
 from core.momentum import (
     check_momentum_hold, evaluate_exit_signals,
@@ -20,6 +21,14 @@ from core.momentum import (
     detect_sl_wick_fakeout
 )
 from core.levels import get_atr_projections_long, get_atr_projections_short, get_entry_based_sl
+
+# ── Module-level config (dibaca sekali saat import) ─────────────────────────
+_INFERENCE_CFG = load_inference_config()
+_VCB_CFG       = _INFERENCE_CFG.get("volatility_circuit_breaker", {})
+VCB_ENABLED    = _VCB_CFG.get("enabled",        True)
+VCB_MULTIPLIER = _VCB_CFG.get("atr_multiplier", 2.5)
+VCB_LOOKBACK   = _VCB_CFG.get("lookback_bars",   24)
+
 
 
 def calculate_71point_score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | None:
@@ -239,26 +248,32 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
         ml_error = "ml_engine tidak tersedia" if ml_engine is None else "df_m15 tidak tersedia"
 
     # ── Volatility Circuit Breaker ────────────────────────────────────────
-    # Jika volatility saat ini > 2.5× rata-rata 24 jam → paksa FLAT
-    # Tujuan: proteksi dari event-driven volatility (flash crash, news shock, dll.)
+    # Parameter dari module-level constants (inference_config.json)
     _vcb_active = False
     _vcb_reason = ""
-    if 'ATR_14' in df.columns and len(df) >= 24:
+
+    if VCB_ENABLED and 'ATR_14' in df.columns and len(df) >= VCB_LOOKBACK:
         _atr_col = df['ATR_14'].dropna()
-        if len(_atr_col) >= 24:
-            _atr_now     = float(_atr_col.iloc[-1])
-            _atr_avg_24h = float(_atr_col.iloc[-24:].mean())
-            if _atr_avg_24h > 0:
-                _vol_regime = _atr_now / _atr_avg_24h
-                if _vol_regime > 2.5:
+        if len(_atr_col) >= VCB_LOOKBACK:
+            _atr_now = float(_atr_col.iloc[-1])
+            _atr_avg = float(_atr_col.iloc[-VCB_LOOKBACK:].mean())
+            if _atr_avg > 0:
+                _vol_regime = _atr_now / _atr_avg
+                if _vol_regime > VCB_MULTIPLIER:
                     _vcb_active = True
-                    _vcb_reason = f"ATR {_atr_now:.6f} = {_vol_regime:.1f}× avg24h {_atr_avg_24h:.6f} (VCB threshold 2.5×)"
+                    _vcb_reason = (
+                        f"ATR {_atr_now:.6f} = {_vol_regime:.1f}× "
+                        f"avg{VCB_LOOKBACK}h {_atr_avg:.6f} "
+                        f"(threshold {VCB_MULTIPLIER}×)"
+                    )
                     logger.warning(f"[{symbol}] ⚠️ VOLATILITY CIRCUIT BREAKER AKTIF — {_vcb_reason}")
                     if ml_signal != 'FLAT':
                         ml_signal = 'FLAT'
                         ml_size   = 'SKIP'
                         ml_conf   = 0.0
                         ml_error  = f"VCB: {_vcb_reason}"
+
+
 
     # ── Decision ────────────────────────────────────────────────────────────
     long_active  = ml_signal == 'LONG'  and ml_size != 'SKIP'

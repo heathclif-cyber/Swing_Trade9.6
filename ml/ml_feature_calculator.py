@@ -1,13 +1,26 @@
+import sys
+import warnings
+from pathlib import Path
 import numpy as np
 import pandas as pd
-import warnings
+_PROJECT_ROOT = str(Path(__file__).parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
-# --- PARAMETER & KONSTANTA ---
-VP_WINDOW        = 96      # Volume profile rolling window
-VP_BINS          = 50      # Price bins untuk volume profile
-FVG_MIN_GAP_ATR  = 0.5     # Minimum FVG gap dalam ATR
-SWING_LOOKBACK   = 5       # Swing high/low lookback
-SEQ_LEN          = 32      # LSTM sequence length (v3: naik dari 20 → 32)
+from core.helpers import load_inference_config as _load_cfg
+
+# ── Semua parameter dibaca dari inference_config.json (Single Source of Truth) ──
+# Jika key tidak ada, fallback ke nilai default agar backward-compatible.
+_cfg     = _load_cfg()
+_fe_cfg  = _cfg.get("feature_engineering", {})
+
+VP_WINDOW        = _fe_cfg.get("vp_window",        96)
+VP_BINS          = _fe_cfg.get("vp_bins",           50)
+FVG_MIN_GAP_ATR  = _fe_cfg.get("fvg_min_gap_atr",  0.5)
+SWING_LOOKBACK   = _fe_cfg.get("swing_lookback",    5)
+SEQ_LEN          = _cfg.get("inference", {}).get("seq_len", 32)
+
+
 
 FEATURE_COLS = [
     # OHLCV
