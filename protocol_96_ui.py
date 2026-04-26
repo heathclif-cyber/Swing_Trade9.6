@@ -54,6 +54,14 @@ def _normalize_m15_columns(df):
     return df
 import signal_monitor  # type: ignore
 from requests.packages import urllib3  # type: ignore
+
+# ── Trade Logger (auto-capture ke Supabase trade_log) ────────────────────────
+try:
+    import trade_logger as _trade_logger
+    _TRADE_LOGGER_AVAILABLE = True
+except Exception as _tl_import_err:
+    _trade_logger = None  # type: ignore
+    _TRADE_LOGGER_AVAILABLE = False
 # NOTE: data_engine.py telah dipensiun — semua fetch data melalui protocol_96_enrichment (SSOT)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -398,6 +406,80 @@ def save_trade_entries(entries: dict) -> bool:  # type: ignore
     except Exception as e:
         logger.error(f"Failed to save trade entries to file: {e}")
         return False
+
+
+# ── Trade Logger KV helpers — active_trade_id per symbol ─────────────────────
+# Menyimpan UUID trade_id di kv_store PostgreSQL agar kompatibel multi-worker Gunicorn.
+# Key format: "active_trade_{SYMBOL}" e.g. "active_trade_SOLUSDT"
+
+def _set_active_trade_id(symbol: str, trade_id: str) -> None:
+    """Simpan active trade_id ke kv_store PostgreSQL."""
+    key = f"active_trade_{symbol.upper()}"
+    if not DATABASE_URL:
+        return
+    conn = _get_pg_conn()
+    if conn is None:
+        return
+    try:
+        _ensure_pg_table(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO kv_store (key, value, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                (key, trade_id),
+            )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"[TradeLog] Gagal simpan active_trade_id untuk {symbol}: {e}")
+    finally:
+        try: conn.close()
+        except: pass
+
+
+def _get_active_trade_id(symbol: str):  # type: ignore
+    """Ambil active trade_id dari kv_store PostgreSQL. Return None jika tidak ada."""
+    key = f"active_trade_{symbol.upper()}"
+    if not DATABASE_URL:
+        return None
+    conn = _get_pg_conn()
+    if conn is None:
+        return None
+    try:
+        _ensure_pg_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM kv_store WHERE key = %s", (key,))
+            row = cur.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        logger.warning(f"[TradeLog] Gagal ambil active_trade_id untuk {symbol}: {e}")
+        try: conn.close()
+        except: pass
+    return None
+
+
+def _clear_active_trade_id(symbol: str) -> None:
+    """Hapus active trade_id dari kv_store PostgreSQL setelah exit."""
+    key = f"active_trade_{symbol.upper()}"
+    if not DATABASE_URL:
+        return
+    conn = _get_pg_conn()
+    if conn is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM kv_store WHERE key = %s", (key,))
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"[TradeLog] Gagal hapus active_trade_id untuk {symbol}: {e}")
+    finally:
+        try: conn.close()
+        except: pass
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def get_entry_summary(symbol: str) -> dict:  # type: ignore
@@ -1220,6 +1302,80 @@ def set_trade_entry():
         entries[symbol]['allocated_capital'] = allocated_capital
         save_trade_entries(entries)
 
+        # ── TRADE LOGGER: Catat entry ke trade_log (Supabase) ────────────────
+        if _TRADE_LOGGER_AVAILABLE:
+            try:
+                # 1. Snapshot fitur dari enrichment cache (non-blocking)
+                _feat = {}
+                try:
+                    _dq, _dm, _dm15 = _get_enriched_data(symbol)
+                    if _dq is not None and not _dq.empty:
+                        _lc = _dq.iloc[-1]
+                        def _fv(col, default=None):  # safe float from last candle
+                            v = _lc.get(col)
+                            try: return float(v) if v is not None and pd.notna(v) else default
+                            except: return default
+                        _feat = {
+                            "atr_14_m15":    _fv("ATR_14"),
+                            "atr_14_h4":     _fv("ATR_14_H4"),
+                            "rsi_6":         _fv("RSI_6"),
+                            "ema_7_h4":      _fv("EMA_7_H4"),
+                            "ema_50_h4":     _fv("EMA_50_H4"),
+                            "ema_200_h4":    _fv("EMA_200_H4"),
+                            "close":         _fv("Close"),
+                            "adx":           None,  # TODO: tambahkan ADX ke enrichment pipeline
+                            "funding_rate":  _fv("Funding_Rate"),
+                            "fear_greed":    _fv("Fear_Greed"),  # TODO: pastikan Fear_Greed ada di enrichment
+                            "btc_dominance": _fv("BTC_Dominance"),
+                            "market_session":str(_lc.get("Market_Session", "") or ""),
+                            "MSB_BOS":       _fv("BOS"),
+                            "CHoCH":         _fv("CHoCH"),
+                            "FVG_up":        _fv("FVG_Up_Top"),
+                            "FVG_down":      _fv("FVG_Down_Top"),
+                            "cvd":           _fv("CVD"),
+                            "open_interest": _fv("Open_Interest"),
+                        }
+                except Exception as _fe:
+                    logger.warning(f"[TradeLog] Gagal ambil feature snapshot: {_fe}")
+
+                # 2. ML proba dari algo_scoring (ensemble calibrated)
+                # NOTE: ml_proba berisi ensemble proba saja.
+                # TODO: expose lgbm_proba & lstm_proba individual dari MLSignalEngine.predict()
+                _ensemble_proba = {}
+                try:
+                    _dq2, _dm2, _dm152 = _get_enriched_data(symbol)
+                    if _dq2 is not None and not _dq2.empty and len(_dq2) >= 22:
+                        _qr = algo_scoring.calculate_71point_score(
+                            _dq2,
+                            {'Symbol': symbol, 'AVG_ENTRY_PRICE': entry_price, 'ENTRY_DATE': None},
+                            df_m15=_dm152, ml_engine=_ui_ml_engine,
+                        )
+                        if _qr:
+                            _ensemble_proba = _qr['long'].get('ml_proba', {})
+                except Exception as _me:
+                    logger.warning(f"[TradeLog] Gagal ambil ML proba: {_me}")
+
+                _trade_id = _trade_logger.log_entry(
+                    symbol             = symbol,
+                    direction          = side,
+                    price_entry        = entry_price,
+                    features           = _feat,
+                    lgbm_proba         = _ensemble_proba,   # TODO: ganti LGBM individual proba
+                    lstm_proba         = _ensemble_proba,   # TODO: ganti LSTM individual proba
+                    ensemble_proba     = _ensemble_proba,
+                    tp_price           = data.get("tp_price"),
+                    sl_price           = data.get("sl_price"),
+                    position_size_usdt = allocated_capital,
+                    leverage           = float(leverage),
+                    note               = data.get("note"),
+                )
+                _set_active_trade_id(symbol, _trade_id)
+                logger.info(f"[TradeLog] Entry logged: trade_id={_trade_id}")
+            except Exception as _tl_err:
+                # Logging error TIDAK menggagalkan response utama ke user
+                logger.error(f"[TradeLog] log_entry gagal (non-fatal): {_tl_err}")
+        # ─────────────────────────────────────────────────────────────────────
+
         summary = get_entry_summary(symbol)
         logger.info(
             f"💰 Entry: {symbol} {side} {market_type} x{leverage} "
@@ -1296,6 +1452,42 @@ def set_trade_sale():
         }
         entries[symbol]['sales'].append(new_sale)
         save_trade_entries(entries)
+
+        # ── TRADE LOGGER: Catat exit ke trade_log (Supabase) ─────────────────
+        if _TRADE_LOGGER_AVAILABLE:
+            try:
+                _active_tid = _get_active_trade_id(symbol)
+                if _active_tid:
+                    # Hitung PnL dari rolling avg cost vs harga jual
+                    _pre_summary  = get_entry_summary(symbol)
+                    _avg_cost     = _pre_summary.get('rolling_avg_cost', 0) or 0
+                    _pos_side     = entries[symbol].get('position_side', 'LONG')
+                    if _pos_side == 'SHORT':
+                        _pnl_usdt = (_avg_cost - sell_price) * qty
+                    else:
+                        _pnl_usdt = (sell_price - _avg_cost) * qty
+                    # outcome: TP/SL/MANUAL — ambil dari body request jika ada
+                    _outcome = str(data.get("outcome", "MANUAL")).upper()
+                    if _outcome not in ("TP", "SL", "MANUAL"):
+                        _outcome = "MANUAL"
+                    _trade_logger.log_exit(
+                        trade_id   = _active_tid,
+                        price_exit = sell_price,
+                        outcome    = _outcome,
+                        pnl_usdt   = round(_pnl_usdt, 4),
+                        note       = data.get("note"),
+                    )
+                    # Clear trade_id hanya jika semua posisi sudah terjual habis
+                    _post_summary = get_entry_summary(symbol)
+                    if _post_summary.get('remaining_qty', 0) <= 0:
+                        _clear_active_trade_id(symbol)
+                    logger.info(f"[TradeLog] Exit logged: trade_id={_active_tid} outcome={_outcome} pnl={_pnl_usdt:+.4f}")
+                else:
+                    logger.warning(f"[TradeLog] Tidak ada active trade_id untuk {symbol} — exit tidak di-log")
+            except Exception as _tl_err:
+                # Logging error TIDAK menggagalkan response utama ke user
+                logger.error(f"[TradeLog] log_exit gagal (non-fatal): {_tl_err}")
+        # ─────────────────────────────────────────────────────────────────────
 
         summary = get_entry_summary(symbol)
         return jsonify({"success": True, "summary": summary})
@@ -1975,6 +2167,66 @@ def api_price_perf_v2(pair: str):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+
+
+# ==========================================
+# 📒 TRADE LOGBOOK ENDPOINTS
+# ==========================================
+
+@app.route("/api/logbook", methods=["GET"])
+def api_logbook():
+    """
+    Ambil daftar trade dari tabel trade_log dengan filter opsional.
+    Query params: symbol, status (OPEN|CLOSED), regime (BULLISH|BEARISH|SIDEWAYS|HIGH_VOL), limit
+    """
+    if not _TRADE_LOGGER_AVAILABLE:
+        return jsonify({"success": False, "error": "trade_logger tidak tersedia"}), 503
+    try:
+        symbol = flask_request.args.get("symbol")
+        status = flask_request.args.get("status")
+        regime = flask_request.args.get("regime")
+        limit  = int(flask_request.args.get("limit", 100))
+
+        trades = _trade_logger.get_logbook(
+            symbol=symbol, status=status, regime=regime, limit=limit
+        )
+        # Serialize datetime ke ISO string agar JSON-safe
+        for t in trades:
+            for k, v in t.items():
+                if hasattr(v, "isoformat"):
+                    t[k] = v.isoformat()
+
+        return jsonify({"success": True, "count": len(trades), "trades": trades})
+    except Exception as e:
+        logger.error(f"[Logbook] api_logbook error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/logbook/stats", methods=["GET"])
+def api_logbook_stats():
+    """
+    Statistik ringkasan semua trade CLOSED: win rate, PnL, hold duration, per-regime breakdown.
+    """
+    if not _TRADE_LOGGER_AVAILABLE:
+        return jsonify({"success": False, "error": "trade_logger tidak tersedia"}), 503
+    try:
+        stats = _trade_logger.get_summary_stats()
+        # Serialize Decimal/float dari PostgreSQL agar JSON-safe
+        def _safe(v):
+            try:
+                if v is None: return None
+                return float(v)
+            except Exception:
+                return str(v)
+        clean = {k: _safe(v) for k, v in stats.items() if k != "regime_breakdown"}
+        clean["regime_breakdown"] = [
+            {rk: _safe(rv) if rk != "regime" else rv for rk, rv in row.items()}
+            for row in stats.get("regime_breakdown", [])
+        ]
+        return jsonify({"success": True, "stats": clean})
+    except Exception as e:
+        logger.error(f"[Logbook] api_logbook_stats error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ==========================================
