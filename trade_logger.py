@@ -72,21 +72,21 @@ def _detect_regime(features: dict) -> str:
     Return: 'BULLISH' | 'BEARISH' | 'SIDEWAYS' | 'HIGH_VOL'
 
     Logic:
-    - HIGH_VOL   : atr_ratio > 1.5 (ATR h4 relatif tinggi vs m15)
-    - BULLISH    : adx >= 25 AND close > ema_50_h4 > ema_200_h4
-    - BEARISH    : adx >= 25 AND close < ema_50_h4 < ema_200_h4
-    - SIDEWAYS   : adx < 25
+    - HIGH_VOL   : atr_ratio > 1.5 (ATR H4 relatif tinggi vs H1)
+    - BULLISH    : trend_strength >= 25 AND close > ema_50_h4 > ema_200_h4
+    - BEARISH    : trend_strength >= 25 AND close < ema_50_h4 < ema_200_h4
+    - SIDEWAYS   : trend_strength < 25
     """
     try:
-        atr_m15    = float(features.get("atr_14_m15", 0) or 0)
+        atr_h1     = float(features.get("atr_14_h1", 0) or 0)   # base timeframe H1
         atr_h4     = float(features.get("atr_14_h4", 0) or 0)
-        adx        = float(features.get("adx", 0) or 0)
+        adx        = float(features.get("trend_strength", 0) or 0)  # proxy untuk ADX
         close      = float(features.get("close", 0) or 0)
         ema_50_h4  = float(features.get("ema_50_h4", 0) or 0)
         ema_200_h4 = float(features.get("ema_200_h4", 0) or 0)
 
-        # HIGH_VOL: ATR H4 lebih dari 1.5x ATR M15
-        if atr_m15 > 0 and (atr_h4 / atr_m15) > 1.5:
+        # HIGH_VOL: ATR H4 lebih dari 1.5x ATR H1
+        if atr_h1 > 0 and (atr_h4 / atr_h1) > 1.5:
             return "HIGH_VOL"
 
         if adx >= 25:
@@ -214,13 +214,13 @@ def log_entry(
         "ensemble_conf_short": ensemble_proba.get("SHORT", 0),
         "ensemble_conf_flat":  ensemble_proba.get("FLAT", 0),
 
-        # Fitur snapshot dari candle terakhir
-        "atr_14_m15":     features.get("atr_14_m15"),
+        # Fitur snapshot dari candle terakhir (sesuai FEATURE_COLS_V3)
+        "atr_14_m15":     features.get("atr_14_h1"),   # base timeframe H1, bukan M15
         "atr_14_h4":      features.get("atr_14_h4"),
         "rsi_6":          features.get("rsi_6"),
         "ema_7_h4":       features.get("ema_7_h4"),
         "ema_200_h4":     features.get("ema_200_h4"),
-        "adx":            features.get("adx"),
+        "adx":            features.get("trend_strength"),  # ADX tidak ada, proxy: trend_strength
         "regime":         regime,
         "funding_rate":   features.get("funding_rate"),
         "fear_greed":     features.get("fear_greed"),
