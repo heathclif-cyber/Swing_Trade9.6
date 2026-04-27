@@ -295,6 +295,7 @@ function renderQuantAnalysis(quant, state) {
             </div>`;
     }
 
+    console.log("[SHAP DEBUG] received in UI:", pctx.shap_top_features);
     if (pctx.shap_top_features && pctx.shap_top_features.length > 0) {
         html += `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:16px 0 8px">🔍 Top SHAP Drivers — Mengapa ${data.ml_signal || 'FLAT'}?</div>`;
         html += `<div style="background:rgba(0,0,0,0.2); border-radius:6px; padding:8px; border:1px solid rgba(255,255,255,0.05);">`;
@@ -529,6 +530,7 @@ function renderCSVResult(json) {
                 </div>`;
         }
         
+        console.log("[SHAP DEBUG] received in UI (CSV):", pctx.shap_top_features);
         if (pctx.shap_top_features && pctx.shap_top_features.length > 0) {
             featureRows += `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:16px 0 8px">🔍 Top SHAP Drivers — Mengapa ${d.ml_signal || 'FLAT'}?</div>`;
             featureRows += `<div style="background:rgba(0,0,0,0.2); border-radius:6px; padding:8px; border:1px solid rgba(255,255,255,0.05);">`;

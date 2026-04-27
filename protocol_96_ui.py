@@ -1178,7 +1178,7 @@ def api_data():
             state["quant_analysis"] = None
 
         logger.info("✅ Dashboard data ready!")
-        return jsonify({
+        payload = {
             "success":      True,
             "timestamp":    now_str,
             "raw_data":     raw_data,
@@ -1186,7 +1186,12 @@ def api_data():
             "computed":     computed,
             "state":        state,
             "data_warning": _data_warning,   # UI bisa tampilkan banner peringatan
-        })
+        }
+        
+        _shap = state.get("quant_analysis", {}).get("variables", {}).get("shap_top_features", []) if state.get("quant_analysis") else []
+        logger.info(f"[SHAP DEBUG] payload shap: {len(_shap)} items")
+        
+        return jsonify(payload)
 
     except (BinanceAPIException, BinanceRequestException) as bae:
         logger.error(f"Binance API Error: {bae}")

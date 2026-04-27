@@ -290,7 +290,7 @@ class MLSignalEngine:
             except Exception as e:
                 logger.error(f"[{symbol}] Error calculating SHAP: {e}")
 
-        return {
+        result = {
             'signal':     signal,
             'confidence': round(confidence, 4),
             'size':       size,
@@ -303,3 +303,8 @@ class MLSignalEngine:
             'symbol':     symbol,
             'shap_top_features': shap_top_features,
         }
+        
+        logging.info(f"[SHAP DEBUG] shap_top_features count: {len(result.get('shap_top_features', []))}")
+        logging.info(f"[SHAP DEBUG] sample: {result.get('shap_top_features', [])[:2]}")
+        
+        return result
