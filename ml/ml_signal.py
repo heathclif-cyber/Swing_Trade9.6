@@ -9,6 +9,11 @@ import torch.nn as nn
 import joblib
 from pathlib import Path
 
+try:
+    import shap
+except ImportError:
+    raise ImportError("Jalankan: pip install shap")
+
 warnings.filterwarnings("ignore")
 
 logger = logging.getLogger("ml_signal")
@@ -105,6 +110,12 @@ class MLSignalEngine:
         self.lstm_model = self._load_lstm(ML_DIR / lstm_file, n_feats)
         self.device     = torch.device('cpu')
 
+        try:
+            self.shap_explainer = shap.TreeExplainer(self.lgbm_model)
+        except Exception as e:
+            logger.warning(f"Gagal inisialisasi SHAP explainer: {e}")
+            self.shap_explainer = None
+
         logger.info(
             f"[MLSignalEngine] Active: {active} | n_features={n_feats} "
             f"| seq_len={SEQ_LEN} | F1={cfg.get('f1_macro', '?')}"
@@ -157,6 +168,7 @@ class MLSignalEngine:
             return {
                 'signal': 'FLAT', 'confidence': 0.0, 'size': 'SKIP',
                 'proba': {}, 'model_type': 'error', 'symbol': symbol,
+                'shap_top_features': [],
             }
 
     def _predict_ensemble(self, symbol, df_h1, funding_rate, btc_dominance, fear_greed):
@@ -250,6 +262,34 @@ class MLSignalEngine:
         else:
             size = 'HALF'
 
+        # 8. Calculate SHAP values
+        shap_top_features = []
+        if getattr(self, "shap_explainer", None) is not None:
+            try:
+                shap_vals = self.shap_explainer.shap_values(X_lgbm[lgbm_feat_cols])
+                
+                # Multiclass SHAP usually returns a list of arrays (one per class)
+                if isinstance(shap_vals, list):
+                    target_shap = shap_vals[signal_int][0]
+                elif len(shap_vals.shape) == 3:
+                    target_shap = shap_vals[signal_int][0]
+                else:
+                    target_shap = shap_vals[0]
+                
+                feature_shap = []
+                for feat, s_val in zip(lgbm_feat_cols, target_shap):
+                    feature_shap.append({
+                        "feature": feat,
+                        "shap_value": round(float(s_val), 2),
+                        "direction": "positive" if s_val > 0 else "negative",
+                        "abs_val": abs(float(s_val))
+                    })
+                
+                feature_shap.sort(key=lambda x: x["abs_val"], reverse=True)
+                shap_top_features = [{"feature": f["feature"], "shap_value": f["shap_value"], "direction": f["direction"]} for f in feature_shap[:8]]
+            except Exception as e:
+                logger.error(f"[{symbol}] Error calculating SHAP: {e}")
+
         return {
             'signal':     signal,
             'confidence': round(confidence, 4),
@@ -261,4 +301,5 @@ class MLSignalEngine:
             },
             'model_type': self.cfg.get('type', 'ensemble'),
             'symbol':     symbol,
+            'shap_top_features': shap_top_features,
         }

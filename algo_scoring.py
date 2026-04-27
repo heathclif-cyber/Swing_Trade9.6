@@ -210,6 +210,7 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
     ml_conf   = 0.0
     ml_proba  = {}
     ml_error  = None
+    shap_top_features = []
 
     if ml_engine is not None and df_m15 is not None:
         try:
@@ -240,6 +241,7 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
             ml_size   = r.get('size',       'SKIP')
             ml_conf   = r.get('confidence', 0.0)
             ml_proba  = r.get('proba',      {})
+            shap_top_features = r.get('shap_top_features', [])
             logger.info(f"[{symbol}] ML → {ml_signal} {ml_size} conf={ml_conf:.4f}")
         except Exception as e:
             ml_error = str(e)
@@ -499,6 +501,7 @@ def _score(df: pd.DataFrame, meta: dict, df_m15=None, ml_engine=None) -> dict | 
             'ml_confidence': round(ml_conf,4),
             'ml_size':       ml_size,
             'ml_proba':      ml_proba,
+            'shap_top_features': shap_top_features,
             'ml_error':      ml_error,
             'vcb_active':    _vcb_active,
             'vcb_reason':    _vcb_reason,

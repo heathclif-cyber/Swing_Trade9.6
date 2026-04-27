@@ -1984,8 +1984,14 @@ def api_price_perf_v2(pair: str):
         # ─── Hitung Wilder ATR(14) dari OHLCV ───
         import numpy as np
         ATR_PERIOD   = 14
-        TP_ATR_MULT  = 2.0    # TP = close ± 2 × ATR_14  (sama untuk LONG & SHORT)
-        SL_ATR_MULT  = 1.0    # SL = close ∓ 1 × ATR_14  (sama untuk LONG & SHORT)
+        # Multiplier ATR untuk swing trading M15:
+        # ATR M15 sangat kecil (noise candle 15 menit) — perlu multiplier lebih besar
+        # agar SL tidak sering kena noise dan simulasi lebih realistis.
+        # Rumus:
+        #   LONG : TP = close + 3×ATR  |  SL = close - 1.5×ATR  (R:R = 2×)
+        #   SHORT: TP = close - 3×ATR  |  SL = close + 1.5×ATR  (R:R = 2×)
+        TP_ATR_MULT  = 3.0    # was 2.0 — lebih lebar untuk swing
+        SL_ATR_MULT  = 1.5    # was 1.0 — buffer dari noise M15
         MAX_HOLD     = 96     # candle M15 = 24 jam (sinkron min_hold_bars dari inference_config)
         FEE_SIDE     = 0.0004 # 0.04% per side
 

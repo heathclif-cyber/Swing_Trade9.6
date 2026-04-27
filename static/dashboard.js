@@ -295,6 +295,26 @@ function renderQuantAnalysis(quant, state) {
             </div>`;
     }
 
+    if (pctx.shap_top_features && pctx.shap_top_features.length > 0) {
+        html += `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:16px 0 8px">🔍 Top SHAP Drivers — Mengapa ${data.ml_signal || 'FLAT'}?</div>`;
+        html += `<div style="background:rgba(0,0,0,0.2); border-radius:6px; padding:8px; border:1px solid rgba(255,255,255,0.05);">`;
+        pctx.shap_top_features.forEach(f => {
+            const isPos = f.direction === 'positive';
+            const color = isPos ? 'var(--accent-red)' : 'var(--accent-green)';
+            const icon = isPos ? '🔴' : '🟢';
+            const barWidth = Math.min(100, Math.abs(f.shap_value) * 100);
+            html += `<div style="display:flex; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.02);">
+                <div style="color:var(--text-2); font-size:11px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.feature.replace(/_/g, ' ')}</div>
+                <div style="font-family:var(--mono); color:${color}; font-size:11px; width:45px; text-align:right; margin-right:8px;">${f.shap_value > 0 ? '+' : ''}${f.shap_value}</div>
+                <div style="font-size:10px; margin-right:6px;">${icon}</div>
+                <div style="width:50px; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden;">
+                    <div style="width:${barWidth}%; height:100%; background:${color};"></div>
+                </div>
+            </div>`;
+        });
+        html += `<div style="font-size:9px; color:var(--text-3); margin-top:6px; text-align:center;">* Merah = mendorong ${data.ml_signal || 'FLAT'} | Hijau = melawan ${data.ml_signal || 'FLAT'}</div></div>`;
+    }
+
     // ML Confidence chart dipindahkan ke Price Performance Monitor
 
     document.getElementById('featureGrid').innerHTML = html;
@@ -508,6 +528,27 @@ function renderCSVResult(json) {
                 <div class="feature-bar-bg" style="width:60px; margin-left:10px"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
                 </div>`;
         }
+        
+        if (pctx.shap_top_features && pctx.shap_top_features.length > 0) {
+            featureRows += `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:16px 0 8px">🔍 Top SHAP Drivers — Mengapa ${d.ml_signal || 'FLAT'}?</div>`;
+            featureRows += `<div style="background:rgba(0,0,0,0.2); border-radius:6px; padding:8px; border:1px solid rgba(255,255,255,0.05);">`;
+            pctx.shap_top_features.forEach(f => {
+                const isPos = f.direction === 'positive';
+                const color = isPos ? 'var(--accent-red)' : 'var(--accent-green)';
+                const icon = isPos ? '🔴' : '🟢';
+                const barWidth = Math.min(100, Math.abs(f.shap_value) * 100);
+                featureRows += `<div style="display:flex; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.02);">
+                    <div style="color:var(--text-2); font-size:11px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.feature.replace(/_/g, ' ')}</div>
+                    <div style="font-family:var(--mono); color:${color}; font-size:11px; width:45px; text-align:right; margin-right:8px;">${f.shap_value > 0 ? '+' : ''}${f.shap_value}</div>
+                    <div style="font-size:10px; margin-right:6px;">${icon}</div>
+                    <div style="width:50px; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden;">
+                        <div style="width:${barWidth}%; height:100%; background:${color};"></div>
+                    </div>
+                </div>`;
+            });
+            featureRows += `<div style="font-size:9px; color:var(--text-3); margin-top:6px; text-align:center;">* Merah = mendorong ${d.ml_signal || 'FLAT'} | Hijau = melawan ${d.ml_signal || 'FLAT'}</div></div>`;
+        }
+
         // R:R Matrix for CSV
         let rrHtml = '';
         const rrm = lv.rr_matrix;
