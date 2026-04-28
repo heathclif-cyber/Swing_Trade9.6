@@ -314,7 +314,7 @@ def _fetch_macro_cmc() -> dict | None:
         r = requests.get(url, headers=headers, timeout=8, verify=False)
         if r.status_code == 200:
             d = r.json()["data"]
-            btc_dom_raw   = round(d["btc_dominance"] * 100, 1)
+            btc_dom_raw   = round(d["btc_dominance"], 1)
             btc_dom_frac  = d["btc_dominance"] / 100
             total_mcap    = d["quote"]["USD"]["total_market_cap"]
             altcoin_index = round(total_mcap * (1 - btc_dom_frac) / 1_000_000_000, 1)
@@ -707,12 +707,12 @@ def get_fully_enriched_data(symbol: str, interval: str = "1h",
         # fapi tidak tersedia → gunakan 0.0 (neutral)
         # Nilai 0.0 aman: Gate L3 (≤ +0.0003) PASS, Gate S3 (≥ -0.0003) PASS
         # has_funding = True dengan nilai 0.0 → scoring berjalan normal (netral)
+        # TIDAK ditambahkan ke missing agar signal monitor tetap berjalan
         df["Funding_Rate"] = 0.0
         logger.info(
             f"  [FR] Funding Rate tidak tersedia untuk {symbol} "
             "— menggunakan 0.0 (netral). Gate funding PASS otomatis."
         )
-        missing.append("FundingRate")
 
     # ── 5. H4 Macro EMAs (EMA_200_H4, dll.) ───────────────
     df_h4 = _get_klines_cached(symbol, "4h", limit=250) if interval != "4h" else df
