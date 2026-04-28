@@ -529,7 +529,7 @@ function renderCSVResult(json) {
                 <div class="feature-bar-bg" style="width:60px; margin-left:10px"><div class="feature-bar-fill" style="width:${fillPct}%;background:${fillColor}"></div></div>
                 </div>`;
         }
-        
+
         console.log("[SHAP DEBUG] received in UI (CSV):", pctx.shap_top_features);
         if (pctx.shap_top_features && pctx.shap_top_features.length > 0) {
             featureRows += `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:16px 0 8px">🔍 Top SHAP Drivers — Mengapa ${d.ml_signal || 'FLAT'}?</div>`;
@@ -913,16 +913,16 @@ function renderEntryList() {
 /* ── THEME ───────────────────────────────────────────────────────────────── */
 function toggleTheme() {
     const h = document.documentElement;
-    const isDark = h.getAttribute('data-theme') === 'dark';
-    h.setAttribute('data-theme', isDark ? 'light' : 'dark');
-    localStorage.setItem('theme', isDark ? 'light' : 'dark');
+    const isLight = h.classList.contains('light');
+    h.classList.toggle('light');
+    localStorage.setItem('theme', isLight ? 'dark' : 'light');
 }
 
 /* ── MARKET SCANNER (ALL COINS) ──────────────────────────────────────────── */
 async function fetchScannerData() {
     const grid = document.getElementById('scannerGrid');
     try {
-        const res  = await fetch('/api/scanner');
+        const res = await fetch('/api/scanner');
         const json = await res.json();
 
         if (!json.success) throw new Error(json.error || 'Scanner gagal memuat.');
@@ -935,12 +935,12 @@ async function fetchScannerData() {
         const groups = { LONG: [], SHORT: [], WAIT: [] };
         json.data.forEach(d => {
             if (d.error) { groups.WAIT.push(d); return; }
-            const mlSignal  = d.ml_signal  || 'FLAT';
-            const mlSize    = d.ml_size    || 'SKIP';
+            const mlSignal = d.ml_signal || 'FLAT';
+            const mlSize = d.ml_size || 'SKIP';
             const mlSignalS = d.ml_signal_s || 'FLAT';
-            const mlSizeS   = d.ml_size_s  || 'SKIP';
+            const mlSizeS = d.ml_size_s || 'SKIP';
 
-            const isLong  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
+            const isLong = (mlSignal === 'LONG') && (mlSize === 'FULL' || mlSize === 'HALF');
             const isShort = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
 
             if (isLong) groups.LONG.push(d);
@@ -956,14 +956,14 @@ async function fetchScannerData() {
                         <div class="sc-header"><span class="sc-pair">${d.pair}</span><span style="color:var(--accent-red);font-size:11px">⚠️ Error</span></div>
                     </div>`;
                 }
-                const mlSignal  = d.ml_signal  || 'FLAT';
-                const mlConf    = d.ml_confidence || 0;
-                const mlSize    = d.ml_size    || 'SKIP';
+                const mlSignal = d.ml_signal || 'FLAT';
+                const mlConf = d.ml_confidence || 0;
+                const mlSize = d.ml_size || 'SKIP';
                 const mlSignalS = d.ml_signal_s || 'FLAT';
-                const mlConfS   = d.ml_confidence_s || 0;
-                const mlSizeS   = d.ml_size_s  || 'SKIP';
+                const mlConfS = d.ml_confidence_s || 0;
+                const mlSizeS = d.ml_size_s || 'SKIP';
 
-                const longActive  = (mlSignal  === 'LONG')  && (mlSize  === 'FULL' || mlSize  === 'HALF');
+                const longActive = (mlSignal === 'LONG') && (mlSize === 'FULL' || mlSize === 'HALF');
                 const shortActive = (mlSignalS === 'SHORT') && (mlSizeS === 'FULL' || mlSizeS === 'HALF');
 
                 let decIcon, decLabel, decColor, decConf, decSize, decBg, decBorder, cardClass;
@@ -993,7 +993,7 @@ async function fetchScannerData() {
                         <div><div class="sc-pair">${d.pair}</div><div class="sc-price">$${d.close.toFixed(5)}</div></div>
                         <div class="sc-decision" style="background:${decBg};border-color:${decBorder}">
                             <span class="sc-dec-icon">${decIcon}</span>
-                            <div><div style="display:flex;align-items:center;gap:6px"><span class="sc-dec-label" style="color:${decColor}">${decLabel}</span>${sizePill}</div><div class="sc-dec-sub" style="color:${decColor}">${(decConf*100).toFixed(1)}% conf</div></div>
+                            <div><div style="display:flex;align-items:center;gap:6px"><span class="sc-dec-label" style="color:${decColor}">${decLabel}</span>${sizePill}</div><div class="sc-dec-sub" style="color:${decColor}">${(decConf * 100).toFixed(1)}% conf</div></div>
                         </div>
                     </div>
                     ${entryHtml}
@@ -1010,8 +1010,8 @@ async function fetchScannerData() {
         };
 
         grid.innerHTML = renderGroup('🟢 SETUPS LONG', groups.LONG, '#34d399') +
-                         renderGroup('🔴 SETUPS SHORT', groups.SHORT, '#f87171') +
-                         renderGroup('⚪ WATCHLIST / WAIT', groups.WAIT, 'var(--text-3)');
+            renderGroup('🔴 SETUPS SHORT', groups.SHORT, '#f87171') +
+            renderGroup('⚪ WATCHLIST / WAIT', groups.WAIT, 'var(--text-3)');
 
     } catch (e) {
         grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--accent-red);padding:40px">❌ Error Scanner: ${e.message}</div>`;
@@ -1039,7 +1039,7 @@ const _confChartOpen = {};   // track open state per pair
 
 async function toggleConfChart(pair) {
     const container = document.getElementById(`conf-chart-${pair}`);
-    const btn       = document.getElementById(`conf-btn-${pair}`);
+    const btn = document.getElementById(`conf-btn-${pair}`);
     if (!container) return;
 
     if (_confChartOpen[pair]) {
@@ -1056,7 +1056,7 @@ async function toggleConfChart(pair) {
     _confChartOpen[pair] = true;
 
     try {
-        const res  = await fetch(`/api/confidence-history/${pair}`);
+        const res = await fetch(`/api/confidence-history/${pair}`);
         const json = await res.json();
         if (!json.success || !json.data.length) {
             container.innerHTML = `<div style="text-align:center;color:var(--text-3);font-size:11px;padding:10px">
@@ -1080,11 +1080,11 @@ function renderConfidenceChart(pair, data, customWidth = 280) {
     const W = customWidth, H = 80, PAD = 12;
     const n = data.length;
     const confs = data.map(d => d.ml_conf * 100);
-    const minC = Math.max(0,  Math.min(...confs) - 5);
+    const minC = Math.max(0, Math.min(...confs) - 5);
     const maxC = Math.min(100, Math.max(...confs) + 5);
     const range = maxC - minC || 1;
 
-    const toX = i   => PAD + (i / Math.max(n - 1, 1)) * (W - 2 * PAD);
+    const toX = i => PAD + (i / Math.max(n - 1, 1)) * (W - 2 * PAD);
     const toY = val => H - PAD - ((val - minC) / range) * (H - 2 * PAD);
 
     // Build polyline points
@@ -1151,7 +1151,7 @@ function renderConfidenceChart(pair, data, customWidth = 280) {
         </svg>
         <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-3);margin-top:2px">
             <span>${fmtTime(firstTs)} WITA</span>
-            <span style="color:${lastCol};font-weight:700">${last.ml_signal} ${(last.ml_conf*100).toFixed(1)}%</span>
+            <span style="color:${lastCol};font-weight:700">${last.ml_signal} ${(last.ml_conf * 100).toFixed(1)}%</span>
             <span>${fmtTime(lastTs)} WITA</span>
         </div>
         <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
@@ -1164,7 +1164,8 @@ function renderConfidenceChart(pair, data, customWidth = 280) {
 
 document.addEventListener('DOMContentLoaded', () => {
     const t = localStorage.getItem('theme') || 'dark';
-    document.documentElement.setAttribute('data-theme', t);
+    const h = document.documentElement;
+    if (t === 'light') h.classList.add('light');
     document.addEventListener('click', e => { if (e.target.id === 'entryModal') closeEntryModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEntryModal(); });
     fetchData(); // Fungsi utama me-load single dashboard default

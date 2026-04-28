@@ -1,1151 +1,833 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Protocol 9.6 — Structural Guardian Dashboard</title>
-    <meta name="description" content="Quantitative swing trading dashboard with 78-Point Scoring engine, live Binance data, and CSV analysis.">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-<style>
-/* ── DESIGN TOKENS ─────────────────────────────────────────────────────── */
-:root {
-    --bg-base:      #0a0e1a;
-    --bg-surface:   #0f1424;
-    --glass-bg:     rgba(255,255,255,0.035);
-    --glass-bg-2:   rgba(255,255,255,0.06);
-    --glass-hover:  rgba(255,255,255,0.055);
-    --glass-border: rgba(255,255,255,0.08);
-    --glass-glow:   rgba(99,140,255,0.08);
-    --accent-blue:   #637dff;
-    --accent-cyan:   #22d3ee;
-    --accent-green:  #34d399;
-    --accent-red:    #f87171;
-    --accent-yellow: #fbbf24;
-    --accent-purple: #a78bfa;
-    --accent-orange: #fb923c;
-    --text-1: #e8ecf4;
-    --text-2: #8b95ad;
-    --text-3: #5a6478;
-    --font:  'Inter', system-ui, sans-serif;
-    --mono:  'JetBrains Mono', monospace;
-    --radius-sm: 10px;
-    --radius-md: 14px;
-    --radius-lg: 18px;
-    --radius-xl: 24px;
-    --shadow-sm:  0 2px 12px rgba(0,0,0,0.4);
-    --shadow-md:  0 8px 32px rgba(0,0,0,0.5);
-    --glow-blue:  0 0 30px rgba(99,125,255,0.12);
-    --glow-green: 0 0 30px rgba(52,211,153,0.12);
-    --glow-red:   0 0 30px rgba(248,113,113,0.12);
-    --blur:       blur(24px);
-    --blur-sm:    blur(14px);
-    --transition: 0.25s cubic-bezier(.4,0,.2,1);
-}
-[data-theme="light"] {
-    --bg-base:      #eef2fa;
-    --bg-surface:   #e2e8f4;
-    --glass-bg:     rgba(255,255,255,0.6);
-    --glass-bg-2:   rgba(255,255,255,0.8);
-    --glass-hover:  rgba(255,255,255,0.72);
-    --glass-border: rgba(99,125,255,0.12);
-    --glass-glow:   rgba(99,125,255,0.06);
-    --text-1: #0f172a;
-    --text-2: #475569;
-    --text-3: #94a3b8;
-    --shadow-sm:  0 2px 8px rgba(0,0,0,0.06);
-    --shadow-md:  0 4px 20px rgba(0,0,0,0.1);
-}
-[data-theme="light"] .header {
-    background: rgba(238,242,250,0.92);
-}
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
-body {
-    font-family: var(--font); background: var(--bg-base); color: var(--text-1);
-    min-height: 100vh; -webkit-font-smoothing: antialiased; line-height: 1.5;
-    background-image:
-        radial-gradient(ellipse 70% 50% at 15% 0%, rgba(99,125,255,0.06) 0%, transparent 55%),
-        radial-gradient(ellipse 50% 40% at 85% 100%, rgba(167,139,250,0.05) 0%, transparent 55%);
-    background-attachment: fixed;
-}
-/* ── GLASS ──────────────────────────────────────────────────────────────── */
-.glass {
-    background: var(--glass-bg); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
-    border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm); transition: box-shadow var(--transition), background var(--transition);
-}
-.glass:hover { background: var(--glass-hover); box-shadow: var(--shadow-md); }
-.glass-sm {
-    background: var(--glass-bg); backdrop-filter: var(--blur-sm); -webkit-backdrop-filter: var(--blur-sm);
-    border: 1px solid var(--glass-border); border-radius: var(--radius-md);
-}
-/* ── LAYOUT ─────────────────────────────────────────────────────────────── */
-.app-container { max-width: 1520px; margin: 0 auto; padding: 12px 18px; }
-/* ── FLOATING STICKY HEADER ─────────────────────────────────────────────── */
-/* Wrapper sticky — bungkus header agar tidak ikut scroll */
-.header-sticky-wrapper {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    z-index: 900;
-    /* Shadow bawah untuk kedalaman saat scroll */
-    filter: drop-shadow(0 4px 20px rgba(0,0,0,0.5));
-}
-/* Kompensasi ketinggian header fixed agar konten tidak tertutup */
-body { padding-top: 72px; }
-/* ── HEADER ─────────────────────────────────────────────────────────────── */
-.header {
-    display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 8px; padding: 10px 16px; margin-bottom: 0;
-    /* Frosted glass dengan background solid agar konten tidak tembus */
-    background: rgba(10,14,26,0.90);
-    backdrop-filter: blur(30px) saturate(1.8);
-    -webkit-backdrop-filter: blur(30px) saturate(1.8);
-    box-shadow: 0 2px 20px rgba(0,0,0,0.5), 0 1px 0 var(--glass-border);
-    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    border-bottom: 1px solid var(--glass-border);
-}
-.header-left { display: flex; align-items: center; gap: 14px; }
-.header-logo {
-    width: 44px; height: 44px; border-radius: 14px;
-    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-    display: flex; align-items: center; justify-content: center;
-    font-size: 22px; box-shadow: var(--glow-blue);
-}
-.header-title { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
-.header-sub   { font-size: 12px; color: var(--text-3); font-weight: 400; }
-.header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.live-badge {
-    display: flex; align-items: center; gap: 6px;
-    background: var(--glass-bg); border: 1px solid var(--glass-border);
-    border-radius: 22px; padding: 6px 14px;
-    font-family: var(--mono); font-size: 12px; color: var(--text-2);
-}
-.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); animation: pulse 2s ease infinite; }
-@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes fadeIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
-@keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
-/* ── BUTTONS ────────────────────────────────────────────────────────────── */
-.btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 9px 18px; border: 1px solid var(--glass-border);
-    border-radius: 22px; font-family: var(--font); font-size: 13px; font-weight: 500;
-    cursor: pointer; transition: all var(--transition);
-    background: var(--glass-bg); color: var(--text-1); white-space: nowrap;
-}
-.btn:hover { background: var(--glass-hover); border-color: rgba(255,255,255,0.14); transform: translateY(-1px); }
-.btn-primary { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
-.btn-primary:hover { background: #4f6bef; box-shadow: var(--glow-blue); }
-.btn-green { background: var(--accent-green); color: #0a0e1a; border-color: var(--accent-green); font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
-.btn-green:hover { background: #2cc48a; box-shadow: var(--glow-green); }
-.btn-icon { padding: 9px 12px; font-size: 16px; }
-.btn-loading { opacity: .6; pointer-events: none; }
-.select-styled {
-    background: var(--glass-bg); color: var(--text-1);
-    border: 1px solid var(--glass-border); border-radius: 22px;
-    padding: 8px 16px; font-family: var(--font); font-size: 13px;
-    cursor: pointer; outline: none; transition: border-color var(--transition);
-}
-.select-styled:hover { border-color: var(--accent-blue); }
-/* ── STATUS STRIP ───────────────────────────────────────────────────────── */
-.status-strip {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-    gap: 8px; margin-bottom: 14px;
-}
-.status-card { padding: 11px 14px; position: relative; overflow: hidden; animation: slideUp .4s ease backwards; }
-.status-card::before {
-    content: ''; position: absolute; inset: 0; border-radius: inherit;
-    background: linear-gradient(135deg, rgba(255,255,255,0.025) 0%, transparent 100%); pointer-events: none;
-}
-.status-card.accent-blue  { border-top: 2px solid var(--accent-blue); }
-.status-card.accent-green { border-top: 2px solid var(--accent-green); }
-.status-card.accent-red   { border-top: 2px solid var(--accent-red); }
-.status-card.accent-purple{ border-top: 2px solid var(--accent-purple); }
-.status-card.accent-yellow{ border-top: 2px solid var(--accent-yellow); }
-.status-label { font-size: 9.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px; }
-.status-value { font-size: 18px; font-weight: 600; line-height: 1.2; }
-.status-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 10px; margin-top: 4px; }
-.tag-active { background: rgba(52,211,153,.14); color: var(--accent-green); border: 1px solid rgba(52,211,153,.28); }
-.tag-killed { background: rgba(248,113,113,.14); color: var(--accent-red); border: 1px solid rgba(248,113,113,.28); }
-.val-pos { color: var(--accent-green) !important; }
-.val-neg { color: var(--accent-red) !important; }
-.val-warn { color: var(--accent-yellow) !important; }
-/* ── SECTIONS ───────────────────────────────────────────────────────────── */
-.section { margin-bottom: 12px; }
-.section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.section-icon-badge {
-    width: 30px; height: 30px; border-radius: 10px;
-    display: flex; align-items: center; justify-content: center; font-size: 14px;
-}
-.icon-blue   { background: rgba(99,125,255,.12); }
-.icon-cyan   { background: rgba(34,211,238,.12); }
-.icon-green  { background: rgba(52,211,153,.12); }
-.icon-red    { background: rgba(248,113,113,.12); }
-.icon-purple { background: rgba(167,139,250,.12); }
-.icon-yellow { background: rgba(251,191,36,.12); }
-.section-title { font-size: 14px; font-weight: 600; }
-.section-badge {
-    margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: .8px;
-    text-transform: uppercase; padding: 4px 12px; border-radius: 12px;
-    background: var(--glass-bg); color: var(--text-3); border: 1px solid var(--glass-border);
-}
-/* ── TABS ────────────────────────────────────────────────────────────────── */
-.tabs { display: flex; border-bottom: 1px solid var(--glass-border); margin-bottom: 14px; overflow-x: auto; flex-wrap: nowrap; }
-.tab-btn {
-    padding: 10px 20px; font-size: 13px; font-weight: 500; color: var(--text-3);
-    background: transparent; border: none; border-bottom: 2px solid transparent;
-    cursor: pointer; transition: all var(--transition); font-family: var(--font); white-space: nowrap;
-}
-.tab-btn:hover { color: var(--accent-blue); background: rgba(99,125,255,.04); }
-.tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); font-weight: 600; }
-/* ── TABLE ───────────────────────────────────────────────────────────────── */
-.data-card { overflow: hidden; }
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-thead th {
-    position: sticky; top: 0; background: rgba(15,20,36,0.92); backdrop-filter: blur(8px);
-    color: var(--text-3); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px;
-    padding: 12px 14px; text-align: right; border-bottom: 1px solid var(--glass-border); white-space: nowrap;
-}
-thead th:first-child { text-align: left; }
-tbody td {
-    padding: 11px 14px; font-family: var(--mono); font-size: 12px;
-    color: var(--text-1); text-align: right;
-    border-bottom: 1px solid rgba(255,255,255,0.03); white-space: nowrap;
-}
-tbody td:first-child { text-align: left; font-family: var(--font); color: var(--text-3); }
-tbody tr:hover { background: var(--glass-hover); }
-tbody tr:last-child td { border-bottom: none; }
-/* ── PANELS ──────────────────────────────────────────────────────────────── */
-.panel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
-.panel { padding: 14px; }
-.panel-title {
-    font-size: 11px; font-weight: 600; color: var(--text-2);
-    display: flex; align-items: center; gap: 6px; margin-bottom: 10px;
-    text-transform: uppercase; letter-spacing: .7px;
-}
-.panel-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.035);
-}
-.panel-row:last-child { border-bottom: none; }
-.panel-row-label { font-size: 12px; color: var(--text-2); }
-.panel-row-value { font-family: var(--mono); font-size: 12px; font-weight: 500; }
-/* ── BADGES ──────────────────────────────────────────────────────────────── */
-.badge {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
-}
-.badge-green  { background: rgba(52,211,153,.12); color: var(--accent-green); border: 1px solid rgba(52,211,153,.22); }
-.badge-red    { background: rgba(248,113,113,.12); color: var(--accent-red); border: 1px solid rgba(248,113,113,.22); }
-.badge-yellow { background: rgba(251,191,36,.12); color: var(--accent-yellow); border: 1px solid rgba(251,191,36,.22); }
-.badge-blue   { background: rgba(99,125,255,.12); color: var(--accent-blue); border: 1px solid rgba(99,125,255,.22); }
-/* ── LOADING ────────────────────────────────────────────────────────────── */
-.loading-overlay {
-    position: fixed; inset: 0; z-index: 9999;
-    background: rgba(10,14,26,.92); backdrop-filter: var(--blur);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    transition: opacity .3s ease;
-}
-.loading-overlay.hidden { opacity: 0; pointer-events: none; }
-.spinner { width: 44px; height: 44px; border: 3px solid rgba(99,125,255,.2); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin 1s linear infinite; }
-.loading-text { margin-top: 16px; font-size: 14px; color: var(--text-2); }
-/* ── ALERT & EMERGENCY ──────────────────────────────────────────────────── */
-.alert-banner {
-    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9000;
-    padding: 12px 24px; border-radius: var(--radius-md);
-    font-size: 13px; font-weight: 600; display: none; white-space: nowrap; box-shadow: var(--shadow-md);
-}
-.alert-banner.show { display: block; animation: fadeIn .3s ease; }
-.alert-banner.success { background: var(--accent-green); color: #0a0e1a; }
-.alert-banner.danger  { background: var(--accent-red); color: #fff; }
-/* ── SYSTEM HEALTH BANNER ──────────────────────────────────────────────────── */
-.system-health-bar {
-    display: none; position: relative;
-    background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35);
-    border-radius: var(--radius-md); padding: 10px 18px; margin-bottom: 14px;
-    color: #fbbf24; font-size: 12.5px; font-weight: 600;
-    align-items: center; gap: 10px; animation: fadeIn .3s ease;
-    backdrop-filter: var(--blur-sm);
-}
-.system-health-bar.show { display: flex; }
-.health-errors { flex: 1; font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.emergency-bar {
-    display: flex; align-items: center; justify-content: center; gap: 12px;
-    padding: 14px 20px; margin-bottom: 16px;
-    background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.35);
-    border-radius: var(--radius-md); color: #fca5a5; font-weight: 700; font-size: 14px;
-    animation: pulse 2s ease infinite; display: none;
-}
-/* ── KILL SWITCH ────────────────────────────────────────────────────────── */
-.kill-switch-panel { border: 1px solid rgba(248,113,113,.25) !important; background: rgba(248,113,113,.03) !important; }
-.kill-switch-header {
-    padding: 14px 18px; background: rgba(248,113,113,.06);
-    border-bottom: 1px solid rgba(248,113,113,.18);
-    display: flex; align-items: center; gap: 10px;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-.kill-switch-item {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 16px; border: 1px solid var(--glass-border);
-    border-radius: var(--radius-sm); margin-bottom: 8px;
-}
-.kill-switch-item:last-child { margin-bottom: 0; }
-.kill-verdict { padding: 12px 16px; border-radius: var(--radius-sm); text-align: center; font-weight: 700; font-size: 14px; margin-top: 12px; }
-
-/* ══════════════════════════════════════════════════
-   GLASSMORPHISM UPGRADE — Global
-   ══════════════════════════════════════════════════ */
-:root {
-  --glass-bg:        rgba(255, 255, 255, 0.03);
-  --glass-bg-hover:  rgba(255, 255, 255, 0.06);
-  --glass-border:    rgba(255, 255, 255, 0.08);
-  --glass-shadow:    0 8px 32px rgba(0, 0, 0, 0.4);
-  --glass-blur:      blur(12px);
-  --radius-lg:       16px;
-  --radius-md:       12px;
-}
-
-.glass-card {
-  background:    var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border:        1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  box-shadow:    var(--glass-shadow);
-  transition:    background 0.2s, box-shadow 0.2s;
-}
-
-.glass-card:hover {
-  background:  var(--glass-bg-hover);
-  box-shadow:  0 12px 40px rgba(0,0,0,0.5);
-}
-
-/* Input glassmorphism */
-.glass-input {
-  background:    rgba(255,255,255,0.05);
-  border:        1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  color:         var(--text-1);
-  padding:       10px 14px;
-  font-size:     14px;
-  outline:       none;
-  transition:    border-color 0.2s, box-shadow 0.2s;
-  backdrop-filter: blur(4px);
-}
-.glass-input:focus {
-  border-color: var(--accent-blue);
-  box-shadow:   0 0 0 3px rgba(99,125,255,0.15);
-}
-
-/* Select glassmorphism */
-.glass-select {
-  background:    rgba(20,20,35,0.8);
-  border:        1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  color:         var(--text-1);
-  padding:       10px 14px;
-  font-size:     14px;
-  outline:       none;
-  cursor:        pointer;
-  transition:    border-color 0.2s;
-}
-.glass-select:focus { border-color: var(--accent-blue); }
-
-/* Button glassmorphism */
-.glass-btn {
-  background:    linear-gradient(135deg, rgba(99,125,255,0.2), rgba(167,139,250,0.2));
-  border:        1px solid rgba(99,125,255,0.3);
-  border-radius: var(--radius-md);
-  color:         var(--text-1);
-  padding:       10px 20px;
-  font-size:     14px;
-  font-weight:   600;
-  cursor:        pointer;
-  backdrop-filter: blur(4px);
-  transition:    all 0.2s;
-}
-.glass-btn:hover {
-  background:  linear-gradient(135deg, rgba(99,125,255,0.35), rgba(167,139,250,0.35));
-  box-shadow:  0 0 20px rgba(99,125,255,0.3);
-  transform:   translateY(-1px);
-}
-.glass-btn:active { transform: translateY(0); }
-
-/* Stat card kecil */
-.perf-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 7px;
-  margin-bottom: 12px;
-}
-.perf-stat-card {
-  background:    rgba(255,255,255,0.04);
-  border:        1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  padding:       10px;
-  text-align:    center;
-  backdrop-filter: blur(8px);
-}
-.perf-stat-label {
-  font-size:  10px;
-  color:      var(--text-2);
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.perf-stat-value {
-  font-size:   17px;
-  font-weight: 700;
-  font-family: var(--mono);
-}
-.perf-stat-value.green { color: #34d399; }
-.perf-stat-value.red   { color: #f87171; }
-.perf-stat-value.blue  { color: var(--accent-blue); }
-.perf-stat-value.purple{ color: var(--accent-purple); }
-
-/* Chart container */
-#perfChartContainer {
-  position:      relative;
-  width:         100%;
-  height:        360px;
-  border-radius: var(--radius-md);
-  overflow:      hidden;
-  border:        1px solid var(--glass-border);
-  background:    rgba(10,10,20,0.6);
-}
-
-/* Loading state chart */
-.chart-loading {
-  position:   absolute;
-  inset:      0;
-  display:    flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-  color: var(--text-2);
-  font-size: 14px;
-}
-.chart-spinner {
-  width:  36px;
-  height: 36px;
-  border: 3px solid var(--glass-border);
-  border-top-color: var(--accent-blue);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* Signal badge di legend */
-.signal-badge {
-  display:       inline-flex;
-  align-items:   center;
-  gap:           5px;
-  padding:       3px 10px;
-  border-radius: 20px;
-  font-size:     12px;
-  font-weight:   600;
-}
-.signal-badge.LONG  { background: rgba(52,211,153,0.15); color: #34d399; border: 1px solid rgba(52,211,153,0.3); }
-.signal-badge.SHORT { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
-.signal-badge.FLAT  { background: rgba(148,163,184,0.15); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); }
-
-/* ── QUANT SECTION ──────────────────────────────────────────────────────── */
-.quant-decision-banner {
-    padding: 14px 20px; border-radius: var(--radius-lg);
-    text-align: center; margin-bottom: 12px;
-    border: 1px solid transparent; position: relative; overflow: hidden;
-}
-.quant-decision-banner::before {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(135deg, rgba(255,255,255,.02) 0%, transparent 60%);
-}
-.decision-FULL { background: rgba(52,211,153,.08); border-color: rgba(52,211,153,.3); }
-.decision-HALF { background: rgba(99,125,255,.08); border-color: rgba(99,125,255,.3); }
-.decision-WAIT { background: rgba(251,191,36,.08); border-color: rgba(251,191,36,.3); }
-.decision-SKIP { background: rgba(248,113,113,.08); border-color: rgba(248,113,113,.3); }
-.decision-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 2.5px; color: var(--text-3); margin-bottom: 6px; }
-.decision-name  { font-size: 22px; font-weight: 800; letter-spacing: -1px; margin-bottom: 4px; }
-.decision-score { font-size: 13px; font-weight: 500; opacity: .8; }
-.color-FULL { color: var(--accent-green); }
-.color-HALF { color: var(--accent-blue); }
-.color-WAIT { color: var(--accent-yellow); }
-.color-SKIP { color: var(--accent-red); }
-.quant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.narrative-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
-@media(max-width: 900px) { .quant-grid { grid-template-columns: 1fr; } .narrative-grid { grid-template-columns: 1fr; } }
-.quant-card { padding: 14px; }
-/* Feature scoring */
-.feature-row {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.03);
-}
-.feature-row:last-child { border-bottom: none; }
-.feature-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-.dot-3 { background: var(--accent-green); box-shadow: 0 0 8px rgba(52,211,153,.4); }
-.dot-2 { background: var(--accent-yellow); }
-.dot-1 { background: var(--accent-orange); }
-.dot-0 { background: var(--accent-red); }
-.feature-name { flex: 1; font-size: 12px; color: var(--text-2); }
-.feature-val  { font-family: var(--mono); font-size: 12px; font-weight: 600; min-width: 56px; text-align: right; }
-.feature-bar-bg  { width: 72px; height: 5px; background: rgba(255,255,255,.06); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
-.feature-bar-fill{ height: 100%; border-radius: 3px; transition: width .5s ease; }
-.pts-label { font-size: 10px; color: var(--text-3); font-family: var(--mono); min-width: 40px; text-align: right; }
-/* Level pills */
-.level-pill {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 9px 14px; background: rgba(255,255,255,0.02);
-    border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
-    margin-bottom: 6px; font-family: var(--mono); font-size: 12px;
-}
-.level-pill:last-child { margin-bottom: 0; }
-.rr-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 10px; font-weight: 700; margin-left: 8px; }
-.rr-good { background: rgba(52,211,153,.16); color: var(--accent-green); }
-.rr-bad  { background: rgba(248,113,113,.16); color: var(--accent-red); }
-/* R:R Matrix */
-.rr-matrix { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
-.rr-matrix th { font-size: 10px; padding: 6px 8px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; background: rgba(255,255,255,.02); }
-.rr-matrix td { padding: 6px 8px; text-align: center; font-family: var(--mono); font-weight: 600; border: 1px solid rgba(255,255,255,.04); }
-/* Narrative */
-.narrative-box {
-    background: rgba(255,255,255,.02); border-radius: var(--radius-md);
-    border-left: 3px solid var(--accent-blue); padding: 16px;
-    font-size: 13px; line-height: 1.7; color: var(--text-2);
-}
-.narrative-long  { border-left-color: var(--accent-green); }
-.narrative-short { border-left-color: var(--accent-red); }
-.nar-section { margin-bottom: 12px; }
-.nar-section:last-child { margin-bottom: 0; }
-.nar-lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-3); display: block; margin-bottom: 4px; }
-/* Exit signal */
-.exit-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.03); font-size: 12px; }
-.exit-row:last-child { border-bottom: none; }
-.exit-mandate { padding: 10px 14px; border-radius: var(--radius-sm); text-align: center; font-weight: 700; font-size: 13px; margin-top: 12px; }
-.mandate-hold  { background: rgba(52,211,153,.08); color: var(--accent-green); border: 1px solid rgba(52,211,153,.22); }
-.mandate-watch { background: rgba(251,191,36,.08); color: var(--accent-yellow); border: 1px solid rgba(251,191,36,.22); }
-.mandate-exit  { background: rgba(248,113,113,.08); color: var(--accent-red); border: 1px solid rgba(248,113,113,.22); }
-/* ── CSV UPLOAD ─────────────────────────────────────────────────────────── */
-.upload-zone {
-    border: 2px dashed var(--glass-border); border-radius: var(--radius-lg);
-    padding: 32px; text-align: center; cursor: pointer;
-    transition: all var(--transition); background: var(--glass-bg);
-}
-.upload-zone:hover, .upload-zone.drag-over { border-color: var(--accent-blue); background: rgba(99,125,255,.04); box-shadow: var(--glow-blue); }
-.upload-icon { font-size: 40px; margin-bottom: 12px; }
-.upload-text { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-.upload-sub  { font-size: 13px; color: var(--text-3); }
-#csvFileInput { display: none; }
-.csv-result { display: none; }
-/* ── MODAL ──────────────────────────────────────────────────────────────── */
-.modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,.55); backdrop-filter: var(--blur-sm);
-    display: none; align-items: center; justify-content: center; z-index: 2000;
-}
-.modal-overlay.show { display: flex; animation: fadeIn .2s ease; }
-.modal {
-    background: var(--bg-surface); border: 1px solid var(--glass-border);
-    border-radius: var(--radius-xl);
-    padding: 28px; width: 90%; max-width: 520px;
-    max-height: 88vh; overflow-y: auto; box-shadow: var(--shadow-md), 0 0 60px rgba(0,0,0,.4);
-}
-.modal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-.modal-title { font-size: 18px; font-weight: 700; }
-.modal-close {
-    background: var(--glass-bg); border: 1px solid var(--glass-border);
-    color: var(--text-2); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 16px; line-height: 1;
-}
-.modal-close:hover { background: var(--glass-hover); }
-.form-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
-.form-label { font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .6px; }
-.form-input, .form-select {
-    background: var(--glass-bg); border: 1px solid var(--glass-border);
-    border-radius: var(--radius-sm); padding: 11px 14px;
-    color: var(--text-1); font-family: var(--font); font-size: 14px;
-    outline: none; transition: border-color var(--transition); width: 100%;
-}
-.form-input:focus, .form-select:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(99,125,255,.08); }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.btn-save {
-    background: var(--accent-blue); color: #fff; border: none;
-    padding: 12px; border-radius: var(--radius-md); font-size: 14px;
-    font-weight: 600; cursor: pointer; width: 100%; font-family: var(--font);
-    transition: all var(--transition);
-}
-.btn-save:hover { background: #4f6bef; box-shadow: var(--glow-blue); }
-.entry-item {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 11px 14px; border: 1px solid var(--glass-border);
-    border-radius: var(--radius-sm); margin-bottom: 8px; gap: 10px;
-}
-.btn-del-e {
-    background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.18);
-    color: var(--accent-red); border-radius: 6px; padding: 4px 10px;
-    font-size: 11px; cursor: pointer; white-space: nowrap;
-}
-.btn-del-e:hover { background: rgba(248,113,113,.16); }
-.entry-empty { text-align: center; color: var(--text-3); font-size: 13px; padding: 24px; border: 1px dashed var(--glass-border); border-radius: var(--radius-sm); }
-/* ── COMPASS ────────────────────────────────────────────────────────────── */
-.row-bullish { background: rgba(52,211,153,.06) !important; }
-.row-bearish { background: rgba(248,113,113,.06) !important; }
-.row-neutral { background: rgba(251,191,36,.04) !important; }
-/* ── RESPONSIVE ─────────────────────────────────────────────────────────── */
-/* ── COLLAPSIBLE SECTIONS ────────────────────────────────────────────────── */
-.section-collapsible {
-    cursor: pointer; user-select: none; border-radius: var(--radius-md);
-    padding: 10px 14px; margin: -4px -4px 14px; transition: background var(--transition);
-}
-.section-collapsible:hover { background: rgba(255,255,255,.02); }
-.chevron {
-    margin-left: auto; font-size: 11px; color: var(--text-3);
-    transition: transform 0.3s ease; display: inline-block;
-}
-.section-collapsible.open .chevron { transform: rotate(180deg); }
-.section-body {
-    max-height: 2000px; overflow: hidden; transition: max-height 0.4s ease, opacity 0.3s ease; opacity: 1;
-}
-.section-body.collapsed {
-    max-height: 0; opacity: 0; overflow: hidden;
-}
-@media(max-width: 768px) {
-    .app-container { padding: 12px 14px; }
-    .header { flex-direction: column; align-items: flex-start; }
-    .status-strip { grid-template-columns: 1fr 1fr; }
-    .panel-grid { grid-template-columns: 1fr; }
-    .form-row { grid-template-columns: 1fr; }
-    .status-value { font-size: 18px; }
-    .decision-name { font-size: 22px; }
-}
-/* ── SCANNER CARD GRID ───────────────────────────────────────────────────── */
-#scannerGrid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 12px;
-    padding: 4px 2px;
-}
-.scanner-card {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-md);
-    padding: 14px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    transition: all var(--transition);
-    position: relative;
-    overflow: hidden;
-}
-.scanner-card::before {
-    content: ''; position: absolute; inset: 0; border-radius: inherit;
-    background: linear-gradient(135deg, rgba(255,255,255,.025) 0%, transparent 60%);
-    pointer-events: none;
-}
-.scanner-card:hover {
-    background: var(--glass-hover);
-    box-shadow: var(--shadow-sm);
-    transform: translateY(-1px);
-}
-.scanner-card.dec-long  { border-left: 3px solid var(--accent-green); }
-.scanner-card.dec-short { border-left: 3px solid var(--accent-red); }
-.scanner-card.dec-wait  { border-left: 3px solid var(--text-3); }
-/* Card header row */
-.sc-header {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-}
-.sc-pair {
-    font-weight: 700; font-size: 14px; color: var(--text-1); letter-spacing: -.3px;
-}
-.sc-price {
-    font-family: var(--mono); font-size: 12px; color: var(--text-2);
-}
-/* Decision chip */
-.sc-decision {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 7px 14px; border-radius: 10px;
-    border: 1px solid transparent;
-}
-.sc-dec-icon { font-size: 18px; line-height: 1; }
-.sc-dec-label {
-    font-weight: 800; font-size: 15px; letter-spacing: .3px;
-}
-.sc-dec-sub {
-    font-size: 10.5px; font-family: var(--mono); opacity: .7; margin-top: 1px;
-}
-.sc-size-pill {
-    font-size: 9.5px; font-weight: 700; padding: 2px 8px;
-    border-radius: 8px; border: 1px solid currentColor; opacity: .85;
-    letter-spacing: .4px; text-transform: uppercase;
-}
-/* Entry historical row */
-.sc-entry {
-    display: flex; align-items: flex-start; gap: 8px;
-    padding: 8px 10px;
-    background: rgba(167,139,250,.06);
-    border-left: 2px solid var(--accent-purple);
-    border-radius: 0 8px 8px 0;
-}
-.sc-entry-icon { font-size: 12px; margin-top: 1px; }
-.sc-entry-body { flex: 1; min-width: 0; }
-.sc-entry-label {
-    font-size: 9px; font-weight: 700; color: var(--accent-purple);
-    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px;
-}
-.sc-entry-signal { font-size: 11.5px; font-weight: 700; }
-.sc-entry-time {
-    font-size: 9.5px; color: var(--text-3); font-family: var(--mono); margin-top: 1px;
-}
-/* Footer */
-.sc-footer {
-    display: flex; justify-content: flex-end;
-}
-@media print { .btn, .tabs, .loading-overlay, .alert-banner, .modal-overlay { display: none !important; } }
-</style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Protocol 9.6 — Structural Guardian Dashboard</title>
+  <meta name="description"
+    content="Quantitative swing trading dashboard with 78-Point Scoring engine, live Binance data, and CSV analysis.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
 </head>
-<body>
-<!-- LOADING -->
-<div class="loading-overlay" id="loadingOverlay">
-    <div class="spinner"></div>
-    <div class="loading-text">Loading Protocol 9.6 · Quantitative Engine...</div>
-</div>
-<!-- ALERT -->
-<div class="alert-banner" id="alertBanner"></div>
-<!-- STICKY FLOATING HEADER WRAPPER -->
-<div class="header-sticky-wrapper" id="floatingHeader">
-<div style="max-width:1520px;margin:0 auto;padding:0 18px;">
-<header class="glass header" id="mainHeader">
-    <div class="header-left">
-        <div class="header-logo">🛡️</div>
-        <div>
-            <div class="header-title">Protocol 9.6</div>
-            <div class="header-sub">Structural Guardian · Quantitative Swing Engine</div>
-        </div>
-    </div>
-    <div class="header-right">
-        <select id="pairSelect" class="select-styled" onchange="changePair()"><option value="">LOADING...</option></select>
-        <div class="live-badge"><span class="live-dot"></span><span id="headerTimestamp">—</span></div>
-        <button class="btn btn-icon" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
-        <button class="btn" id="btnEntry" onclick="openEntryModal()">💰 Entry</button>
-        <button class="btn btn-primary" id="btnRefresh" onclick="fetchData()">🔄 Refresh</button>
-        <button class="btn" id="btnPdf" onclick="downloadPDF()">📄 PDF</button>
-        <div style="display:flex;border:1px solid var(--glass-border);border-radius:22px;overflow:hidden;">
-            <select id="csvYears" class="select-styled" style="border:none;border-radius:0;padding:8px 12px;">
-                <option value="0.1">250 Candle</option><option value="0.5">6 Bulan</option>
-                <option value="1">1 Tahun</option><option value="2">2 Tahun</option><option value="3">3 Tahun</option>
-            </select>
-            <button id="btnCsv" onclick="downloadCSV()" class="btn btn-green" style="border-radius:0;border:none;padding:8px 16px;">📥 HARVEST</button>
-        </div>
-    </div>
-</header>
-</div><!-- /.inner max-width (header) -->
-</div><!-- /.header-sticky-wrapper -->
 
-<div class="app-container" id="dashboardContent" style="padding-top:10px;">
+<body>
+  <!-- LOADING -->
+  <div
+    class="fixed inset-0 z-[9999] bg-[rgba(10,14,26,0.92)] backdrop-blur-2xl flex flex-col items-center justify-center transition-opacity duration-300"
+    id="loadingOverlay">
+    <div class="w-11 h-11 border-[3px] border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+    <div class="mt-4 text-sm text-[var(--text-2)]">Loading Protocol 9.6 · Quantitative Engine...</div>
+  </div>
+  <!-- ALERT -->
+  <div
+    class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9000] px-6 py-3 rounded-md text-[13px] font-semibold hidden whitespace-nowrap shadow-[0_8px_32px_rgba(0,0,0,0.5)] animate-fadeIn"
+    id="alertBanner"></div>
+  <!-- STICKY FLOATING HEADER WRAPPER -->
+  <div class="fixed top-0 left-0 right-0 w-full z-[900] drop-shadow-[0_4px_20px_rgba(0,0,0,0.5)]" id="floatingHeader">
+    <div style="max-width:1520px;margin:0 auto;padding:0 18px;">
+      <header
+        class="flex items-center justify-between flex-wrap gap-2 px-4 py-2.5 mb-0 bg-[rgba(10,14,26,0.90)] backdrop-blur-[30px] saturate-[1.8] shadow-[0_2px_20px_rgba(0,0,0,0.5),0_1px_0_rgba(255,255,255,0.08)] rounded-b-lg border-b border-white/[0.08]"
+        id="mainHeader">
+        <div class="flex items-center gap-3.5">
+          <div
+            class="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-[22px] shadow-[0_0_30px_rgba(99,125,255,0.12)]">
+            🛡️</div>
+          <div>
+            <div class="text-xl font-bold tracking-tight">Protocol 9.6</div>
+            <div class="text-xs text-[var(--text-3)] font-normal">Structural Guardian · Quantitative Swing Engine</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <select id="pairSelect"
+            class="bg-white/[0.03] text-[var(--text-1)] border border-white/[0.08] rounded-full px-4 py-2 text-[13px] cursor-pointer outline-none transition-colors duration-[0.25s] hover:border-blue-500"
+            onchange="changePair()">
+            <option value="">LOADING...</option>
+          </select>
+          <div
+            class="flex items-center gap-1.5 bg-white/[0.03] border border-white/[0.08] rounded-full px-3.5 py-1.5 font-mono text-xs text-[var(--text-2)]">
+            <span class="w-[7px] h-[7px] rounded-full bg-[#34d399] animate-pulse"></span><span
+              id="headerTimestamp">—</span></div>
+          <button
+            class="inline-flex items-center justify-center gap-1.5 px-3 py-2 border border-white/[0.08] rounded-full text-sm font-medium cursor-pointer transition-all duration-[0.25s] bg-white/[0.03] text-[var(--text-1)] whitespace-nowrap hover:bg-white/[0.055] hover:border-white/[0.14] hover:-translate-y-px"
+            onclick="toggleTheme()" title="Toggle Theme">🌓</button>
+          <button
+            class="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-white/[0.08] rounded-full text-[13px] font-medium cursor-pointer transition-all duration-[0.25s] bg-white/[0.03] text-[var(--text-1)] whitespace-nowrap hover:bg-white/[0.055] hover:border-white/[0.14] hover:-translate-y-px"
+            id="btnEntry" onclick="openEntryModal()">💰 Entry</button>
+          <button
+            class="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-white/[0.08] rounded-full text-[13px] font-medium cursor-pointer transition-all duration-[0.25s] whitespace-nowrap hover:-translate-y-px bg-blue-500 text-white border-blue-500 hover:bg-[#4f6bef] hover:shadow-[0_0_30px_rgba(99,125,255,0.12)]"
+            id="btnRefresh" onclick="fetchData()">🔄 Refresh</button>
+          <button
+            class="inline-flex items-center justify-center gap-1.5 px-4 py-2 border border-white/[0.08] rounded-full text-[13px] font-medium cursor-pointer transition-all duration-[0.25s] bg-white/[0.03] text-[var(--text-1)] whitespace-nowrap hover:bg-white/[0.055] hover:border-white/[0.14] hover:-translate-y-px"
+            id="btnPdf" onclick="downloadPDF()">📄 PDF</button>
+          <div class="flex border border-white/[0.08] rounded-full overflow-hidden">
+            <select id="csvYears"
+              class="bg-white/[0.03] text-[var(--text-1)] border-none rounded-none px-3 py-2 text-[13px] cursor-pointer outline-none"
+              style="padding:8px 12px;">
+              <option value="0.1">250 Candle</option>
+              <option value="0.5">6 Bulan</option>
+              <option value="1">1 Tahun</option>
+              <option value="2">2 Tahun</option>
+              <option value="3">3 Tahun</option>
+            </select>
+            <button id="btnCsv" onclick="downloadCSV()"
+              class="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-[13px] font-bold uppercase tracking-wide cursor-pointer transition-all duration-[0.25s] hover:-translate-y-px bg-[#34d399] text-[#0a0e1a] border-0 rounded-none hover:bg-[#2cc48a] hover:shadow-[0_0_30px_rgba(52,211,153,0.12)]"
+              style="padding:8px 16px;">📥 HARVEST</button>
+          </div>
+        </div>
+      </header>
+    </div><!-- /.inner max-width (header) -->
+  </div><!-- /.header-sticky-wrapper -->
+
+  <div class="max-w-[1520px] mx-auto px-4 py-3 pt-2.5" id="dashboardContent">
 
     <!-- SYSTEM HEALTH BANNER -->
-    <div class="system-health-bar" id="systemHealthBar">
-        <span>⚠️ DATA WARNING</span>
-        <span class="health-errors" id="healthErrorText">Memeriksa status data...</span>
-        <span id="healthCheckedAt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap;"></span>
+    <div
+      class="hidden relative bg-yellow-500/10 border border-yellow-500/35 rounded-md px-4 py-2.5 mb-3.5 text-[#fbbf24] text-[12.5px] font-semibold items-center gap-2.5 animate-fadeIn backdrop-blur"
+      id="systemHealthBar">
+      <span>⚠️ DATA WARNING</span>
+      <span class="flex-1 font-mono text-[11.5px] overflow-hidden text-ellipsis whitespace-nowrap"
+        id="healthErrorText">Memeriksa status data...</span>
+      <span id="healthCheckedAt" style="font-size:10.5px;color:var(--text-3);white-space:nowrap;"></span>
     </div>
 
-    <div class="section glass-card" id="sectionScanner" style="padding:20px;">
-        <div class="section-header section-collapsible open" onclick="toggleSection('scannerContent', this)">
-            <div class="section-icon-badge icon-yellow">📡</div>
-            <div class="section-title">Market Scanner — Pantauan Seluruh Koin (4H)</div>
-            <span class="chevron">▼</span>
+    <div
+      class="mb-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionScanner">
+      <div
+        class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] section-collapsible open"
+        onclick="toggleSection('scannerContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-yellow-500/[0.12]">📡</div>
+        <div class="text-sm font-semibold">Market Scanner — Pantauan Seluruh Koin (4H)</div>
+        <span
+          class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
+      </div>
+      <div id="scannerContent"
+        class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
+        style="max-height:2000px;">
+        <div id="scannerGrid" class="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3 p-1">
+          <div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px">
+            <div
+              class="w-7 h-7 border-[2px] border-blue-500/20 border-t-blue-500 rounded-full animate-spin mx-auto mb-3.5"
+              style="width:28px;height:28px;border-width:2px;margin:0 auto 14px;"></div>
+            Mengumpulkan data indikator untuk semua koin...
+          </div>
         </div>
-        <div id="scannerContent" class="section-body">
-            <div id="scannerGrid">
-                <div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px">
-                    <div class="spinner" style="width:28px;height:28px;border-width:2px;margin:0 auto 14px;"></div>
-                    Mengumpulkan data indikator untuk semua koin...
-                </div>
-            </div>
-        </div>
+      </div>
     </div>
 
     <!-- EMERGENCY -->
-    <div class="emergency-bar" id="emergencyBar"><span id="emergencyMsg">⚠️ ALERT</span></div>
+    <div
+      class="flex items-center justify-center gap-3 px-5 py-3.5 mb-4 bg-red-500/10 border border-red-500/35 rounded-md text-[#fca5a5] font-bold text-sm animate-pulse hidden"
+      id="emergencyBar"><span id="emergencyMsg">⚠️ ALERT</span></div>
 
     <!-- STATUS STRIP -->
-    <div class="status-strip" id="statusStrip">
-        <div class="glass status-card accent-blue"><div class="status-label">Coin Pair</div><div class="status-value" id="statCoin">—</div></div>
-        <div class="glass status-card accent-green"><div class="status-label">Current Price</div><div class="status-value" id="statPrice">—</div></div>
-        <div class="glass status-card" id="pnlCard"><div class="status-label">Unrealized P&L</div><div class="status-value" id="statPnl">—</div></div>
-        <div class="glass status-card accent-blue" onclick="openEntryModal()" style="cursor:pointer" title="Click to edit"><div class="status-label">Entry Price 📝</div><div class="status-value" id="statEntry" style="cursor:pointer">—</div></div>
-        <div class="glass status-card accent-red"><div class="status-label">Active Stop Loss</div><div class="status-value" id="statSL">—</div></div>
-        <div class="glass status-card accent-purple"><div class="status-label">Remaining Qty</div><div class="status-value" id="statRemainingQty">—</div></div>
-        <div class="glass status-card" id="floatPnlCard"><div class="status-label">Floating P&L ($)</div><div class="status-value" id="statRealizedPnL">—</div></div>
-        <div class="glass status-card accent-yellow" id="realizedPnlCard"><div class="status-label">Realized P&L 💰</div><div class="status-value" id="statRealizedPnLTotal">—</div></div>
-        <div class="glass status-card"><div class="status-label">Trade Status</div><div class="status-value"><span class="status-tag" id="statStatus">—</span></div></div>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-2 mb-3.5" id="statusStrip">
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        style="border-top:2px solid #637dff">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Coin Pair</div>
+        <div class="text-lg font-semibold leading-tight" id="statCoin">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        style="border-top:2px solid #34d399">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Current Price</div>
+        <div class="text-lg font-semibold leading-tight" id="statPrice">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        id="pnlCard">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Unrealized P&L</div>
+        <div class="text-lg font-semibold leading-tight" id="statPnl">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card cursor-pointer"
+        style="border-top:2px solid #637dff" onclick="openEntryModal()" title="Click to edit">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Entry Price 📝</div>
+        <div class="text-lg font-semibold leading-tight cursor-pointer" id="statEntry">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        style="border-top:2px solid #f87171">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Active Stop Loss</div>
+        <div class="text-lg font-semibold leading-tight" id="statSL">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        style="border-top:2px solid #a78bfa">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Remaining Qty</div>
+        <div class="text-lg font-semibold leading-tight" id="statRemainingQty">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        id="floatPnlCard">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Floating P&L ($)</div>
+        <div class="text-lg font-semibold leading-tight" id="statRealizedPnL">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card"
+        style="border-top:2px solid #fbbf24" id="realizedPnlCard">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Realized P&L 💰</div>
+        <div class="text-lg font-semibold leading-tight" id="statRealizedPnLTotal">—</div>
+      </div>
+      <div
+        class="px-3.5 py-2.5 relative overflow-hidden animate-slideUp bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] status-card">
+        <div class="text-[9.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1">Trade Status</div>
+        <div class="text-lg font-semibold leading-tight"><span
+            class="inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-lg mt-1" id="statStatus">—</span></div>
+      </div>
     </div>
 
-    <!-- ═══════════════ SECTION 1: QUANT ANALYST (PRIMARY — FIRST VISIBLE) ═══════════════ -->
-    <div class="section glass-card" id="sectionQuantitative" style="padding:20px;">
-        <div class="section-header">
-            <div class="section-icon-badge icon-purple">🤖</div>
-            <div class="section-title">Machine Learning Swing Analyst — ML Ensemble (Live 4H)</div>
-            <span class="section-badge" style="background:rgba(167,139,250,.12);color:var(--accent-purple);border-color:rgba(167,139,250,.25)">ML V3.0</span>
-        </div>
-        <div class="tabs" id="quantSetupTabs" style="display:none;">
-            <button class="tab-btn active" onclick="switchQuantTab('long')">🐂 LONG Setup</button>
-            <button class="tab-btn" onclick="switchQuantTab('short')">🐻 SHORT Setup</button>
-        </div>
-        <div id="activePosBanner"></div>
-        <div id="decisionBanner" class="quant-decision-banner decision-WAIT">
-            <div class="decision-label">Institutional Mandate</div>
-            <div class="decision-name color-WAIT" id="quantDecisionName">LOADING ALGORITHM...</div>
-            <div class="decision-score" id="quantScoreSummary">—</div>
-        </div>
-        <div class="quant-grid">
-            <div class="glass quant-card" style="height: 100%; display: flex; flex-direction: column;">
-                <div class="panel-title">🧠 ML Indicator & Probabilities</div>
-                <div style="margin-bottom:14px">
-                    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:5px"><span>ML Confidence</span><span id="quantTotalPts">0.0%</span></div>
-                    <div style="height:8px;background:rgba(255,255,255,.06);border-radius:4px;overflow:hidden"><div id="quantTotalBar" style="height:100%;border-radius:4px;transition:width .5s ease;width:0%"></div></div>
-                </div>
-                <div id="featureGrid" style="display:flex;flex-direction:column;gap:0;flex:1;"></div>
+    <!-- ═══════════════ SECTION 1: QUANT ANALYST ═══════════════ -->
+    <div
+      class="mb-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionQuantitative">
+      <div class="flex items-center gap-2.5 mb-2.5">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-purple-500/[0.12]">🤖</div>
+        <div class="text-sm font-semibold">Machine Learning Swing Analyst — ML Ensemble (Live 4H)</div>
+        <span
+          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-[var(--accent-purple)] border border-purple-500/[0.25]"
+          style="color:#a78bfa;">ML V3.0</span>
+      </div>
+      <div class="hidden flex border-b border-white/[0.08] mb-3.5 overflow-x-auto flex-nowrap" id="quantSetupTabs">
+        <button
+          class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
+          onclick="switchQuantTab('long')">🐂 LONG Setup</button>
+        <button
+          class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+          onclick="switchQuantTab('short')">🐻 SHORT Setup</button>
+      </div>
+      <div id="activePosBanner"></div>
+      <div id="decisionBanner"
+        class="p-3.5 px-5 rounded-lg text-center mb-3 border border-transparent relative overflow-hidden quant-decision-banner decision-WAIT"
+        style="background:rgba(251,191,36,0.08);border-color:rgba(251,191,36,0.3);">
+        <div class="text-[10.5px] uppercase tracking-[2.5px] text-[var(--text-3)] mb-1.5">Institutional Mandate</div>
+        <div class="text-[22px] font-extrabold tracking-tight mb-1 color-WAIT" id="quantDecisionName"
+          style="color:#fbbf24;">LOADING ALGORITHM...</div>
+        <div class="text-[13px] font-medium opacity-80" id="quantScoreSummary">—</div>
+      </div>
+      <div class="grid grid-cols-2 gap-3.5 max-[900px]:grid-cols-1">
+        <div
+          class="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5"
+          style="height: 100%; display: flex; flex-direction: column;">
+          <div
+            class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
+            🧠 ML Indicator & Probabilities</div>
+          <div style="margin-bottom:14px">
+            <div class="flex justify-between text-[11px] text-[var(--text-3)] mb-1"><span>ML Confidence</span><span
+                id="quantTotalPts">0.0%</span></div>
+            <div class="h-2 bg-white/[0.06] rounded overflow-hidden">
+              <div id="quantTotalBar" class="h-full rounded transition-all duration-[0.5s] ease-in-out"
+                style="width:0%;background:#637dff;"></div>
             </div>
-            
-            <div class="glass quant-card" style="height: 100%; display: flex; flex-direction: column;">
-                <div class="panel-title">🛡️ Risk Management</div>
-                <div style="margin-bottom:14px">
-                    <div style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Stop Loss Levels</div>
-                    <div id="slLevels"></div>
-                </div>
-                <div style="margin-bottom:14px">
-                    <div style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Take Profit Targets</div>
-                    <div id="tpLevels"></div>
-                </div>
-                <div style="font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">R:R Matrix (SL vs TP)</div>
-                <div id="rrMatrix"></div>
-                <div id="exitSignalBox" style="margin-top:auto;"></div>
-            </div>
+          </div>
+          <div id="featureGrid" class="flex flex-col gap-0 flex-1"></div>
         </div>
-        
-        <div class="glass quant-card" style="margin-top:14px;">
-            <div class="panel-title">🎙️ Analyst Narrative & Context</div>
-            <div class="narrative-grid">
-                <div id="quantNarrative" class="narrative-box"></div>
-                <div>
-                    <div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Live Market Variables</div>
-                    <div id="marketContext" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px"></div>
-                </div>
-            </div>
-        </div>
-    </div>
 
-
-    <!-- ═══════════════ SECTION: PRICE PERFORMANCE MONITOR ═══════════════ -->
-    <div class="section glass-card" id="sectionPerfMonitor" style="padding:20px;">
-      <div class="section-header section-collapsible open" onclick="toggleSection('perfMonitorContent', this)">
-        <div class="section-icon-badge icon-cyan">📈</div>
-        <div class="section-title">Price Performance Monitor — Validasi Performa Model</div>
-        <span class="section-badge" style="background:rgba(52,211,153,.12);color:#34d399;border-color:rgba(52,211,153,.25)">LIVE</span>
-        <span class="chevron" style="margin-left:auto;color:var(--text-2);font-size:12px;">▼</span>
+        <div
+          class="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5"
+          style="height: 100%; display: flex; flex-direction: column;">
+          <div
+            class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
+            🛡️ Risk Management</div>
+          <div style="margin-bottom:14px">
+            <div class="text-[10.5px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-2">Stop Loss Levels
+            </div>
+            <div id="slLevels"></div>
+          </div>
+          <div style="margin-bottom:14px">
+            <div class="text-[10.5px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-2">Take Profit
+              Targets</div>
+            <div id="tpLevels"></div>
+          </div>
+          <div class="text-[10.5px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-2">R:R Matrix (SL vs
+            TP)</div>
+          <div id="rrMatrix"></div>
+          <div id="exitSignalBox" style="margin-top:auto;"></div>
+        </div>
       </div>
 
-      <div id="perfMonitorContent" class="section-body">
+      <div
+        class="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5 mt-3.5">
+        <div
+          class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
+          🎙️ Analyst Narrative & Context</div>
+        <div class="grid grid-cols-[1.6fr_1fr] gap-3.5 max-[900px]:grid-cols-1">
+          <div id="quantNarrative"
+            class="bg-white/[0.02] rounded-md border-l-[3px] border-blue-500 p-4 text-[13px] leading-relaxed text-[var(--text-2)]">
+          </div>
+          <div>
+            <div class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-2">Live Market
+              Variables</div>
+            <div id="marketContext" class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-1.5"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-        <!-- Input Controls (compact) -->
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;">
-          <div style="font-size:11px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Monitor:</div>
-          <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-2);">
+    <!-- ═══════════════ SECTION: PRICE PERFORMANCE MONITOR ═══════════════ -->
+    <div
+      class="mb-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionPerfMonitor">
+      <div
+        class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] section-collapsible open"
+        onclick="toggleSection('perfMonitorContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-cyan-500/[0.12]">📈</div>
+        <div class="text-sm font-semibold">Price Performance Monitor — Validasi Performa Model</div>
+        <span
+          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-[#34d399]/[0.12] text-[#34d399] border border-[#34d399]/[0.25]">LIVE</span>
+        <span class="ml-auto text-xs text-[var(--text-2)] transition-transform duration-300 inline-block chevron"
+          style="margin-left:auto;color:var(--text-2);font-size:12px;">▼</span>
+      </div>
+
+      <div id="perfMonitorContent"
+        class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
+        style="max-height:2000px;">
+
+        <div class="flex flex-wrap gap-2 items-center mb-3">
+          <div class="text-[11px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Monitor:</div>
+          <div class="flex items-center gap-1 text-xs text-[var(--text-2)]">
             <span>Koin:</span>
-            <strong id="perfCoinLabel" style="color:var(--accent-cyan);font-family:var(--mono);">—</strong>
+            <strong id="perfCoinLabel" class="text-cyan-400 font-mono">—</strong>
           </div>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <label style="font-size:11px;color:var(--text-2);">Lev</label>
-            <input id="perfLeverageInput" type="number" class="glass-input" value="3" min="1" max="20" step="1" style="width:64px;padding:5px 8px;font-size:12px;" />
+          <div class="flex items-center gap-1">
+            <label class="text-[11px] text-[var(--text-2)]">Lev</label>
+            <input id="perfLeverageInput" type="number"
+              class="bg-white/[0.05] border border-white/[0.08] rounded-md text-[var(--text-1)] outline-none transition-colors duration-200 backdrop-blur focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.15)]"
+              value="3" min="1" max="20" step="1" style="width:64px;padding:5px 8px;font-size:12px;" />
           </div>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <label style="font-size:11px;color:var(--text-2);">Periode</label>
-            <select id="perfHoursSelect" class="glass-select" style="padding:5px 8px;font-size:12px;">
+          <div class="flex items-center gap-1">
+            <label class="text-[11px] text-[var(--text-2)]">Periode</label>
+            <select id="perfHoursSelect"
+              class="bg-[rgba(20,20,35,0.8)] border border-white/[0.08] rounded-md text-[var(--text-1)] outline-none cursor-pointer transition-colors duration-200 focus:border-blue-500"
+              style="padding:5px 8px;font-size:12px;">
               <option value="12">12 Jam</option>
               <option value="24">24 Jam</option>
               <option value="48">48 Jam</option>
               <option value="72" selected>72 Jam</option>
             </select>
           </div>
-          <button class="glass-btn" onclick="loadPerfChart()" style="padding:5px 14px;font-size:12px;">
+          <button
+            class="bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 rounded-md text-[var(--text-1)] font-semibold cursor-pointer backdrop-blur transition-all duration-200 hover:from-blue-500/35 hover:to-purple-500/35 hover:shadow-[0_0_20px_rgba(99,125,255,0.3)] hover:-translate-y-px active:translate-y-0"
+            onclick="loadPerfChart()" style="padding:5px 14px;font-size:12px;">
             🔍 Analisis
           </button>
-          <div id="perfLastUpdate" style="font-size:11px;color:var(--text-3);"></div>
+          <div id="perfLastUpdate" class="text-[11px] text-[var(--text-3)]"></div>
         </div>
 
         <!-- Stat Cards -->
-        <div class="perf-stat-grid" id="perfStatGrid" style="display:none;">
-          <div class="perf-stat-card">
-            <div class="perf-stat-label" title="Total sinyal entry valid conf ≥ 72%">Valid Entry</div>
-            <div class="perf-stat-value blue" id="statTotalSignals">—</div>
+        <div class="hidden grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-[7px] mb-3" id="perfStatGrid">
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide"
+              title="Total sinyal entry valid conf ≥ 72%">Valid Entry</div>
+            <div class="text-[17px] font-bold font-mono text-blue-500" id="statTotalSignals">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label">🐂 LONG</div>
-            <div class="perf-stat-value green" id="statLongCount">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🐂 LONG</div>
+            <div class="text-[17px] font-bold font-mono text-[#34d399]" id="statLongCount">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label">🐻 SHORT</div>
-            <div class="perf-stat-value red" id="statShortCount">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🐻 SHORT</div>
+            <div class="text-[17px] font-bold font-mono text-[#f87171]" id="statShortCount">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label">○ Weak (Skip)</div>
-            <div class="perf-stat-value" id="statFlatCount" style="color:var(--text-2);">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">○ Weak (Skip)</div>
+            <div class="text-[17px] font-bold font-mono text-[var(--text-2)]" id="statFlatCount">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label" title="Win = TP kena sebelum SL">Win Rate (sim)</div>
-            <div class="perf-stat-value" id="statWinRate" style="color:#a78bfa;">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide" title="Win = TP kena sebelum SL">
+              Win Rate (sim)</div>
+            <div class="text-[17px] font-bold font-mono text-[#a78bfa]" id="statWinRate">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label" title="Total PnL termasuk fee, leverage">Total PnL (sim)</div>
-            <div class="perf-stat-value" id="statTotalPnl">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide"
+              title="Total PnL termasuk fee, leverage">Total PnL (sim)</div>
+            <div class="text-[17px] font-bold font-mono" id="statTotalPnl">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label">✅ TP Hit</div>
-            <div class="perf-stat-value green" id="statTpHits">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">✅ TP Hit</div>
+            <div class="text-[17px] font-bold font-mono text-[#34d399]" id="statTpHits">—</div>
           </div>
-          <div class="perf-stat-card">
-            <div class="perf-stat-label">🔴 SL Hit</div>
-            <div class="perf-stat-value red" id="statSlHits">—</div>
+          <div class="bg-white/[0.04] border border-white/[0.08] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🔴 SL Hit</div>
+            <div class="text-[17px] font-bold font-mono text-[#f87171]" id="statSlHits">—</div>
           </div>
         </div>
 
         <!-- Chart Area -->
-        <div id="perfChartContainer">
-          <div class="chart-loading" id="perfChartPlaceholder">
+        <div id="perfChartContainer"
+          class="relative w-full h-[360px] rounded-md overflow-hidden border border-white/[0.08] bg-[rgba(10,10,20,0.6)]">
+          <div class="absolute inset-0 flex items-center justify-center flex-col gap-3 text-[var(--text-2)] text-sm"
+            id="perfChartPlaceholder">
             <div style="font-size:32px;">📈</div>
             <div>Pilih koin & klik <strong>Analisis</strong> untuk memuat grafik</div>
           </div>
-          <canvas id="perfChart" style="display:none;"></canvas>
+          <canvas id="perfChart" class="hidden"></canvas>
         </div>
 
-        <!-- Legend (Custom - lebih bersih) -->
-        <div id="perfLegend" style="display:none;margin-top:10px;flex-direction:column;gap:6px;">
-          <!-- Baris 1: Sinyal Entry -->
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Sinyal:</span>
-            <span class="signal-badge LONG">▲ LONG (conf ≥72%)</span>
-            <span class="signal-badge SHORT">▼ SHORT (conf ≥72%)</span>
-            <span style="font-size:11px;color:rgba(148,163,184,0.7);">○ Weak (60–72%, skip)</span>
-            <span style="font-size:11px;color:rgba(167,139,250,0.9);">- - 🧠 ML Conf % (sumbu kiri)</span>
-            <span style="font-size:11px;color:rgba(99,125,255,0.8);">— Harga Close (sumbu kanan)</span>
+        <!-- Legend -->
+        <div id="perfLegend" class="hidden mt-2.5 flex-col gap-1.5">
+          <div class="flex flex-wrap gap-2 items-center">
+            <span class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Sinyal:</span>
+            <span
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#34d399]/[0.15] text-[#34d399] border border-[#34d399]/[0.3]">▲
+              LONG (conf ≥72%)</span>
+            <span
+              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#f87171]/[0.15] text-[#f87171] border border-[#f87171]/[0.3]">▼
+              SHORT (conf ≥72%)</span>
+            <span class="text-[11px]" style="color:rgba(148,163,184,0.7);">○ Weak (60–72%, skip)</span>
+            <span class="text-[11px]" style="color:rgba(167,139,250,0.9);">- - 🧠 ML Conf % (sumbu kiri)</span>
+            <span class="text-[11px]" style="color:rgba(99,125,255,0.8);">— Harga Close (sumbu kanan)</span>
           </div>
-          <!-- Baris 2: TP/SL Projection -->
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-            <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Proyeksi TP/SL:</span>
-            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(52,211,153,0.1);border:1px dashed rgba(52,211,153,0.6);color:#34d399;">- - TP (2×ATR)</span>
-            <span style="font-size:11px;color:var(--text-3);">Target profit</span>
-            <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(248,113,113,0.1);border:1px dashed rgba(248,113,113,0.5);color:#f87171;">- - SL (1×ATR)</span>
-            <span style="font-size:11px;color:var(--text-3);">Stop loss</span>
-            <span style="font-size:11px;color:#34d399;">★ = TP HIT ✅</span>
-            <span style="font-size:11px;color:#fbbf24;">✕ = SL HIT 🔴</span>
-            <span style="font-size:11px;color:var(--text-3);">⊙ = belum tercapai | max 48 candle ke depan</span>
+          <div class="flex flex-wrap gap-2 items-center">
+            <span class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Proyeksi TP/SL:</span>
+            <span
+              class="text-[11px] px-2 py-0.5 rounded bg-[#34d399]/10 border border-dashed border-[#34d399]/60 text-[#34d399]">-
+              - TP (2×ATR)</span>
+            <span class="text-[11px] text-[var(--text-3)]">Target profit</span>
+            <span
+              class="text-[11px] px-2 py-0.5 rounded bg-[#f87171]/10 border border-dashed border-[#f87171]/50 text-[#f87171]">-
+              - SL (1×ATR)</span>
+            <span class="text-[11px] text-[var(--text-3)]">Stop loss</span>
+            <span class="text-[11px] text-[#34d399]">★ = TP HIT ✅</span>
+            <span class="text-[11px] text-[#fbbf24]">✕ = SL HIT 🔴</span>
+            <span class="text-[11px] text-[var(--text-3)]">⊙ = belum tercapai | max 48 candle ke depan</span>
           </div>
         </div>
-
 
       </div>
     </div>
     <!-- ═══════════════ END PRICE PERFORMANCE MONITOR ═══════════════ -->
 
     <!-- ═══════════════ SECTION 2: KILL SWITCH + MARKET STRUCTURE ═══════════════ -->
-    <div class="section glass-card" id="sectionMarketStructure" style="padding:20px;">
+    <div
+      class="mb-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionMarketStructure">
 
-
-        <!-- Analysis Grid: Liquidity + SMT + OI + Compass -->
-        <div class="panel-grid" style="margin-bottom:16px">
-            <div class="glass panel">
-                <div class="panel-title">🧱 Liquidity Borders</div>
-                <div class="panel-row"><span class="panel-row-label">PDH</span><span class="panel-row-value" id="valPDH">—</span></div>
-                <div class="panel-row"><span class="panel-row-label">PDL</span><span class="panel-row-value" id="valPDL">—</span></div>
-                <div class="panel-row"><span class="panel-row-label">PWH</span><span class="panel-row-value" id="valPWH">—</span></div>
-                <div class="panel-row"><span class="panel-row-label">PWL</span><span class="panel-row-value" id="valPWL">—</span></div>
-            </div>
-            <div class="glass panel">
-                <div class="panel-title">🔗 SMT Divergence</div>
-                <div class="panel-row"><span class="panel-row-label">BTC 12h</span><span class="panel-row-value" id="valBtcTrend">—</span></div>
-                <div class="panel-row"><span class="panel-row-label">Coin 12h</span><span class="panel-row-value" id="valCoinTrend">—</span></div>
-                <div class="panel-row"><span class="panel-row-label">Bearish SMT?</span><span class="panel-row-value" id="valSMT">—</span></div>
-            </div>
-            <div class="glass panel">
-                <div class="panel-title">📊 OI Momentum</div>
-                <div class="panel-row"><span class="panel-row-label">OI Delta %</span><span class="panel-row-value" id="valOIDelta">—</span></div>
-            </div>
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-3.5 mb-4">
+        <div
+          class="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5">
+          <div
+            class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
+            🧱 Liquidity Borders</div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035]"><span
+              class="text-xs text-[var(--text-2)]">PDH</span><span class="font-mono text-xs font-medium"
+              id="valPDH">—</span></div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035]"><span
+              class="text-xs text-[var(--text-2)]">PDL</span><span class="font-mono text-xs font-medium"
+              id="valPDL">—</span></div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035]"><span
+              class="text-xs text-[var(--text-2)]">PWH</span><span class="font-mono text-xs font-medium"
+              id="valPWH">—</span></div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035] last:border-b-0"><span
+              class="text-xs text-[var(--text-2)]">PWL</span><span class="font-mono text-xs font-medium"
+              id="valPWL">—</span></div>
         </div>
-
-        <!-- Tactical Compass -->
-        <div class="glass data-card" style="margin-bottom:16px;overflow:hidden;">
-            <div style="padding:14px 18px;background:var(--glass-bg);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:10px">
-                <span style="font-size:18px">🧭</span>
-                <span style="font-size:14px;font-weight:700">TACTICAL COMPASS — Markdown ↓ vs Markup ↑</span>
-                <span id="compassVerdict" style="margin-left:auto;font-size:13px;font-weight:700;padding:4px 14px;border-radius:12px"></span>
-            </div>
-            <div class="table-scroll"><table id="tacticalCompassTable"><thead><tr>
-                <th style="text-align:left;width:15%">Parameter</th>
-                <th style="text-align:center;width:12%">Live Value</th>
-                <th style="text-align:center;background:rgba(248,113,113,.08);color:var(--accent-red);width:23%">🔴 MARKDOWN</th>
-                <th style="text-align:center;background:rgba(52,211,153,.08);color:var(--accent-green);width:23%">🟢 MARKUP</th>
-                <th style="text-align:center;width:12%">Verdict</th>
-                <th style="text-align:left;width:15%;font-size:10px;color:var(--text-3)">Notes</th>
-            </tr></thead><tbody id="tacticalCompassBody"><tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td></tr></tbody></table></div>
+        <div
+          class="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5">
+          <div
+            class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
+            🔗 SMT Divergence</div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035]"><span
+              class="text-xs text-[var(--text-2)]">BTC 12h</span><span class="font-mono text-xs font-medium"
+              id="valBtcTrend">—</span></div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035]"><span
+              class="text-xs text-[var(--text-2)]">Coin 12h</span><span class="font-mono text-xs font-medium"
+              id="valCoinTrend">—</span></div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035] last:border-b-0"><span
+              class="text-xs text-[var(--text-2)]">Bearish SMT?</span><span class="font-mono text-xs font-medium"
+              id="valSMT">—</span></div>
         </div>
+        <div
+          class="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5">
+          <div
+            class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
+            📊 OI Momentum</div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/[0.035] last:border-b-0"><span
+              class="text-xs text-[var(--text-2)]">OI Delta %</span><span class="font-mono text-xs font-medium"
+              id="valOIDelta">—</span></div>
+        </div>
+      </div>
+
+      <!-- Tactical Compass -->
+      <div
+        class="overflow-hidden bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s]"
+        style="margin-bottom:16px;overflow:hidden;">
+        <div class="flex items-center gap-2.5 px-4 py-3.5 bg-white/[0.03] border-b border-white/[0.08]">
+          <span style="font-size:18px">🧭</span>
+          <span class="text-sm font-bold">TACTICAL COMPASS — Markdown ↓ vs Markup ↑</span>
+          <span id="compassVerdict" class="ml-auto text-[13px] font-bold px-3.5 py-1 rounded-full"></span>
+        </div>
+        <div class="overflow-x-auto overscroll-x-contain">
+          <table id="tacticalCompassTable" class="w-full border-collapse text-[12.5px]">
+            <thead>
+              <tr>
+                <th
+                  class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                  style="text-align:left;width:15%">Parameter</th>
+                <th
+                  class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                  style="text-align:center;width:12%">Live Value</th>
+                <th
+                  class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                  style="text-align:center;background:rgba(248,113,113,.08);color:var(--accent-red);width:23%">🔴
+                  MARKDOWN</th>
+                <th
+                  class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                  style="text-align:center;background:rgba(52,211,153,.08);color:var(--accent-green);width:23%">🟢
+                  MARKUP</th>
+                <th
+                  class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                  style="text-align:center;width:12%">Verdict</th>
+                <th
+                  class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                  style="text-align:left;width:15%;font-size:10px;color:var(--text-3)">Notes</th>
+              </tr>
+            </thead>
+            <tbody id="tacticalCompassBody">
+              <tr>
+                <td colspan="6" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
-    <!-- ═══════════════ SECTION 3: RAW DATA (Collapsible) ═══════════════ -->
-    <div class="section glass-card" id="sectionRaw" style="padding:20px;">
-        <div class="section-header section-collapsible" onclick="toggleSection('rawContent', this)">
-            <div class="section-icon-badge icon-blue">📊</div>
-            <div class="section-title">Raw OHLCV Data — Binance Market Structure</div>
-            <span class="section-badge">BINANCE REST</span>
-            <span class="chevron">▼</span>
+    <!-- ═══════════════ SECTION 3: RAW DATA ═══════════════ -->
+    <div
+      class="mb-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionRaw">
+      <div
+        class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] section-collapsible"
+        onclick="toggleSection('rawContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-blue-500/[0.12]">📊</div>
+        <div class="text-sm font-semibold">Raw OHLCV Data — Binance Market Structure</div>
+        <span
+          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-white/[0.03] text-[var(--text-3)] border border-white/[0.08]">BINANCE
+          REST</span>
+        <span
+          class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
+      </div>
+      <div id="rawContent"
+        class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body collapsed"
+        style="max-height:0;opacity:0;overflow:hidden;">
+        <div class="mb-2 text-[10px] text-[var(--text-3)] uppercase tracking-wide font-semibold">Select Pair</div>
+        <div class="flex border-b border-white/[0.08] mb-3.5 overflow-x-auto flex-nowrap" id="pairTabs">
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
+            data-pair="coin" onclick="switchPair(this)">🎯 Target Coin</button>
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+            data-pair="btc" onclick="switchPair(this)">₿ BTCUSDT</button>
         </div>
-        <div id="rawContent" class="section-body collapsed">
-            <div style="margin-bottom:8px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;font-weight:600;">Select Pair</div>
-            <div class="tabs" id="pairTabs">
-                <button class="tab-btn active" data-pair="coin" onclick="switchPair(this)">🎯 Target Coin</button>
-                <button class="tab-btn" data-pair="btc" onclick="switchPair(this)">₿ BTCUSDT</button>
-            </div>
-            <div style="margin-bottom:8px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;font-weight:600;">Timeframe</div>
-            <div class="tabs" id="timeframeTabs">
-                <button class="tab-btn active" data-tf="15m" onclick="switchTimeframe(this)">15m</button>
-                <button class="tab-btn" data-tf="1h" onclick="switchTimeframe(this)">1H</button>
-                <button class="tab-btn" data-tf="4h" onclick="switchTimeframe(this)">4H</button>
-                <button class="tab-btn" data-tf="1d" onclick="switchTimeframe(this)">1D</button>
-                <button class="tab-btn" data-tf="1w" onclick="switchTimeframe(this)">1W</button>
-            </div>
-            <div class="glass data-card"><div class="table-scroll">
-                <table id="rawTable"><thead><tr>
-                    <th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th>
-                    <th>Total Vol</th><th>Buy Vol</th><th>Sell Vol</th><th>Delta</th>
-                </tr></thead><tbody id="rawTableBody"><tr><td colspan="9" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td></tr></tbody></table>
-            </div></div>
+        <div class="mb-2 text-[10px] text-[var(--text-3)] uppercase tracking-wide font-semibold">Timeframe</div>
+        <div class="flex border-b border-white/[0.08] mb-3.5 overflow-x-auto flex-nowrap" id="timeframeTabs">
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
+            data-tf="15m" onclick="switchTimeframe(this)">15m</button>
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+            data-tf="1h" onclick="switchTimeframe(this)">1H</button>
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+            data-tf="4h" onclick="switchTimeframe(this)">4H</button>
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+            data-tf="1d" onclick="switchTimeframe(this)">1D</button>
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+            data-tf="1w" onclick="switchTimeframe(this)">1W</button>
         </div>
+        <div
+          class="overflow-hidden bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s]">
+          <div class="overflow-x-auto overscroll-x-contain">
+            <table id="rawTable" class="w-full border-collapse text-[12.5px]">
+              <thead>
+                <tr>
+                  <th
+                    class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Time</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Open</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    High</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Low</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Close</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Total Vol</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Buy Vol</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Sell Vol</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Delta</th>
+                </tr>
+              </thead>
+              <tbody id="rawTableBody">
+                <tr>
+                  <td colspan="9" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- ═══════════════ SECTION 4: COMPUTED INDICATORS (Collapsible) ═══════════════ -->
-    <div class="section glass-card" id="sectionComputed" style="padding:20px;">
-        <div class="section-header section-collapsible" onclick="toggleSection('computedContent', this)">
-            <div class="section-icon-badge icon-cyan">🔬</div>
-            <div class="section-title">Computed Indicators & Market Structure</div>
-            <span class="section-badge">PANDAS-TA</span>
-            <span class="chevron">▼</span>
+    <!-- ═══════════════ SECTION 4: COMPUTED INDICATORS ═══════════════ -->
+    <div
+      class="mb-3 bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionComputed">
+      <div
+        class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] section-collapsible"
+        onclick="toggleSection('computedContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-cyan-500/[0.12]">🔬</div>
+        <div class="text-sm font-semibold">Computed Indicators & Market Structure</div>
+        <span
+          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-white/[0.03] text-[var(--text-3)] border border-white/[0.08]">PANDAS-TA</span>
+        <span
+          class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
+      </div>
+      <div id="computedContent"
+        class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body collapsed"
+        style="max-height:0;opacity:0;overflow:hidden;">
+        <div class="mb-2 text-[10px] text-[var(--text-3)] uppercase tracking-wide font-semibold">Timeframe</div>
+        <div class="flex border-b border-white/[0.08] mb-3.5 overflow-x-auto flex-nowrap" id="indicatorTabs">
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
+            data-ind="1h" onclick="switchIndicator(this)">H1 Indicators</button>
+          <button
+            class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+            data-ind="4h" onclick="switchIndicator(this)">H4 Indicators</button>
         </div>
-        <div id="computedContent" class="section-body collapsed">
-            <div style="margin-bottom:8px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;font-weight:600;">Timeframe</div>
-            <div class="tabs" id="indicatorTabs">
-                <button class="tab-btn active" data-ind="1h" onclick="switchIndicator(this)">H1 Indicators</button>
-                <button class="tab-btn" data-ind="4h" onclick="switchIndicator(this)">H4 Indicators</button>
-            </div>
-            <div class="glass data-card" style="margin-bottom:16px"><div class="table-scroll">
-                <table><thead><tr>
-                    <th>Time</th><th>Close</th><th>EMA 7</th><th>EMA 21</th><th>EMA 50</th><th>EMA 200</th>
-                    <th>RSI 6</th><th>StochK</th><th>StochD</th><th>Buy Vol</th><th>Sell Vol</th><th>Delta</th>
-                </tr></thead><tbody id="indicatorTableBody"><tr><td colspan="12" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td></tr></tbody></table>
-            </div></div>
+        <div
+          class="overflow-hidden bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-lg shadow-sm hover:bg-white/[0.055] hover:shadow-md transition-all duration-[0.25s]"
+          style="margin-bottom:16px">
+          <div class="overflow-x-auto overscroll-x-contain">
+            <table class="w-full border-collapse text-[12.5px]">
+              <thead>
+                <tr>
+                  <th
+                    class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Time</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Close</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    EMA 7</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    EMA 21</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    EMA 50</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    EMA 200</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    RSI 6</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    StochK</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    StochD</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Buy Vol</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Sell Vol</th>
+                  <th
+                    class="sticky top-0 bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 text-right border-b border-white/[0.08] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Delta</th>
+                </tr>
+              </thead>
+              <tbody id="indicatorTableBody">
+                <tr>
+                  <td colspan="12" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
+      </div>
     </div>
 
-</div>
+  </div><!-- /.app-container -->
 
-<!-- ENTRY MODAL -->
-<div class="modal-overlay" id="entryModal">
-    <div class="modal">
-        <div class="modal-header">
-            <div class="modal-title">💰 Trade Entry Manager</div>
-            <button class="modal-close" onclick="closeEntryModal()">✕</button>
+  <!-- ENTRY MODAL -->
+  <div class="fixed inset-0 bg-black/55 backdrop-blur hidden items-center justify-center z-[2000]" id="entryModal">
+    <div
+      class="bg-[var(--bg-surface)] border border-white/[0.08] rounded-xl p-7 w-[90%] max-w-[520px] max-h-[88vh] overflow-y-auto shadow-[0_8px_32px_rgba(0,0,0,0.5),0_0_60px_rgba(0,0,0,0.4)]">
+      <div class="flex items-center justify-between mb-5">
+        <div class="text-lg font-bold">💰 Trade Entry Manager</div>
+        <button
+          class="bg-white/[0.03] border border-white/[0.08] text-[var(--text-2)] rounded px-2.5 py-1.5 cursor-pointer text-base leading-none hover:bg-white/[0.055]"
+          onclick="closeEntryModal()">✕</button>
+      </div>
+      <div class="flex border-b border-white/[0.08] mb-5 overflow-x-auto flex-nowrap" style="margin-top:0;">
+        <button
+          class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
+          id="tabEntry" onclick="switchModalTab('entry')">📥 Open Pos</button>
+        <button
+          class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+          id="tabSell" onclick="switchModalTab('sell')">📤 Close Pos</button>
+        <button
+          class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04]"
+          id="tabHistory" onclick="switchModalTab('history')">📜 History</button>
+      </div>
+      <div id="modalEntryForm" class="grid gap-3.5">
+        <div class="grid grid-cols-2 gap-3.5 max-[768px]:grid-cols-1">
+          <div class="flex flex-col gap-1.5 w-full"><label
+              class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Select Coin</label><select
+              id="entrySymbol"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"></select>
+          </div>
+          <div class="flex flex-col gap-1.5 w-full"><label
+              class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Position Side</label>
+            <select id="entrySide"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              onchange="onEntrySideChange()">
+              <option value="LONG">🟢 LONG</option>
+              <option value="SHORT">🔴 SHORT</option>
+            </select>
+          </div>
         </div>
-        <div class="tabs" style="margin-top:0;margin-bottom:20px">
-            <button class="tab-btn active" id="tabEntry" onclick="switchModalTab('entry')">📥 Open Pos</button>
-            <button class="tab-btn" id="tabSell" onclick="switchModalTab('sell')">📤 Close Pos</button>
-            <button class="tab-btn" id="tabHistory" onclick="switchModalTab('history')">📜 History</button>
+        <div class="grid grid-cols-2 gap-3.5 max-[768px]:grid-cols-1">
+          <div class="flex flex-col gap-1.5 w-full"><label
+              class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Market Type</label>
+            <select id="entryMarketType"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              onchange="onMarketTypeChange()">
+              <option value="SPOT">📈 SPOT</option>
+              <option value="FUTURES">⚡ FUTURES</option>
+            </select>
+          </div>
+          <div class="flex flex-col gap-1.5 w-full hidden" id="leverageGroup">
+            <label class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Leverage</label>
+            <input type="number" id="entryLeverage"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              value="10" min="1" max="125" placeholder="e.g. 10">
+          </div>
         </div>
-        <div id="modalEntryForm" style="display:grid;gap:14px">
-            <!-- Row 1: Coin + Position Side -->
-            <div class="form-row">
-                <div class="form-group"><label class="form-label">Select Coin</label><select id="entrySymbol" class="form-select"></select></div>
-                <div class="form-group"><label class="form-label">Position Side</label>
-                    <select id="entrySide" class="form-select" onchange="onEntrySideChange()">
-                        <option value="LONG">🟢 LONG</option>
-                        <option value="SHORT">🔴 SHORT</option>
-                    </select>
-                </div>
-            </div>
-            <!-- Row 2: Market Type + Leverage -->
-            <div class="form-row">
-                <div class="form-group"><label class="form-label">Market Type</label>
-                    <select id="entryMarketType" class="form-select" onchange="onMarketTypeChange()">
-                        <option value="SPOT">📈 SPOT</option>
-                        <option value="FUTURES">⚡ FUTURES</option>
-                    </select>
-                </div>
-                <div class="form-group" id="leverageGroup" style="display:none">
-                    <label class="form-label">Leverage</label>
-                    <input type="number" id="entryLeverage" class="form-input" value="10" min="1" max="125" placeholder="e.g. 10">
-                </div>
-            </div>
-            <!-- Row 3: Price + Margin USDT -->
-            <div class="form-row">
-                <div class="form-group"><label class="form-label">Entry Price ($)</label><input type="number" step="any" id="entryPrice" class="form-input" placeholder="0.000" oninput="calcQtyFromUsdt()"></div>
-                <div class="form-group"><label class="form-label">Margin (USDT)</label><input type="number" step="any" id="entryUsdt" class="form-input" placeholder="0.00" oninput="calcQtyFromUsdt()"></div>
-            </div>
-            <!-- Row 4: Calculated Quantity -->
-            <div class="form-row" style="margin-top: 14px;">
-                <div class="form-group">
-                    <label class="form-label">Calculated Quantity (Coin)</label>
-                    <input type="number" step="any" id="entryQty" class="form-input" placeholder="0.00">
-                </div>
-            </div>
-            <button class="btn-save" id="btnSaveEntry" onclick="saveEntry()">💾 Open Position</button>
+        <div class="grid grid-cols-2 gap-3.5 max-[768px]:grid-cols-1">
+          <div class="flex flex-col gap-1.5 w-full"><label
+              class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Entry Price ($)</label><input
+              type="number" step="any" id="entryPrice"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              placeholder="0.000" oninput="calcQtyFromUsdt()"></div>
+          <div class="flex flex-col gap-1.5 w-full"><label
+              class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Margin (USDT)</label><input
+              type="number" step="any" id="entryUsdt"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              placeholder="0.00" oninput="calcQtyFromUsdt()"></div>
         </div>
-        <div id="modalSellForm" style="display:none;gap:14px">
-            <div class="form-group"><label class="form-label">Select Coin</label><select id="sellSymbol" class="form-select"></select></div>
-            <div class="form-row">
-                <div class="form-group"><label class="form-label">Close Price ($)</label><input type="number" step="any" id="sellPriceInput" class="form-input" placeholder="0.000"></div>
-                <div class="form-group">
-                    <label class="form-label" style="display:flex; justify-content:space-between">
-                        Quantity
-                        <span onclick="setMaxSellQty()" style="cursor:pointer; color:var(--accent-blue); font-weight:700" title="Close All Remaining">MAX</span>
-                    </label>
-                    <input type="number" step="any" id="sellQtyInput" class="form-input" placeholder="0.00">
-                </div>
-            </div>
-            <button class="btn-save" style="background:var(--accent-red)" onclick="saveSell()">📤 Close Position</button>
+        <div class="grid grid-cols-2 gap-3.5 max-[768px]:grid-cols-1" style="margin-top: 14px;">
+          <div class="flex flex-col gap-1.5 w-full">
+            <label class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Calculated Quantity
+              (Coin)</label>
+            <input type="number" step="any" id="entryQty"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              placeholder="0.00">
+          </div>
         </div>
-        <div id="modalHistory" style="display:none"><div id="entryListBody"></div></div>
+        <button
+          class="bg-blue-500 text-white border-none p-3 rounded-md text-sm font-semibold cursor-pointer w-full font-sans transition-all duration-[0.25s] hover:bg-[#4f6bef] hover:shadow-[0_0_30px_rgba(99,125,255,0.12)]"
+          id="btnSaveEntry" onclick="saveEntry()">💾 Open Position</button>
+      </div>
+      <div id="modalSellForm" class="hidden gap-3.5">
+        <div class="flex flex-col gap-1.5 w-full"><label
+            class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Select Coin</label><select
+            id="sellSymbol"
+            class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"></select>
+        </div>
+        <div class="grid grid-cols-2 gap-3.5 max-[768px]:grid-cols-1">
+          <div class="flex flex-col gap-1.5 w-full"><label
+              class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide">Close Price ($)</label><input
+              type="number" step="any" id="sellPriceInput"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              placeholder="0.000"></div>
+          <div class="flex flex-col gap-1.5 w-full">
+            <label class="text-xs font-semibold text-[var(--text-3)] uppercase tracking-wide flex justify-between">
+              Quantity
+              <span onclick="setMaxSellQty()" class="cursor-pointer text-blue-500 font-bold"
+                title="Close All Remaining">MAX</span>
+            </label>
+            <input type="number" step="any" id="sellQtyInput"
+              class="bg-white/[0.03] border border-white/[0.08] rounded-sm px-3.5 py-2.5 text-[var(--text-1)] font-sans text-sm outline-none transition-colors duration-[0.25s] w-full focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.08)]"
+              placeholder="0.00">
+          </div>
+        </div>
+        <button
+          class="bg-blue-500 text-white border-none p-3 rounded-md text-sm font-semibold cursor-pointer w-full font-sans transition-all duration-[0.25s] hover:bg-[#4f6bef] hover:shadow-[0_0_30px_rgba(99,125,255,0.12)]"
+          style="background:var(--accent-red)" onclick="saveSell()">📤 Close Position</button>
+      </div>
+      <div id="modalHistory" class="hidden">
+        <div id="entryListBody"></div>
+      </div>
     </div>
-</div>
+  </div>
 
-<script>
-function toggleSection(contentId, headerEl) {
-    const body = document.getElementById(contentId);
-    const isCollapsed = body.classList.contains('collapsed');
-    body.classList.toggle('collapsed');
-    headerEl.classList.toggle('open', isCollapsed);
-}
+  <script>
+    function toggleSection(contentId, headerEl) {
+      const body = document.getElementById(contentId);
+      const isCollapsed = body.classList.contains('collapsed');
+      body.classList.toggle('collapsed');
+      headerEl.classList.toggle('open', isCollapsed);
+      // Animate max-height via style when collapsed
+      if (isCollapsed) {
+        body.style.maxHeight = '2000px';
+        body.style.opacity = '1';
+        body.style.overflow = '';
+      } else {
+        body.style.maxHeight = '0';
+        body.style.opacity = '0';
+        body.style.overflow = 'hidden';
+      }
+    }
 
-// ── System Health Monitor ────────────────────────────────────────────────────
-function checkSystemHealth() {
-    fetch('/api/system_health')
+    // ── System Health Monitor ────────────────────────────────────────────────────
+    function checkSystemHealth() {
+      fetch('/api/system_health')
         .then(r => r.json())
         .then(data => {
-            const bar   = document.getElementById('systemHealthBar');
-            const txt   = document.getElementById('healthErrorText');
-            const tsEl  = document.getElementById('healthCheckedAt');
-            if (data.status === 'warning' && data.error_count > 0) {
-                const parts = Object.entries(data.errors)
-                    .map(([sym, info]) => `${sym}: ${info.message || info} (${info.time || ''})`)
+          const bar = document.getElementById('systemHealthBar');
+          const txt = document.getElementById('healthErrorText');
+          const tsEl = document.getElementById('healthCheckedAt');
+          if (data.status === 'warning' && data.error_count > 0) {
+            const parts = Object.entries(data.errors)
+              .map(([sym, info]) => sym + ': ' + (info.message || info) + ' (' + (info.time || '') + ')')
                     .join('  |  ');
                 txt.textContent = parts;
-                tsEl.textContent = `Cek: ${data.checked_at}`;
+                tsEl.textContent = `Cek: ${ data.checked_at } `;
                 bar.classList.add('show');
+                bar.classList.remove('hidden');
+                bar.classList.add('flex');
             } else {
                 bar.classList.remove('show');
+                bar.classList.add('hidden');
+                bar.classList.remove('flex');
             }
         })
         .catch(() => {});
@@ -1160,49 +842,44 @@ setInterval(checkSystemHealth, 30000);
 let perfChartInstance = null;
 
 async function loadPerfChart() {
-  // Baca koin dari selector GLOBAL (sinkronisasi 1 sumber)
   const coin     = document.getElementById('pairSelect').value || currentBackendPair || 'BTCUSDT';
   const leverage = parseFloat(document.getElementById('perfLeverageInput').value) || 3;
   const hours    = parseInt(document.getElementById('perfHoursSelect').value) || 24;
 
-  // Update label koin di controls
   const lbl = document.getElementById('perfCoinLabel');
   if (lbl) lbl.textContent = coin;
 
-  // Show loading
   const placeholder = document.getElementById('perfChartPlaceholder');
   const canvas      = document.getElementById('perfChart');
   placeholder.innerHTML = `
-    <div class="chart-spinner"></div>
-    <div>Memuat data ${coin}...</div>
-  `;
+            < div class="w-9 h-9 border-[3px] border-white/[0.08] border-t-blue-500 rounded-full animate-spin" ></div >
+              <div>Memuat data ${coin}...</div>
+          `;
   placeholder.style.display = 'flex';
   canvas.style.display = 'none';
 
   try {
-    // Fetch OHLCV+signals dan confidence-history SECARA PARALEL
     const [perfRes, confRes] = await Promise.all([
-      fetch(`/api/price-performance/${coin}?hours=${hours}&leverage=${leverage}`),
-      fetch(`/api/confidence-history/${coin}?hours=${hours}`)
+      fetch(`/ api / price - performance / ${ coin }?hours = ${ hours }& leverage=${ leverage } `),
+      fetch(`/ api / confidence - history / ${ coin }?hours = ${ hours } `)
     ]);
     const perfData = await perfRes.json();
     const confData = await confRes.json();
 
     if (!perfData.success) throw new Error(perfData.error || 'Gagal memuat data harga');
 
-    // Gabungkan data confidence ke dalam objek
     const confHistory = (confData.success && confData.data) ? confData.data : [];
 
     const filteredCounts = renderPerfChart(perfData, coin, leverage, confHistory);
     updatePerfStats(perfData.stats, filteredCounts);
 
     document.getElementById('perfLastUpdate').textContent =
-      `Update: ${new Date().toLocaleTimeString('id-ID')} · ${confHistory.length} titik conf`;
+      `Update: ${ new Date().toLocaleTimeString('id-ID') } · ${ confHistory.length } titik conf`;
 
   } catch (err) {
     placeholder.innerHTML = `
-      <div style="color:#f87171;font-size:13px;">❌ Error: ${err.message}</div>
-    `;
+            < div style = "color:#f87171;font-size:13px;" >❌ Error: ${ err.message }</div >
+              `;
     placeholder.style.display = 'flex';
     console.error('PerfChart error:', err);
   }
@@ -1226,39 +903,32 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     return;
   }
 
-  // Siapkan data chart
   const labels = ohlcv.map(d => {
     const dt = new Date(d.ts);
     return dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   });
   const closes = ohlcv.map(d => d.close);
 
-  // ── Filter sinyal sesuai inference_config.json ──
-  // confidence_threshold_entry = 0.72 (valid entry)
-  // confidence_half_size       = 0.60 (weak, tampil kecil)
-  // min_hold_bars              = 96 (96 × 15min = 24 jam cooldown antar sinyal searah)
-  const CONF_ENTRY   = 0.72;  // Full entry marker
-  const CONF_WEAK    = 0.60;  // Weak signal (shown dim)
-  const HOLD_BAR_MS  = 96 * 15 * 60 * 1000;  // 24 jam dalam ms (sinkron min_hold_bars=96 dari inference_config)
+  const CONF_ENTRY   = 0.72;
+  const CONF_WEAK    = 0.60;
+  const HOLD_BAR_MS  = 96 * 15 * 60 * 1000;
 
-  const longPoints  = [];   // conf >= 0.72 valid entry
+  const longPoints  = [];
   const shortPoints = [];
-  const weakPoints  = [];   // 0.60 <= conf < 0.72 (dim, referensi saja)
+  const weakPoints  = [];
 
-  // Sorted signals by timestamp untuk cooldown tracking
   const sortedSignals = [...signals].sort((a, b) => (a.ts || 0) - (b.ts || 0));
-  let lastLongTs  = -Infinity;  // ms
+  let lastLongTs  = -Infinity;
   let lastShortTs = -Infinity;
 
   sortedSignals.forEach(s => {
     const sig  = s.ml_signal || s.signal;
     const conf = s.ml_conf   || s.conf || 0;
-    const sMs  = (s.ts || 0) * 1000;  // konversi ke ms
+    const sMs  = (s.ts || 0) * 1000;
 
-    if (conf < CONF_WEAK) return;  // buang noise di bawah 60%
-    if (sig === 'FLAT')   return;  // FLAT bukan sinyal entry
+    if (conf < CONF_WEAK) return;
+    if (sig === 'FLAT')   return;
 
-    // Cari indeks OHLCV terdekat
     let bestIdx = -1, bestDiff = Infinity;
     ohlcv.forEach((d, i) => {
       const diff = Math.abs(d.ts - sMs);
@@ -1269,7 +939,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     const price = ohlcv[bestIdx].close;
 
     if (conf >= CONF_ENTRY) {
-      // Valid entry — terapkan cooldown min_hold_bars
       if (sig === 'LONG') {
         if (sMs - lastLongTs >= HOLD_BAR_MS) {
           longPoints.push({ x: bestIdx, y: price, conf });
@@ -1282,15 +951,13 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
         }
       }
     } else {
-      // Weak signal (0.60–0.72): tampil kecil transparan
       weakPoints.push({ x: bestIdx, y: price, conf, sig });
     }
   });
 
-  // ── Proyeksi TP/SL — dari backend simulation (ATR riil, model params) ──
   const simulation = data.simulation || [];
   const tpSlDatasets = [];
-  const tpSlByIdx    = {};  // lookup per entry candle index
+  const tpSlByIdx    = {};
 
   simulation.forEach(sim => {
     const entryIdx  = sim.ohlcv_idx;
@@ -1304,12 +971,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
 
     if (entryIdx == null || endIdx == null) return;
 
-    // Tentukan akhir garis (sampai hit atau end_idx)
-    // Backend sudah hitung end_idx berdasarkan max_hold=48
-    const tpEnd = endIdx;  // line memanjang sampai max hold (backend sudah limitasi)
+    const tpEnd = endIdx;
     const slEnd = endIdx;
 
-    // Buat array data: mulai dari entryPrice di entryIdx, lalu horizontal ke target
     function lineFromEntry(targetPrice, to) {
       return ohlcv.map((_, i) => {
         if (i === entryIdx) return entryPrice;
@@ -1318,16 +982,14 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       });
     }
 
-    // Simpan untuk tooltip
     tpSlByIdx[entryIdx] = sim;
 
-    // ─── TP line ───
     const tpColor = tpHit
       ? (isLong ? 'rgba(52,211,153,1.0)' : 'rgba(248,113,113,1.0)')
       : (isLong ? 'rgba(52,211,153,0.4)'  : 'rgba(248,113,113,0.4)');
 
     tpSlDatasets.push({
-      label: `_tp_${sim.signal}_${entryIdx}`,
+      label: `_tp_${ sim.signal }_${ entryIdx } `,
       data: lineFromEntry(tpPrice, tpEnd),
       type: 'line', yAxisID: 'yPrice',
       borderColor: tpColor,
@@ -1337,13 +999,12 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       fill: false, showLine: true, tension: 0, spanGaps: false, order: 6,
     });
 
-    // ─── SL line ───
     const slColor = slHit
       ? 'rgba(251,191,36,1.0)'
       : (isLong ? 'rgba(248,113,113,0.4)' : 'rgba(52,211,153,0.4)');
 
     tpSlDatasets.push({
-      label: `_sl_${sim.signal}_${entryIdx}`,
+      label: `_sl_${ sim.signal }_${ entryIdx } `,
       data: lineFromEntry(slPrice, slEnd),
       type: 'line', yAxisID: 'yPrice',
       borderColor: slColor,
@@ -1353,11 +1014,10 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       fill: false, showLine: true, tension: 0, spanGaps: false, order: 6,
     });
 
-    // ─── Dot marker di ujung TP ───
     const dotTP = new Array(ohlcv.length).fill(null);
     dotTP[tpEnd] = tpPrice;
     tpSlDatasets.push({
-      label: `_dot_tp_${entryIdx}`,
+      label: `_dot_tp_${ entryIdx } `,
       data: dotTP, type: 'line', showLine: false, yAxisID: 'yPrice',
       borderColor: isLong ? '#34d399' : '#f87171',
       backgroundColor: tpHit
@@ -1368,11 +1028,10 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       pointHoverRadius: 10, fill: false, tension: 0, order: 5,
     });
 
-    // ─── Dot marker di ujung SL ───
     const dotSL = new Array(ohlcv.length).fill(null);
     dotSL[slEnd] = slPrice;
     tpSlDatasets.push({
-      label: `_dot_sl_${entryIdx}`,
+      label: `_dot_sl_${ entryIdx } `,
       data: dotSL, type: 'line', showLine: false, yAxisID: 'yPrice',
       borderColor: '#fbbf24',
       backgroundColor: slHit ? 'rgba(251,191,36,0.95)' : 'rgba(80,80,100,0.5)',
@@ -1382,15 +1041,13 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     });
   });
 
-  // ── ML Confidence line — dimap ke indeks label M15 terdekat ──
   const confLineData = new Array(ohlcv.length).fill(null);
   confHistory.forEach(ch => {
 
     if (!ch.ts) return;
-    // Cari indeks OHLCV yang paling dekat
     let bestIdx = -1, bestDiff = Infinity;
     ohlcv.forEach((d, i) => {
-      const diff = Math.abs(d.ts - ch.ts * 1000); // ch.ts dalam detik
+      const diff = Math.abs(d.ts - ch.ts * 1000);
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     });
     if (bestIdx >= 0 && bestDiff < 30 * 60 * 1000) {
@@ -1398,13 +1055,11 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     }
   });
 
-  // Warna gradient untuk price line
   const ctx = canvas.getContext('2d');
   const gradient = ctx.createLinearGradient(0, 0, 0, 400);
   gradient.addColorStop(0, 'rgba(99,125,255,0.3)');
   gradient.addColorStop(1, 'rgba(99,125,255,0.0)');
 
-  // Gradient untuk confidence line
   const confGrad = ctx.createLinearGradient(0, 0, 0, 400);
   confGrad.addColorStop(0, 'rgba(167,139,250,0.25)');
   confGrad.addColorStop(1, 'rgba(167,139,250,0.0)');
@@ -1417,10 +1072,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     data: {
       labels,
       datasets: [
-        // Harga Wicks (High/Low)
         {
           type: 'bar',
-          label: `${coin} Candles`,
+          label: `${ coin } Candles`,
           data: ohlcv.map(d => [d.low, d.high]),
           yAxisID: 'yPrice',
           backgroundColor: ohlcv.map(d => d.close >= d.open ? '#34d399' : '#f87171'),
@@ -1428,12 +1082,10 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           categoryPercentage: 0.8,
           order: 4,
         },
-        // Harga Body (Open/Close)
         {
           type: 'bar',
           label: `_ignore`,
           data: ohlcv.map(d => {
-             // Beri sedikit body jika open == close agar garis horizontal tetap terlihat
              if (d.open === d.close) return [d.open, d.open + (d.open * 0.0001)];
              return [d.open, d.close];
           }),
@@ -1443,7 +1095,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           categoryPercentage: 0.8,
           order: 4,
         },
-        // ML Confidence %
         {
           label: '🧠 ML Conf %',
           data: confLineData,
@@ -1459,7 +1110,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           spanGaps: true,
           order: 3,
         },
-        // Sinyal LONG (conf >= 0.72, valid entry)
         {
           label: '▲ LONG',
           data: ohlcv.map((_, i) => { const pt = longPoints.find(p => p.x === i); return pt ? pt.y : null; }),
@@ -1473,7 +1123,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           pointStyle: 'triangle',
           order: 1,
         },
-        // Sinyal SHORT (conf >= 0.72, valid entry)
         {
           label: '▼ SHORT',
           data: ohlcv.map((_, i) => { const pt = shortPoints.find(p => p.x === i); return pt ? pt.y : null; }),
@@ -1488,7 +1137,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           rotation: 180,
           order: 1,
         },
-        // Weak signals (0.60–0.72) — bukan entry, hanya referensi
         {
           label: '○ Weak (60-72%)',
           data: ohlcv.map((_, i) => { const pt = weakPoints.find(p => p.x === i); return pt ? pt.y : null; }),
@@ -1501,7 +1149,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           pointStyle: 'circle',
           order: 2,
         },
-        // TP / SL projection datasets
         ...tpSlDatasets.filter(ds => !ds.label.startsWith('_dot_')),
         ...tpSlDatasets.filter(ds => ds.label.startsWith('_dot_')),
       ]
@@ -1513,7 +1160,7 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
       animation: { duration: 400 },
       plugins: {
         legend: {
-          display: false,  // Gunakan custom legend di bawah chart
+          display: false,
         },
         tooltip: {
           backgroundColor: 'rgba(15,15,30,0.95)',
@@ -1523,7 +1170,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
           bodyColor: 'rgba(255,255,255,0.7)',
           padding: 12,
           filter: function(tooltipItem) {
-             // Sembunyikan dataset body (ignore) dan dot dari tooltip
              return !tooltipItem.dataset.label.startsWith('_');
           },
           callbacks: {
@@ -1531,10 +1177,10 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
               if (ctx.dataset.label.includes('Candles')) {
                 const c = ohlcv[ctx.dataIndex];
                 const fmt = v => v >= 1 ? v.toFixed(2) : v.toFixed(6);
-                return `O: ${fmt(c.open)}  H: ${fmt(c.high)}  L: ${fmt(c.low)}  C: ${fmt(c.close)}`;
+                return `O: ${ fmt(c.open) } H: ${ fmt(c.high) } L: ${ fmt(c.low) } C: ${ fmt(c.close) } `;
               }
               if (ctx.dataset.label === '🧠 ML Conf %') {
-                return `🧠 ML Conf %: ${ctx.parsed.y.toFixed(1)}%`;
+                return `🧠 ML Conf %: ${ ctx.parsed.y.toFixed(1) }% `;
               }
               return ctx.dataset.label + ': ' + ctx.formattedValue;
             },
@@ -1544,7 +1190,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
               const confVal = confLineData[i];
               const lines  = [];
 
-              // Cek apakah candle ini punya entry valid
               const inLong  = longPoints.find(p => p.x === i);
               const inShort = shortPoints.find(p => p.x === i);
               const inWeak  = weakPoints.find(p => p.x === i);
@@ -1552,30 +1197,30 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
               if (inLong) {
                 lines.push(`✅ VALID ENTRY: LONG`);
                 const m = tpSlByIdx[i];
-                lines.push(`Conf   : ${(inLong.conf*100).toFixed(1)}% (≥ 72%)`);
+                lines.push(`Conf: ${ (inLong.conf * 100).toFixed(1) }% (≥ 72 %)`);
                 if (m) {
                   const fmt = v => v >= 1 ? v.toFixed(4) : v.toFixed(6);
-                  lines.push(`ATR    : ${(m.atr||0).toFixed(6)}`);
-                  lines.push(`TP (2×): ${fmt(m.tpPrice)} ${m.tpHit ? '✅ HIT' : '⏳'}`);
-                  lines.push(`SL (1×): ${fmt(m.slPrice)} ${m.slHit ? '🔴 HIT' : '⏳'}`);
+                  lines.push(`ATR: ${ (m.atr || 0).toFixed(6) } `);
+                  lines.push(`TP(2×): ${ fmt(m.tpPrice) } ${ m.tpHit ? '✅ HIT' : '⏳' } `);
+                  lines.push(`SL(1×): ${ fmt(m.slPrice) } ${ m.slHit ? '🔴 HIT' : '⏳' } `);
                 }
               } else if (inShort) {
                 lines.push(`✅ VALID ENTRY: SHORT`);
                 const m = tpSlByIdx[i];
-                lines.push(`Conf   : ${(inShort.conf*100).toFixed(1)}% (≥ 72%)`);
+                lines.push(`Conf: ${ (inShort.conf * 100).toFixed(1) }% (≥ 72 %)`);
                 if (m) {
                   const fmt = v => v >= 1 ? v.toFixed(4) : v.toFixed(6);
-                  lines.push(`ATR    : ${(m.atr||0).toFixed(6)}`);
-                  lines.push(`TP (2×): ${fmt(m.tpPrice)} ${m.tpHit ? '✅ HIT' : '⏳'}`);
-                  lines.push(`SL (1×): ${fmt(m.slPrice)} ${m.slHit ? '🔴 HIT' : '⏳'}`);
+                  lines.push(`ATR: ${ (m.atr || 0).toFixed(6) } `);
+                  lines.push(`TP(2×): ${ fmt(m.tpPrice) } ${ m.tpHit ? '✅ HIT' : '⏳' } `);
+                  lines.push(`SL(1×): ${ fmt(m.slPrice) } ${ m.slHit ? '🔴 HIT' : '⏳' } `);
                 }
               } else if (inWeak) {
-                lines.push(`⚠️ Weak signal: ${inWeak.sig}`);
-                lines.push(`Conf   : ${(inWeak.conf*100).toFixed(1)}% (< 72%, skip)`);
+                lines.push(`⚠️ Weak signal: ${ inWeak.sig } `);
+                lines.push(`Conf: ${ (inWeak.conf * 100).toFixed(1) }% (< 72 %, skip)`);
               }
 
-              if (confVal != null) lines.push(`ML Conf: ${confVal.toFixed(1)}%`);
-              if (leverage > 1)    lines.push(`Lev    : ${leverage}x`);
+              if (confVal != null) lines.push(`ML Conf: ${ confVal.toFixed(1) }% `);
+              if (leverage > 1)    lines.push(`Lev: ${ leverage } x`);
               return lines;
             }
           }
@@ -1620,7 +1265,6 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
     }
   });
 
-  // Tampilkan legend
   document.getElementById('perfLegend').style.display = 'flex';
 
   return {
@@ -1633,9 +1277,9 @@ function renderPerfChart(data, coin, leverage, confHistory = []) {
 function updatePerfStats(stats, filteredCounts) {
   if (!stats) return;
   const grid = document.getElementById('perfStatGrid');
-  grid.style.display = 'grid';
+  grid.classList.remove('hidden');
+  grid.classList.add('grid');
 
-  // Hitung total valid dari simulation (LONG+SHORT yang masuk simulasi)
   const totalValid = (stats.tp_hits ?? 0) + (stats.sl_hits ?? 0) + ((filteredCounts?.longCount ?? 0) + (filteredCounts?.shortCount ?? 0) - (stats.tp_hits ?? 0) - (stats.sl_hits ?? 0));
 
   if (filteredCounts) {
@@ -1650,7 +1294,6 @@ function updatePerfStats(stats, filteredCounts) {
     document.getElementById('statFlatCount').textContent    = stats.flat_count    ?? '—';
   }
 
-  // Win Rate
   const wr = stats.winrate_pct;
   const wrEl = document.getElementById('statWinRate');
   if (wr != null) {
@@ -1658,7 +1301,6 @@ function updatePerfStats(stats, filteredCounts) {
     wrEl.style.color = wr >= 55 ? '#34d399' : wr >= 45 ? '#a78bfa' : '#f87171';
   } else { wrEl.textContent = '—'; }
 
-  // Total PnL
   const pnl = stats.total_pnl_pct;
   const pnlEl = document.getElementById('statTotalPnl');
   if (pnl != null) {
@@ -1666,14 +1308,16 @@ function updatePerfStats(stats, filteredCounts) {
     pnlEl.style.color = pnl > 0 ? '#34d399' : '#f87171';
   } else { pnlEl.textContent = '—'; }
 
-  // TP/SL Hits
   document.getElementById('statTpHits').textContent = stats.tp_hits ?? '—';
   document.getElementById('statSlHits').textContent = stats.sl_hits ?? '—';
 }
 
-
-// Ensure the old script tag end matches
-</script>
-<script src="/static/dashboard.js"></script>
+function closeEntryModal() {
+    document.getElementById('entryModal').classList.remove('show', 'flex');
+    document.getElementById('entryModal').classList.add('hidden');
+}
+  </script>
+  <script src="/static/dashboard.js"></script>
 </body>
+
 </html>

@@ -27,3 +27,9 @@ pyrightconfig.json
 bot_debug.py
 diag_tg.py
 protocol_96_tracker.py
+
+# Node.js
+node_modules/
+
+# Built Tailwind CSS
+static/css/tailwind.css

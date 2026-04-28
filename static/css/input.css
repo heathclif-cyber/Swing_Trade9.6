@@ -1,0 +1,515 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+
+  /*
+    Base styles that cannot be expressed as Tailwind utility classes on <body>
+    because they involve CSS custom properties, pseudo-elements, or complex
+    gradient backgrounds with attachment.
+  */
+  body {
+    @apply antialiased min-h-screen pt-[72px];
+    font-family: 'Inter', system-ui, sans-serif;
+    background-image:
+      radial-gradient(ellipse 70% 50% at 15% 0%, rgba(99, 125, 255, 0.06) 0%, transparent 55%),
+      radial-gradient(ellipse 50% 40% at 85% 100%, rgba(167, 139, 250, 0.05) 0%, transparent 55%);
+    background-attachment: fixed;
+  }
+
+  /*
+    Status-card ::before pseudo element (gradient overlay)
+    Cannot be done with utility classes alone.
+  */
+  .status-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0%, transparent 100%);
+    pointer-events: none;
+  }
+
+  /*
+    Scanner-card ::before pseudo element (gradient overlay)
+  */
+  .scanner-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  /*
+    Decision banner ::before pseudo element
+  */
+  .quant-decision-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, transparent 60%);
+  }
+
+  /*
+    Table header sticky background — uses rgba which cannot be done
+    with Tailwind's bg-opacity for the sticky header blur effect.
+  */
+  thead th {
+    background: rgba(15, 20, 36, 0.92);
+  }
+
+  .light thead th {
+    background: rgba(226, 232, 244, 0.92);
+  }
+
+  /*
+    Print utilities — Tailwind's `print:` modifier works for display,
+    but we need a comprehensive print rule.
+  */
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+  }
+
+  /*
+    Smooth scroll on html
+  */
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/*
+============================================================================
+COMPONENT LAYER — Classes referenced by dashboard.js template literals
+============================================================================
+These classes are set by JavaScript functions (renderQuantAnalysis,
+renderStatusStrip, renderScannerCards, renderCSVResult, etc.) and must
+exist as CSS rules since they cannot be expressed as inline Tailwind
+utility classes in the JS template literals.
+============================================================================ */
+@layer components {
+
+  /* ── Value Color Helpers ────────────────────────────────────────── */
+  .val-pos {
+    color: #34d399;
+  }
+
+  .val-neg {
+    color: #f87171;
+  }
+
+  .val-warn {
+    color: #fbbf24;
+  }
+
+  /* ── Status Strip ───────────────────────────────────────────────── */
+  .status-value {
+    @apply text-lg font-bold font-mono;
+  }
+
+  .status-tag {
+    @apply inline-block px-2.5 py-1 text-xs font-bold rounded-full;
+  }
+
+  .tag-killed {
+    @apply bg-red-500/15 text-red-400;
+  }
+
+  .tag-active {
+    @apply bg-blue-500/15 text-blue-400;
+  }
+
+  /* ── Glass Card (used in CSV result) ─────────────────────────────── */
+  .glass {
+    @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg;
+  }
+
+  .quant-card {
+    padding: 1.25rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  /* ── Panel ───────────────────────────────────────────────────────── */
+  .panel-title {
+    @apply text-[10.5px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-2.5;
+  }
+
+  .panel-row-value {
+    @apply text-sm font-mono font-semibold;
+  }
+
+  /* ── Quant Decision Banner ───────────────────────────────────────── */
+  .quant-decision-banner {
+    @apply relative overflow-hidden rounded-lg p-4 border;
+  }
+
+  .decision-label {
+    @apply text-[10px] font-semibold text-[var(--text-3)] uppercase tracking-wide mb-1.5;
+  }
+
+  .decision-name {
+    @apply text-xl font-bold mb-1;
+  }
+
+  .decision-score {
+    @apply text-xs text-[var(--text-3)];
+  }
+
+  /* Decision codes */
+  .decision-FULL {
+    background: rgba(52, 211, 153, 0.1);
+    border-color: rgba(52, 211, 153, 0.3);
+  }
+
+  .decision-HALF {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: rgba(96, 165, 250, 0.3);
+  }
+
+  .decision-WAIT {
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.3);
+  }
+
+  .decision-SKIP {
+    background: rgba(248, 113, 113, 0.1);
+    border-color: rgba(248, 113, 113, 0.3);
+  }
+
+  .color-FULL {
+    color: #34d399;
+  }
+
+  .color-HALF {
+    color: #60a5fa;
+  }
+
+  .color-WAIT {
+    color: #fbbf24;
+  }
+
+  .color-SKIP {
+    color: #f87171;
+  }
+
+  /* ── Feature Rows (ML probabilities / inputs) ───────────────────── */
+  .feature-row {
+    @apply flex items-center py-1.5 border-b border-white/[0.05] gap-2;
+  }
+
+  .feature-name {
+    @apply text-xs text-[var(--text-2)] flex-1;
+  }
+
+  .feature-val {
+    @apply font-mono text-xs text-[var(--text-1)] text-right;
+  }
+
+  .feature-dot {
+    @apply w-2 h-2 rounded-full flex-shrink-0;
+  }
+
+  .feature-bar-bg {
+    @apply h-1.5 bg-white/[0.06] rounded overflow-hidden;
+  }
+
+  .feature-bar-fill {
+    @apply h-full rounded;
+  }
+
+  /* ── Level Pills (SL/TP levels) ─────────────────────────────────── */
+  .level-pill {
+    @apply flex items-center justify-between py-1.5 px-2 text-xs border-b border-white/[0.035] last:border-b-0 gap-2;
+  }
+
+  /* ── R:R Badge & Matrix ──────────────────────────────────────────── */
+  .rr-badge {
+    @apply inline-block px-1.5 py-0.5 text-[10px] font-bold rounded ml-1.5;
+  }
+
+  .rr-good {
+    background: rgba(52, 211, 153, 0.15);
+    color: #34d399;
+  }
+
+  .rr-bad {
+    background: rgba(248, 113, 113, 0.15);
+    color: #f87171;
+  }
+
+  .rr-matrix {
+    @apply w-full border-collapse text-xs;
+  }
+
+  .rr-matrix th,
+  .rr-matrix td {
+    @apply px-2 py-1.5 text-center border border-white/[0.06];
+  }
+
+  .rr-matrix thead th {
+    @apply text-[10px] font-semibold text-[var(--text-3)] uppercase tracking-wide;
+    background: rgba(15, 20, 36, 0.92);
+  }
+
+  /* ── Exit Signals ────────────────────────────────────────────────── */
+  .exit-row {
+    @apply flex items-center gap-2 py-2 text-xs border-b border-white/[0.035];
+  }
+
+  .exit-mandate {
+    @apply mt-2 px-3 py-2 rounded text-xs font-bold text-center;
+  }
+
+  .mandate-exit {
+    @apply bg-red-500/10 text-red-400 border border-red-500/25;
+  }
+
+  .mandate-watch {
+    @apply bg-yellow-500/10 text-yellow-400 border border-yellow-500/25;
+  }
+
+  .mandate-hold {
+    @apply bg-blue-500/10 text-blue-400 border border-blue-500/25;
+  }
+
+  /* ── Narrative Box ───────────────────────────────────────────────── */
+  .narrative-box {
+    @apply rounded-lg p-3.5 text-xs border;
+  }
+
+  .narrative-long {
+    background: rgba(52, 211, 153, 0.06);
+    border-color: rgba(52, 211, 153, 0.18);
+  }
+
+  .narrative-short {
+    background: rgba(248, 113, 113, 0.06);
+    border-color: rgba(248, 113, 113, 0.18);
+  }
+
+  .nar-section {
+    @apply flex justify-between py-1.5 border-b border-white/[0.06] gap-4;
+  }
+
+  .nar-lbl {
+    @apply text-[var(--text-3)] font-semibold flex-shrink-0;
+  }
+
+  /* ── Scanner Cards ────────────────────────────────────────────────── */
+  .scanner-card {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    transition: all 0.25s;
+  }
+
+  .scanner-card:hover {
+    background: rgba(255, 255, 255, 0.055);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  }
+
+  .dec-long {
+    @apply border-l-2 border-l-[#34d399];
+  }
+
+  .dec-short {
+    @apply border-l-2 border-l-[#f87171];
+  }
+
+  .dec-wait {
+    @apply border-l-2 border-l-[var(--text-3)];
+  }
+
+  .sc-header {
+    @apply flex items-start justify-between mb-2.5 gap-2;
+  }
+
+  .sc-pair {
+    @apply text-sm font-bold text-[var(--text-1)];
+  }
+
+  .sc-price {
+    @apply text-xs text-[var(--text-3)] font-mono mt-0.5;
+  }
+
+  .sc-decision {
+    @apply flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs;
+  }
+
+  .sc-dec-icon {
+    @apply text-base leading-none;
+  }
+
+  .sc-dec-label {
+    @apply font-bold text-sm;
+  }
+
+  .sc-dec-sub {
+    @apply text-[10px];
+  }
+
+  .sc-size-pill {
+    @apply inline-block px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-white/[0.08] border border-white/[0.15];
+  }
+
+  .sc-entry {
+    @apply mb-2.5;
+  }
+
+  .sc-entry-body {
+    @apply bg-white/[0.02] border border-white/[0.06] rounded p-2.5;
+  }
+
+  .sc-entry-label {
+    @apply text-[9.5px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-1;
+  }
+
+  .sc-entry-signal {
+    @apply text-xs font-bold;
+  }
+
+  .sc-entry-time {
+    @apply text-[10px] text-[var(--text-3)] font-mono mt-0.5;
+  }
+
+  .sc-footer {
+    @apply flex justify-end;
+  }
+
+  /* ── Badges ──────────────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-[10px] font-bold rounded-full;
+  }
+
+  .badge-red {
+    background: rgba(248, 113, 113, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(248, 113, 113, 0.3);
+  }
+
+  .badge-green {
+    background: rgba(52, 211, 153, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(52, 211, 153, 0.3);
+  }
+
+  .badge-yellow {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  .badge-blue {
+    background: rgba(96, 165, 250, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+  }
+
+  /* ── Buttons ─────────────────────────────────────────────────────── */
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: #3b82f6;
+    color: #fff;
+    border-color: #3b82f6;
+    transition: all 0.25s;
+  }
+
+  .btn-primary:hover {
+    background: #4f6bef;
+    box-shadow: 0 0 30px rgba(99, 125, 255, 0.12);
+  }
+
+  .btn-del-e {
+    @apply bg-white/[0.03] border border-white/[0.08] text-[var(--text-2)] rounded px-2 py-1 cursor-pointer text-xs leading-none hover:bg-white/[0.055] transition-all duration-[0.2s];
+  }
+
+  .btn-loading {
+    @apply opacity-60 pointer-events-none;
+  }
+
+  /* ── Table Row Classes (Tactical Compass) ────────────────────────── */
+  .row-bullish {
+    background: rgba(52, 211, 153, 0.04);
+  }
+
+  .row-bearish {
+    background: rgba(248, 113, 113, 0.04);
+  }
+
+  .row-neutral {
+    @apply bg-transparent;
+  }
+
+  /* ── Tab Buttons ─────────────────────────────────────────────────── */
+  .tab-btn {
+    @apply px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04];
+  }
+
+  .tab-btn.active {
+    @apply text-blue-500 border-b-blue-500 font-semibold;
+  }
+
+  /* ── Alert Banner ────────────────────────────────────────────────── */
+  .alert-banner {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9000;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.375rem;
+    font-size: 13px;
+    font-weight: 600;
+    display: none;
+    white-space: nowrap;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    animation: fadeIn 0.3s ease;
+  }
+
+  .alert-banner.show {
+    @apply flex items-center gap-2;
+  }
+
+  .alert-banner.danger {
+    @apply bg-red-500/15 text-red-400 border border-red-500/25;
+  }
+
+  .alert-banner.success {
+    @apply bg-green-500/15 text-green-400 border border-green-500/25;
+  }
+
+  /* ── Entry List ──────────────────────────────────────────────────── */
+  .entry-empty {
+    @apply text-center text-[var(--text-3)] py-6 text-sm;
+  }
+
+  /* ── Modal ───────────────────────────────────────────────────────── */
+  .modal {
+    @apply fixed inset-0 bg-black/55 backdrop-blur items-center justify-center z-[2000];
+  }
+
+  /* ── Emergency Bar (CSV result) ──────────────────────────────────── */
+  .emergency-bar {
+    @apply items-center justify-center gap-3 px-5 py-3.5 mb-4 bg-red-500/10 border border-red-500/35 rounded-md text-[#fca5a5] font-bold text-sm animate-pulse;
+  }
+}
