@@ -193,13 +193,14 @@
     <div
       class="mb-3 bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] light:bg-black/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
       id="sectionQuantitative">
-      <div class="flex items-center gap-2.5 mb-2.5">
+      <div class="flex items-center gap-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] light:bg-black/[0.02] section-collapsible open"
+        onclick="toggleSection('quantContent', this)">
         <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-purple-500/[0.12]">🤖</div>
         <div class="text-sm font-semibold">Machine Learning Swing Analyst — ML Ensemble (Live 4H)</div>
-        <span
-          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-[var(--accent-purple)] border border-purple-500/[0.25]"
-          style="color:#a78bfa;">ML V3.0</span>
+        <span class="ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-purple-400 border border-purple-500/[0.25]">ML V3.0</span>
+        <span class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
       </div>
+      <div id="quantContent" class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body" style="max-height:4000px;">
       <div class="hidden flex border-b border-white/[0.08] light:border-black/[0.1] mb-3.5 overflow-x-auto flex-nowrap" id="quantSetupTabs">
         <button
           class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
@@ -268,12 +269,12 @@
             class="bg-white/[0.02] light:bg-black/[0.02] rounded-md border-l-[3px] border-blue-500 p-4 text-[13px] leading-relaxed text-[var(--text-2)]">
           </div>
           <div>
-            <div class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-2">Live Market
-              Variables</div>
+            <div class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-2">Market Context</div>
             <div id="marketContext" class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-1.5"></div>
           </div>
         </div>
       </div>
+      </div><!-- /quantContent -->
     </div>
 
     <!-- ═══════════════ SECTION: PRICE PERFORMANCE MONITOR ═══════════════ -->

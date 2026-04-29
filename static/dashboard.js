@@ -565,29 +565,6 @@ function renderQuantAnalysis(quant, state) {
             </div>`;
     }
 
-    console.log("[SHAP DEBUG] received in UI:", pctx.shap_top_features);
-    if (pctx.shap_top_features && pctx.shap_top_features.length > 0) {
-        html += `<div style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;margin:16px 0 8px">🔍 Top SHAP Drivers — Mengapa ${data.ml_signal || 'FLAT'}?</div>`;
-        html += `<div style="background:rgba(0,0,0,0.2); border-radius:6px; padding:8px; border:1px solid rgba(255,255,255,0.05);">`;
-        pctx.shap_top_features.forEach(f => {
-            const isPos = f.direction === 'positive';
-            const color = isPos ? 'var(--accent-red)' : 'var(--accent-green)';
-            const icon = isPos ? '🔴' : '🟢';
-            const barWidth = Math.min(100, Math.abs(f.shap_value) * 100);
-            html += `<div style="display:flex; align-items:center; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.02);">
-                <div style="color:var(--text-2); font-size:11px; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.feature.replace(/_/g, ' ')}</div>
-                <div style="font-family:var(--mono); color:${color}; font-size:11px; width:45px; text-align:right; margin-right:8px;">${f.shap_value > 0 ? '+' : ''}${f.shap_value}</div>
-                <div style="font-size:10px; margin-right:6px;">${icon}</div>
-                <div style="width:50px; height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden;">
-                    <div style="width:${barWidth}%; height:100%; background:${color};"></div>
-                </div>
-            </div>`;
-        });
-        html += `<div style="font-size:9px; color:var(--text-3); margin-top:6px; text-align:center;">* Merah = mendorong ${data.ml_signal || 'FLAT'} | Hijau = melawan ${data.ml_signal || 'FLAT'}</div></div>`;
-    }
-
-    // ML Confidence chart dipindahkan ke Price Performance Monitor
-
     document.getElementById('featureGrid').innerHTML = html;
     // SL/TP Levels
     const lv = data.levels;
@@ -666,37 +643,28 @@ function renderQuantAnalysis(quant, state) {
         <div class="nar-section"><span class="nar-lbl">📍 Kondisi Pasar</span><span>${n.kondisi}</span></div>
         <div class="nar-section"><span class="nar-lbl">🎯 Keputusan Rasional</span><span style="color:var(--accent-blue);font-weight:600">${n.keputusan}</span></div>
         <div class="nar-section"><span class="nar-lbl">🗺️ Skenario</span><span>${n.skenario}</span></div>`;
-    // Market context — combine variables + live market_context
+    // Market context — unique items only.
+    // Dihapus (duplikat): RSI 6, ATR%, OI Norm, Vol Norm, CVD Norm → sudah di ML Feature Inputs
+    // Dihapus (duplikat): PDH/PDL/PWH/PWL → sudah di Liquidity Borders (Kill Switch)
+    // Dihapus (duplikat): StochRSI_K/D → sudah di Indicator Table
     const ctx = quant.variables || {};
     const mctx = quant.market_context || {};
     let ctxItems = [
         ['Session', ctx.session],
-        ['RSI 6', ctx.O_rsi?.toFixed(1)],
-        ['ATR %', ctx.H_atr_pct?.toFixed(2) + '%'],
-        ['OI Norm', ctx.C_oi_norm?.toFixed(2) + '%'],
-        ['Vol Norm', ctx.F_vol_norm?.toFixed(2) + '%'],
-        ['CVD Norm', ctx.K_cvd_norm?.toFixed(2) + '%'],
-        ['CVD Bull Div', ctx.cvd_div_bull ? '🟢 YES' : '—'],
-        ['CVD Bear Div', ctx.cvd_div_bear ? '🔴 YES' : '—'],
-        ['Altcoin Mode', ctx.is_altcoin ? 'Yes (×2 ATR)' : 'No (BTC scale)'],
+        ['CVD Bull Div', ctx.cvd_div_bull ? '🟢 YES' : null],
+        ['CVD Bear Div', ctx.cvd_div_bear ? '🔴 YES' : null],
+        ['Altcoin Mode', ctx.is_altcoin ? 'Yes (×2 ATR)' : 'No'],
     ];
-    // Add live context items
     for (const [k, v] of Object.entries(mctx)) {
-        if (!['StochRSI_K', 'StochRSI_D', 'Funding_Rate', 'Open_Interest', 'PDH', 'PDL', 'PWH', 'PWL'].includes(k)) continue;
-        // Exception for Funding Rate to show 6 decimal places instead of truncating to 4
-        const fmtVal = (typeof v === 'number') ? (k === 'Funding_Rate' ? v.toFixed(6) : v.toFixed(4)) : v;
+        if (!['Funding_Rate', 'Open_Interest'].includes(k)) continue;
+        const fmtVal = (typeof v === 'number') ? (k === 'Funding_Rate' ? v.toFixed(6) : v.toFixed(2)) : v;
         ctxItems.push([k.replace(/_/g, ' '), fmtVal]);
     }
-
-    // Extras for V13 requirements
-    if (ctx.buy_liq_val) ctxItems.push(['Buy_Liq [CSV]', ctx.buy_liq_val?.toFixed(5)]);
-    if (ctx.dyn_buy_liq) ctxItems.push(['Dyn_Buy_Liq 20', ctx.dyn_buy_liq?.toFixed(5)]);
-    if (ctx.macro_slope !== null) ctxItems.push(['EMA200 Slope H4', ctx.macro_slope?.toFixed(2) + '%']);
-
-    if (ctx.stoch_k != null) {
-        let bns = ctx.stoch_bonus_points || 0;
-        ctxItems.push(['StochGate', `K=${ctx.stoch_k} D=${ctx.stoch_d} | bonus=+${bns}`]);
-    }
+    if (ctx.buy_liq_val) ctxItems.push(['Buy Liq', ctx.buy_liq_val?.toFixed(5)]);
+    if (ctx.dyn_buy_liq) ctxItems.push(['Dyn Buy Liq', ctx.dyn_buy_liq?.toFixed(5)]);
+    if (ctx.macro_slope != null) ctxItems.push(['EMA200 Slope', ctx.macro_slope?.toFixed(2) + '%']);
+    if (ctx.stoch_k != null)
+        ctxItems.push(['Stoch Gate', `K=${ctx.stoch_k} D=${ctx.stoch_d} (+${ctx.stoch_bonus_points || 0}pts)`]);
 
     const ctxHtml = ctxItems.filter(([, v]) => v != null && v !== '—').map(([k, v]) =>
         `<div class="level-pill"><span>${k}</span><span style="font-family:var(--mono)">${v}</span></div>`
