@@ -1077,70 +1077,73 @@ def api_data():
             import traceback; traceback.print_exc()
             state["quant_analysis"] = None
 
-        # ── Last row of df_quant — reused by SHAP ranking and feature quality audit ──
-        _last_row = df_quant.iloc[-1] if df_quant is not None and not df_quant.empty else None
+        # ── Feature quality audit + live values ──────────────────────────────
+        # PENTING: FEATURE_COLS adalah OUTPUT dari calculate_features_realtime(),
+        # bukan kolom df_quant (yang pakai nama kapital/enriched). Harus panggil
+        # feature calculator langsung agar audit tidak false-alarm.
+        _feature_quality = {"missing_from_df": [], "nan_values": [], "total": len(FEATURE_COLS), "ok_count": 0}
+        _feature_live: dict = {}
+        _feat_df_audit = None
+        try:
+            from ml.ml_feature_calculator import calculate_features_realtime as _calc_feats
+            if _df_m15_quant is not None and not _df_m15_quant.empty:
+                # Ekstrak macro scalars dari df_quant (sama dengan yang dilakukan algo_scoring)
+                _last_q = df_quant.iloc[-1] if df_quant is not None and not df_quant.empty else pd.Series(dtype=float)
+                _fr_a   = float(_last_q['Funding_Rate'])  if 'Funding_Rate'  in _last_q.index else None
+                _btcd_a = float(_last_q['BTC_Dominance']) if 'BTC_Dominance' in _last_q.index else None
+                _fg_a   = float(_last_q['Fear_Greed'])    if 'Fear_Greed'    in _last_q.index else None
+                _audit_h1 = _df_m15_quant.copy()
+                if _fr_a   is not None: _audit_h1['funding_rate']  = _fr_a
+                if _btcd_a is not None: _audit_h1['btc_dominance'] = _btcd_a
+                if _fg_a   is not None: _audit_h1['fear_greed']    = _fg_a
+                # Jalankan feature calculator (raw, sebelum ffill/fillna agar NaN terlihat)
+                _feat_df_audit = _calc_feats(coin_pair, _audit_h1, _fr_a, _btcd_a, _fg_a)
+        except Exception as _fq_err:
+            logger.warning(f"Feature quality audit error: {_fq_err}")
 
-        # ── SHAP Ranking: top 15 features with live values ──
+        _feat_last = _feat_df_audit.iloc[-1] if _feat_df_audit is not None and not _feat_df_audit.empty else None
+        if _feat_last is not None:
+            for _feat in FEATURE_COLS:
+                if _feat not in _feat_df_audit.columns:
+                    _feature_quality["missing_from_df"].append(_feat)
+                    _feature_live[_feat] = None
+                else:
+                    try:
+                        _rv = _feat_last.get(_feat)
+                        if pd.isna(_rv):
+                            _feature_quality["nan_values"].append(_feat)
+                            _feature_live[_feat] = None
+                        else:
+                            _feature_live[_feat] = round(float(_rv), 6)
+                    except Exception:
+                        _feature_quality["nan_values"].append(_feat)
+                        _feature_live[_feat] = None
+        _feature_quality["ok_count"] = (
+            len(FEATURE_COLS) - len(_feature_quality["missing_from_df"]) - len(_feature_quality["nan_values"])
+        )
+        if _feature_quality["missing_from_df"] or _feature_quality["nan_values"]:
+            logger.warning(
+                f"Feature quality: {len(_feature_quality['missing_from_df'])} missing, "
+                f"{len(_feature_quality['nan_values'])} NaN / {len(FEATURE_COLS)}"
+            )
+
+        # ── SHAP Ranking: top 15 features, live values dari _feature_live ──
         _shap_ranking_data = {"top15": [], "source": "models/shap_ranking.json"}
         try:
             _shap_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'models', 'shap_ranking.json')
             if _os.path.exists(_shap_path):
                 with open(_shap_path, 'r') as _f:
                     _shap_full = json.load(_f)
-                _shap_ranking = _shap_full.get("ranking", [])[:15]
-                for _item in _shap_ranking:
+                for _item in _shap_full.get("ranking", [])[:15]:
                     _feat = _item["feature"]
-                    _val = None
-                    if _last_row is not None and _feat in df_quant.columns:
-                        try:
-                            _raw = _last_row.get(_feat)
-                            if pd.notna(_raw):
-                                _val = round(float(_raw), 6)
-                        except Exception:
-                            pass
                     _shap_ranking_data["top15"].append({
                         "rank":       _item["rank"],
                         "feature":    _feat,
                         "shap_value": _item["mean_abs_shap"],
-                        "live_value": _val,
+                        "live_value": _feature_live.get(_feat),  # reuse live values
                     })
         except Exception as _shap_err:
             logger.warning(f"Could not load SHAP ranking: {_shap_err}")
-
-        # ── Feature quality audit: detect missing/NaN among all 85 FEATURE_COLS ──
-        _feature_quality = {
-            "missing_from_df": [],
-            "nan_values": [],
-            "total": len(FEATURE_COLS),
-            "ok_count": 0,
-        }
-        _feature_live: dict = {}
-        if _last_row is not None:
-            for _feat in FEATURE_COLS:
-                if _feat not in df_quant.columns:
-                    _feature_quality["missing_from_df"].append(_feat)
-                    _feature_live[_feat] = None
-                else:
-                    try:
-                        _raw_val = _last_row.get(_feat)
-                        if pd.isna(_raw_val):
-                            _feature_quality["nan_values"].append(_feat)
-                            _feature_live[_feat] = None
-                        else:
-                            _feature_live[_feat] = round(float(_raw_val), 6)
-                    except Exception:
-                        _feature_quality["nan_values"].append(_feat)
-                        _feature_live[_feat] = None
-        _feature_quality["ok_count"] = (
-            len(FEATURE_COLS)
-            - len(_feature_quality["missing_from_df"])
-            - len(_feature_quality["nan_values"])
-        )
-        if _feature_quality["missing_from_df"] or _feature_quality["nan_values"]:
-            logger.warning(
-                f"Feature quality: {len(_feature_quality['missing_from_df'])} missing, "
-                f"{len(_feature_quality['nan_values'])} NaN out of {len(FEATURE_COLS)}"
-            )
 
         logger.info("✅ Dashboard data ready!")
         payload = {
