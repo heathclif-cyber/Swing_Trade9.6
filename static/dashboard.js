@@ -1162,12 +1162,55 @@ function renderConfidenceChart(pair, data, customWidth = 280) {
     </div>`;
 }
 
+/* ── MODELS ──────────────────────────────────────────────────────────────── */
+async function fetchModels() {
+    try {
+        const res = await fetch('/api/models');
+        const json = await res.json();
+        if (json.success) {
+            const sel = document.getElementById('modelSelect');
+            if (sel) {
+                sel.innerHTML = json.models.map(m => 
+                    `<option value="${m}" ${m === json.active ? 'selected' : ''}>${m.toUpperCase().replace('_', ' ')}</option>`
+                ).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to fetch models:', e);
+    }
+}
+
+async function changeModel() {
+    const sel = document.getElementById('modelSelect');
+    if (!sel) return;
+    const model = sel.value;
+    
+    try {
+        const res = await fetch('/api/models/set', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model })
+        });
+        const json = await res.json();
+        if (json.success) {
+            showAlert('success', `✅ Model changed to ${model.toUpperCase().replace('_', ' ')}`);
+            setTimeout(hideAlert, 3000);
+            fetchData(); // reload data with new model
+        } else {
+            showAlert('danger', '❌ Failed to change model: ' + json.error);
+        }
+    } catch (e) {
+        showAlert('danger', '❌ ' + e.message);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const t = localStorage.getItem('theme') || 'dark';
     const h = document.documentElement;
     if (t === 'light') h.classList.add('light');
     document.addEventListener('click', e => { if (e.target.id === 'entryModal') closeEntryModal(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEntryModal(); });
+    fetchModels(); // Ambil model yang tersedia
     fetchData(); // Fungsi utama me-load single dashboard default
     fetchScannerData(); // Tambahan untuk memuat scanner
 });

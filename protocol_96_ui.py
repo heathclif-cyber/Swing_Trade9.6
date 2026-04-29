@@ -2249,3 +2249,38 @@ if __name__ == "__main__":
     # ── Start background signal monitor (15-min polling + Telegram alerts) ──
     signal_monitor.start_background_monitor()
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
+@app.route('/api/models', methods=['GET'])
+def get_models():
+    registry_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'models', 'model_registry.json')
+    try:
+        with open(registry_path, 'r') as f:
+            registry = json.load(f)
+        return jsonify({'success': True, 'active': registry.get('active'), 'models': list(registry.get('models', {}).keys())})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/models/set', methods=['POST'])
+def set_model():
+    data = flask_request.get_json()
+    model_name = data.get('model')
+    if not model_name:
+        return jsonify({'success': False, 'error': 'No model specified'})
+    
+    registry_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'models', 'model_registry.json')
+    try:
+        with open(registry_path, 'r') as f:
+            registry = json.load(f)
+        
+        if model_name not in registry.get('models', {}):
+            return jsonify({'success': False, 'error': 'Invalid model name'})
+            
+        registry['active'] = model_name
+        with open(registry_path, 'w') as f:
+            json.dump(registry, f, indent=2)
+            
+        # Reload the ML engine
+        _ui_ml_engine.reload()
+        return jsonify({'success': True, 'active': model_name})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})

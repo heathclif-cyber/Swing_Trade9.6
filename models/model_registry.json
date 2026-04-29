@@ -2,6 +2,7 @@
   "active": "ensemble_v2",
   "models": {
     "ensemble_v2": {
+      "type": "ensemble",
       "version": "v3",
       "status": "active",
       "f1_macro": 0.0831194296054307,
@@ -11,7 +12,32 @@
       "max_drawdown": 0.2902,
       "max_consecutive_loss": 10,
       "trained_date": "2026-04-25",
-      "pnl_lev3x": 80590.21
+      "pnl_lev3x": 80590.21,
+      "lgbm": "lgbm_baseline.pkl",
+      "lstm": "lstm_best.pt",
+      "meta": "ensemble_meta.pkl",
+      "scaler": "lstm_scaler.pkl",
+      "calibrator": "calibrator.pkl"
+    },
+    "lgbm_only": {
+      "type": "lgbm",
+      "version": "v3",
+      "status": "active",
+      "lgbm": "lgbm_baseline.pkl",
+      "lstm": "lstm_best.pt",
+      "meta": "ensemble_meta.pkl",
+      "scaler": "lstm_scaler.pkl",
+      "calibrator": "calibrator.pkl"
+    },
+    "lstm_only": {
+      "type": "lstm",
+      "version": "v3",
+      "status": "active",
+      "lgbm": "lgbm_baseline.pkl",
+      "lstm": "lstm_best.pt",
+      "meta": "ensemble_meta.pkl",
+      "scaler": "lstm_scaler.pkl",
+      "calibrator": "calibrator.pkl"
     }
   }
 }

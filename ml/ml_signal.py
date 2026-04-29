@@ -228,12 +228,20 @@ class MLSignalEngine:
             logits     = self.lstm_model(seq_tensor)
             lstm_proba = torch.softmax(logits, dim=1).numpy()        # (1, 3)
 
-        # 6. Ensemble meta-learner
-        meta_input = np.hstack([lgbm_proba, lstm_proba])             # (1, 6)
-        meta_proba = self.meta_learner.predict_proba(meta_input)     # (1, 3)
+        # 6. Model selection based on config type
+        model_type = self.cfg.get('type', 'ensemble').lower()
+        if model_type == 'lgbm' or model_type == 'lgbm_only':
+            meta_proba = lgbm_proba
+        elif model_type == 'lstm' or model_type == 'lstm_only':
+            meta_proba = lstm_proba
+        else:
+            # Default to ensemble meta-learner
+            meta_input = np.hstack([lgbm_proba, lstm_proba])             # (1, 6)
+            meta_proba = self.meta_learner.predict_proba(meta_input)     # (1, 3)
 
         # 7. [v3] Calibrator (isotonic)
-        if self.calibrator is not None:
+        # Note: We only calibrate if it's the ensemble since calibrator was trained on ensemble outputs
+        if self.calibrator is not None and model_type in ['ensemble', 'ensemble_v2']:
             try:
                 cal_proba = self.calibrator.transform(meta_proba)    # (1, 3)
                 # Normalisasi agar sum = 1
@@ -246,7 +254,7 @@ class MLSignalEngine:
         else:
             signal_proba = meta_proba[0]
 
-        # 8. Signal = argmax probabilitas terkalibrasi
+        # 8. Signal = argmax probabilitas
         signal_int = int(np.argmax(signal_proba))
         signal     = LABEL_MAP[signal_int]
         confidence = float(signal_proba[signal_int])
