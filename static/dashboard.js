@@ -1113,31 +1113,31 @@ function renderEntryList() {
             ? `<span class="badge badge-yellow" style="font-size:9px;padding:2px 7px;margin-left:4px">⚡${lev}x</span>`
             : `<span class="badge badge-blue" style="font-size:9px;padding:2px 7px;margin-left:4px">📈 SPOT</span>`;
 
-        html += `<div style="background:rgba(99,125,255,.06);border:1px solid rgba(99,125,255,.18);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        html += `<div class="entry-header">
+            <div class="entry-header-inner">
                 <strong>${sym}</strong>
                 <span class="badge ${sideClr}" style="font-size:9px;padding:2px 7px">${sideIcon} ${side}</span>
                 ${mktBadge}
-                <span style="font-size:12px;color:var(--text-2)">Rem: <strong>${(sm.remaining_qty || 0).toFixed(4)}</strong></span>
-                <span style="font-size:12px">P&L: <strong class="${(sm.realized_pnl || 0) >= 0 ? 'val-pos' : 'val-neg'}">$${(sm.realized_pnl || 0).toFixed(2)}</strong></span>
+                <span class="entry-remaining">Rem: <strong>${(sm.remaining_qty || 0).toFixed(4)}</strong></span>
+                <span class="entry-pnl">P&L: <strong class="${(sm.realized_pnl || 0) >= 0 ? 'val-pos' : 'val-neg'}">$${(sm.realized_pnl || 0).toFixed(2)}</strong></span>
             </div>
             <button class="btn-del-e" onclick="deleteAllEntries('${sym}')">✕ Clear</button></div>`;
 
         entries.forEach((e, i) => {
-            html += `<div class="entry-item" style="margin-left:12px;border-left:3px solid var(--accent-green)">
-                <div><div style="font-size:11px;color:var(--accent-green);font-weight:700">OPEN #${i + 1}</div>
-                <div style="font-size:11px;color:var(--text-3)">Qty: ${e.qty} · ${e.date || ''}</div></div>
+            html += `<div class="entry-item entry-item-long">
+                <div><div class="entry-label-open">OPEN #${i + 1}</div>
+                <div class="entry-time">Qty: ${e.qty} · ${e.date || ''}</div></div>
                 <div style="display:flex;align-items:center;gap:10px">
-                    <span style="font-family:var(--mono);color:var(--accent-green);font-weight:600">$${e.price}</span>
+                    <span class="entry-price-long">$${e.price}</span>
                     <button class="btn-del-e" onclick="deleteSingleEntry('${sym}',${i})">✕</button>
                 </div></div>`;
         });
         sales.forEach((s, i) => {
-            html += `<div class="entry-item" style="margin-left:12px;border-left:3px solid var(--accent-red)">
-                <div><div style="font-size:11px;color:var(--accent-red);font-weight:700">CLOSE #${i + 1}</div>
-                <div style="font-size:11px;color:var(--text-3)">Qty: ${s.qty} · ${s.date || ''}</div></div>
+            html += `<div class="entry-item entry-item-short">
+                <div><div class="entry-label-close">CLOSE #${i + 1}</div>
+                <div class="entry-time">Qty: ${s.qty} · ${s.date || ''}</div></div>
                 <div style="display:flex;align-items:center;gap:10px">
-                    <span style="font-family:var(--mono);color:var(--accent-red);font-weight:600">$${s.price}</span>
+                    <span class="entry-price-short">$${s.price}</span>
                     <button class="btn-del-e" onclick="deleteSaleEntry('${sym}',${i})">✕</button>
                 </div></div>`;
         });

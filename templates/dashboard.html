@@ -114,8 +114,8 @@
       </div>
       <div id="scannerContent"
         class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
-        style="max-height:2000px;">
-        <div id="scannerGrid" class="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3 p-1">
+        style="max-height:9999px;">
+        <div id="scannerGrid" class="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3 p-1" style="grid-auto-rows:1fr;">
           <div style="grid-column:1/-1;text-align:center;color:var(--text-3);padding:40px">
             <div
               class="w-7 h-7 border-[2px] border-blue-500/20 border-t-blue-500 rounded-full animate-spin mx-auto mb-3.5"
@@ -200,7 +200,7 @@
         <span class="ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-purple-400 border border-purple-500/[0.25]">ML V3.0</span>
         <span class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
       </div>
-      <div id="quantContent" class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body" style="max-height:4000px;">
+      <div id="quantContent" class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body" style="max-height:9999px;">
       <div class="hidden flex border-b border-white/[0.08] light:border-black/[0.1] mb-3.5 overflow-x-auto flex-nowrap" id="quantSetupTabs">
         <button
           class="px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04] active:text-blue-500 active:border-b-blue-500 active:font-semibold"
@@ -218,10 +218,9 @@
           style="color:#fbbf24;">LOADING ALGORITHM...</div>
         <div class="text-[13px] font-medium opacity-80" id="quantScoreSummary">—</div>
       </div>
-      <div class="grid grid-cols-2 gap-3.5 max-[900px]:grid-cols-1">
+      <div class="grid grid-cols-2 gap-3.5 max-[900px]:grid-cols-1" style="grid-auto-rows:1fr;">
         <div
-          class="bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-sm hover:bg-white/[0.055] light:bg-black/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5"
-          style="height: 100%; display: flex; flex-direction: column;">
+          class="bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-sm hover:bg-white/[0.055] light:bg-black/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5 flex flex-col">
           <div
             class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
             🧠 ML Indicator & Probabilities</div>
@@ -237,8 +236,7 @@
         </div>
 
         <div
-          class="bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-sm hover:bg-white/[0.055] light:bg-black/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5"
-          style="height: 100%; display: flex; flex-direction: column;">
+          class="bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-sm hover:bg-white/[0.055] light:bg-black/[0.055] hover:shadow-md transition-all duration-[0.25s] p-3.5 flex flex-col">
           <div
             class="text-[11px] font-semibold text-[var(--text-2)] flex items-center gap-1.5 mb-2.5 uppercase tracking-wide">
             🛡️ Risk Management</div>
@@ -294,7 +292,7 @@
 
       <div id="paperTradingContent"
         class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
-        style="max-height:4000px;">
+        style="max-height:9999px;">
 
         <!-- Summary Stats Grid -->
         <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-[7px] mb-4" id="ptStatGrid">
@@ -524,7 +522,7 @@
       </div>
       <div id="shapPrimaryContent"
         class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
-        style="max-height:2000px;">
+        style="max-height:9999px;">
         <div id="shapQualityAlert" class="hidden mb-3 px-4 py-3 rounded-lg border text-[12px]"></div>
         <div class="overflow-x-auto overscroll-x-contain">
           <table class="w-full border-collapse text-[12px]">
@@ -739,7 +737,7 @@
       </div>
       <div id="featureColsContent"
         class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
-        style="max-height:2000px;">
+        style="max-height:9999px;">
 
         <div id="featureQualityBanner" class="hidden mb-3 px-4 py-3 rounded-lg border text-[12px]"></div>
 
@@ -919,7 +917,7 @@
       headerEl.classList.toggle('open', isCollapsed);
       // Animate max-height via style when collapsed
       if (isCollapsed) {
-        body.style.maxHeight = '2000px';
+        body.style.maxHeight = '9999px';
         body.style.opacity = '1';
         body.style.overflow = '';
       } else {
@@ -928,6 +926,19 @@
         body.style.overflow = 'hidden';
       }
     }
+
+    // ── Dynamic Header Height with ResizeObserver ──────────────────────────────
+    (function initDynamicHeader() {
+      const header = document.getElementById('floatingHeader');
+      if (!header) return;
+      const observer = new ResizeObserver(function(entries) {
+        for (var entry of entries) {
+          var h = entry.contentRect.height;
+          document.body.style.setProperty('--header-height', h + 'px');
+        }
+      });
+      observer.observe(header);
+    })();
 
     // ── System Health Monitor ────────────────────────────────────────────────────
     function checkSystemHealth() {

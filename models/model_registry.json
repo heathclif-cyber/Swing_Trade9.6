@@ -1,5 +1,5 @@
 {
-  "active": "ensemble_v2",
+  "active": "lstm_only",
   "models": {
     "ensemble_v2": {
       "type": "ensemble",
