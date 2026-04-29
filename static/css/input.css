@@ -36,9 +36,9 @@
     @apply antialiased min-h-screen pt-[72px];
     font-family: 'Inter', system-ui, sans-serif;
     background-image:
-      radial-gradient(ellipse 70% 50% at 15% 0%, rgba(99, 125, 255, 0.06) 0%, transparent 55%),
-      radial-gradient(ellipse 50% 40% at 85% 100%, rgba(167, 139, 250, 0.05) 0%, transparent 55%);
-    background-attachment: fixed;
+      radial-gradient(ellipse 70% 50% at 15% 0%, rgba(99, 125, 255, 0.04) 0%, transparent 50%),
+      radial-gradient(ellipse 50% 40% at 85% 100%, rgba(167, 139, 250, 0.03) 0%, transparent 50%);
+    /* background-attachment: fixed dihapus — penyebab repaint seluruh halaman saat scroll */
   }
 
   /*
@@ -149,7 +149,10 @@ utility classes in the JS template literals.
 
   /* ── Glass Card (used in CSV result) ─────────────────────────────── */
   .glass {
-    @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-lg;
+    /* backdrop-blur dikurangi dari xl(24px) ke sm(4px) untuk performa */
+    @apply bg-white/[0.05] border border-white/[0.08] rounded-lg;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
 
   .quant-card {
@@ -290,19 +293,20 @@ utility classes in the JS template literals.
   .scanner-card {
     position: relative;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    /* backdrop-blur DIHAPUS dari scanner cards — ini penyebab utama berat */
+    /* Ganti dengan solid background yang sedikit lebih opaque */
+    background: rgba(20, 26, 46, 0.85);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.5rem;
     padding: 1rem;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    transition: all 0.25s;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    /* transition-all diganti spesifik — tidak animasi semua properti */
+    transition: background 0.2s ease, border-color 0.2s ease;
   }
 
   .scanner-card:hover {
-    background: rgba(255, 255, 255, 0.055);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    background: rgba(25, 32, 56, 0.92);
+    border-color: rgba(255, 255, 255, 0.13);
   }
 
   .dec-long {
@@ -420,16 +424,15 @@ utility classes in the JS template literals.
     background: #3b82f6;
     color: #fff;
     border-color: #3b82f6;
-    transition: all 0.25s;
+    transition: background 0.2s ease;
   }
 
   .btn-primary:hover {
     background: #4f6bef;
-    box-shadow: 0 0 30px rgba(99, 125, 255, 0.12);
   }
 
   .btn-del-e {
-    @apply bg-white/[0.03] border border-white/[0.08] text-[var(--text-2)] rounded px-2 py-1 cursor-pointer text-xs leading-none hover:bg-white/[0.055] transition-all duration-[0.2s];
+    @apply bg-white/[0.03] border border-white/[0.08] text-[var(--text-2)] rounded px-2 py-1 cursor-pointer text-xs leading-none hover:bg-white/[0.055] transition-colors duration-[0.2s];
   }
 
   .btn-loading {
@@ -451,7 +454,7 @@ utility classes in the JS template literals.
 
   /* ── Tab Buttons ─────────────────────────────────────────────────── */
   .tab-btn {
-    @apply px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-all duration-[0.25s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04];
+    @apply px-5 py-2.5 text-[13px] font-medium text-[var(--text-3)] bg-transparent border-none border-b-2 border-transparent cursor-pointer transition-colors duration-[0.2s] font-sans whitespace-nowrap hover:text-blue-500 hover:bg-blue-500/[0.04];
   }
 
   .tab-btn.active {
