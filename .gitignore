@@ -32,4 +32,3 @@ protocol_96_tracker.py
 node_modules/
 
 # Built Tailwind CSS
-static/css/tailwind.css
