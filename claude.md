@@ -207,6 +207,12 @@
 # Frontend:
 #   Flask server-side rendering + Tailwind CSS
 #   Compiled via package.json scripts (build:css, watch:css)
+#   Section 5: ML Feature Columns — 85 features with SHAP top-15 ranking
+#     * renderFeatureCols() — full 85-feature table with category badges + filters
+#     * renderShapTop15() — top 15 features by mean |SHAP| from shap_ranking.json
+#     * Each SHAP row shows: rank, feature name, SHAP bar, live value, category
+#     * Filter buttons: All, Smart Money, Structure, Derived
+#     * Data source: /api/data → feature_cols (85 names) + shap_ranking (top 15 + live values)
 
 # =============================================================================
 # 7. DELETED FILES (no longer in project — do not reference or import)
