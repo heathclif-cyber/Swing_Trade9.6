@@ -18,6 +18,9 @@ import protocol_96_enrichment as enrichment
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
+# Paper Trading Engine — simulasi otomatis
+import paper_trading as _paper_trading
+
 # ML Signal Engine
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -471,6 +474,8 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"📋 <b>Rekomendasi:</b> Tinjau ulang posisi. "
                         f"Pertimbangkan close atau cut loss jika SL sudah tersentuh."
                     )
+                    # Paper Trading: close position with reason EXPIRED
+                    _paper_trading.close_position(symbol, close_price, "EXPIRED")
                     state["entry_expired_sent"] = True
                     _save_alert_state(_alert_state)
 
@@ -549,6 +554,12 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                 high_price = float(df.iloc[-1]["High"])
                 low_price  = float(df.iloc[-1]["Low"])
 
+                # ── Paper Trading: check TP/SL ──────────────────────────────
+                _pt_hit = _paper_trading.check_tp_sl(symbol, high_price, low_price)
+                if _pt_hit and _pt_hit.get("full_close"):
+                    _paper_trading.close_position(symbol, _pt_hit["price"], _pt_hit["hit"])
+                # ─────────────────────────────────────────────────────────────
+
                 mom_signal  = mom_hold.get("signal", False)
                 mom_reasons = " · ".join(mom_hold.get("reasons", [])[:2])
                 hold_reco = (
@@ -619,6 +630,9 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                     f"<b>Sinyal keluar:</b>\n{exit_lines}\n\n"
                     f"📋 Rekomendasi: <b>{exit_r.get('recommendation','PARTIAL EXIT')}</b>"
                 )
+                # ── Paper Trading: close on EXIT signal ─────────────────────
+                _paper_trading.close_position(symbol, close_price, "EXIT")
+                # ─────────────────────────────────────────────────────────────
                 state["exit_alerted"] = True
                 state["last_alert_ts"] = now_ts
                 _save_alert_state(_alert_state)
@@ -696,6 +710,20 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"{'─'*28}\n"
                         f"⚡ Jangan entry jika harga sudah jauh dari <b>${close_price:.6f}</b>!"
                     )
+                    # ── Paper Trading: open LONG position ───────────────────
+                    _paper_trading.open_position(
+                        symbol=symbol,
+                        direction="LONG",
+                        entry_price=close_price,
+                        conf=ml_conf_L,
+                        ml_size=ml_size_L,
+                        tp1=lvl_L['tp1'],
+                        tp2=lvl_L['tp2'],
+                        tp3=lvl_L['tp3'],
+                        sl=lvl_L['sl_structure'],
+                        leverage=3,
+                    )
+                    # ─────────────────────────────────────────────────────────
                     state["last_long_signal"]      = new_signal_L
                     state["last_signal"]           = new_signal_L
                     state["last_signal_direction"] = "LONG"
@@ -744,6 +772,20 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
                         f"{'─'*28}\n"
                         f"⚡ Jangan entry jika harga sudah jauh dari <b>${close_price:.6f}</b>!"
                     )
+                    # ── Paper Trading: open SHORT position ──────────────────
+                    _paper_trading.open_position(
+                        symbol=symbol,
+                        direction="SHORT",
+                        entry_price=close_price,
+                        conf=ml_conf_S,
+                        ml_size=ml_size_S,
+                        tp1=lvl_S['tp1'],
+                        tp2=lvl_S['tp2'],
+                        tp3=lvl_S['tp3'],
+                        sl=lvl_S['sl_structure'],
+                        leverage=3,
+                    )
+                    # ─────────────────────────────────────────────────────────
                     state["last_short_signal"]     = new_signal_S
                     state["last_signal"]           = new_signal_S
                     state["last_signal_direction"] = "SHORT"
@@ -830,6 +872,11 @@ def start_background_monitor() -> threading.Thread | None:
         logger.info("SignalMonitor already running — skipping")
         return None
     _started_flag.set()
+    # Load paper trading state from DB
+    try:
+        _paper_trading.load_open_positions()
+    except Exception as _pt_err:
+        logger.warning(f"PaperTrading load failed: {_pt_err}")
     t = threading.Thread(target=_monitor_loop, name="SignalMonitor", daemon=True)
     t.start()
     logger.info(f"✅ SignalMonitor thread started (id={t.ident})")

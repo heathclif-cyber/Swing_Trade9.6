@@ -25,3 +25,35 @@ CREATE INDEX IF NOT EXISTS idx_kv_store_updated_at ON kv_store (updated_at DESC)
 --
 -- Format value adalah JSON string (bukan JSONB) agar kompatibel
 -- dengan json.dumps() / json.loads() Python tanpa casting khusus.
+
+-- ============================================================
+-- Paper Trading — Simulasi Otomatis
+-- ============================================================
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    symbol          VARCHAR(20) NOT NULL,
+    direction       VARCHAR(10) NOT NULL,
+    status          VARCHAR(10) NOT NULL DEFAULT 'OPEN',
+    entry_price     NUMERIC NOT NULL,
+    entry_ts        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    entry_conf      NUMERIC,
+    entry_ml_size   VARCHAR(10),
+    tp1_price       NUMERIC,
+    tp2_price       NUMERIC,
+    tp3_price       NUMERIC,
+    sl_price        NUMERIC NOT NULL,
+    exit_price      NUMERIC,
+    exit_ts         TIMESTAMPTZ,
+    exit_reason     VARCHAR(20),
+    pnl_pct         NUMERIC,
+    pnl_usdt        NUMERIC,
+    hold_hours      NUMERIC,
+    leverage        NUMERIC NOT NULL DEFAULT 3,
+    fee_pct         NUMERIC DEFAULT 0.0008,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_trades_symbol   ON paper_trades (symbol);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_status   ON paper_trades (status);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_entry_ts ON paper_trades (entry_ts DESC);

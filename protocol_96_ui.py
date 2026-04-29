@@ -36,6 +36,14 @@ try:
 except Exception as _tl_import_err:
     _trade_logger = None  # type: ignore
     _TRADE_LOGGER_AVAILABLE = False
+
+# ── Paper Trading Engine (simulasi otomatis) ─────────────────────────────────
+try:
+    import paper_trading as _paper_trading
+    _PAPER_TRADING_AVAILABLE = True
+except Exception as _pt_import_err:
+    _paper_trading = None  # type: ignore
+    _PAPER_TRADING_AVAILABLE = False
 # NOTE: data_engine.py telah dipensiun — semua fetch data melalui protocol_96_enrichment (SSOT)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -2249,6 +2257,75 @@ def set_model():
         return jsonify({'success': True, 'active': model_name})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 📊 PAPER TRADING API ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/paper-trading/positions", methods=["GET"])
+def api_paper_trading_positions():
+    """Return all currently open paper trading positions with floating PnL."""
+    try:
+        if not _PAPER_TRADING_AVAILABLE:
+            return jsonify({"success": False, "error": "Paper trading module not available"})
+        # Get current prices for floating PnL calculation
+        current_prices = {}
+        for pair in AVAILABLE_PAIRS:
+            try:
+                enriched = _get_enriched_data(pair)
+                if enriched and enriched[0] is not None and not enriched[0].empty:
+                    current_prices[pair] = float(enriched[0].iloc[-1]["Close"])
+            except Exception:
+                pass
+        positions = _paper_trading.get_open_positions(current_prices=current_prices)
+        return jsonify({"success": True, "positions": positions})
+    except Exception as e:
+        logger.error(f"Paper trading positions error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/paper-trading/history", methods=["GET"])
+def api_paper_trading_history():
+    """Return closed paper trading trade history."""
+    try:
+        if not _PAPER_TRADING_AVAILABLE:
+            return jsonify({"success": False, "error": "Paper trading module not available"})
+        symbol = flask_request.args.get("symbol", None)
+        limit = int(flask_request.args.get("limit", 50))
+        trades = _paper_trading.get_closed_trades(limit=limit, symbol=symbol)
+        return jsonify({"success": True, "trades": trades})
+    except Exception as e:
+        logger.error(f"Paper trading history error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/paper-trading/stats", methods=["GET"])
+def api_paper_trading_stats():
+    """Return aggregate paper trading statistics."""
+    try:
+        if not _PAPER_TRADING_AVAILABLE:
+            return jsonify({"success": False, "error": "Paper trading module not available"})
+        stats = _paper_trading.get_stats()
+        return jsonify({"success": True, "stats": stats})
+    except Exception as e:
+        logger.error(f"Paper trading stats error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/paper-trading/reset", methods=["POST"])
+def api_paper_trading_reset():
+    """Reset all paper trading data (for testing)."""
+    try:
+        if not _PAPER_TRADING_AVAILABLE:
+            return jsonify({"success": False, "error": "Paper trading module not available"})
+        _paper_trading.reset_all()
+        logger.warning("🧹 Paper trading data has been reset!")
+        return jsonify({"success": True, "message": "Paper trading data reset successfully"})
+    except Exception as e:
+        logger.error(f"Paper trading reset error: {e}")
+        return jsonify({"success": False, "error": str(e)})
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -851,9 +851,6 @@ function switchTimeframe(btn) { document.querySelectorAll('#timeframeTabs .tab-b
 function switchIndicator(btn) { document.querySelectorAll('#indicatorTabs .tab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); activeIndicator = btn.dataset.ind; renderIndicatorTable(); }
 function changePair() {
     currentBackendPair = document.getElementById('pairSelect').value;
-    // Sync label di Price Performance Monitor
-    const lbl = document.getElementById('perfCoinLabel');
-    if (lbl) lbl.textContent = currentBackendPair;
     fetchData();
 }
 
@@ -1461,6 +1458,271 @@ async function changeModel(model) {
     }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   📊 PAPER TRADING — Simulasi Real-Time
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+let ptEquityChartInstance = null;
+
+async function fetchPaperTrading() {
+    try {
+        const [statsRes, positionsRes, historyRes] = await Promise.all([
+            fetch('/api/paper-trading/stats'),
+            fetch('/api/paper-trading/positions'),
+            fetch('/api/paper-trading/history?limit=30')
+        ]);
+        const stats = await statsRes.json();
+        const positions = await positionsRes.json();
+        const history = await historyRes.json();
+        if (stats.success) renderPaperTradingStats(stats.stats);
+        if (positions.success) renderPaperTradingPositions(positions.positions);
+        if (history.success) renderPaperTradingHistory(history.trades);
+        // Update last refresh timestamp
+        const lu = document.getElementById('ptLastUpdate');
+        if (lu) lu.textContent = `Diperbarui: ${new Date().toLocaleTimeString('id-ID')}`;
+    } catch (e) {
+        // Silently fail — paper trading may not be available yet
+    }
+}
+
+function renderPaperTradingStats(stats) {
+    if (!stats) return;
+    const fmt = (v) => {
+        if (v === null || v === undefined) return '—';
+        const n = Number(v);
+        if (Math.abs(n) >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return n.toFixed(2);
+    };
+    const pnl = Number(stats.total_pnl_usdt || 0);
+    const pnlEl = document.getElementById('ptStatTotalPnl');
+    if (pnlEl) {
+        pnlEl.textContent = `$${fmt(pnl)}`;
+        pnlEl.style.color = pnl >= 0 ? '#34d399' : '#f87171';
+    }
+    const wr = document.getElementById('ptStatWinRate');
+    if (wr) wr.textContent = stats.win_rate != null ? `${stats.win_rate}%` : '—';
+    const tt = document.getElementById('ptStatTotalTrades');
+    if (tt) tt.textContent = stats.total_trades ?? '—';
+    const lc = document.getElementById('ptStatLongCount');
+    if (lc) lc.textContent = stats.long_count ?? '—';
+    const sc = document.getElementById('ptStatShortCount');
+    if (sc) sc.textContent = stats.short_count ?? '—';
+    const tp = document.getElementById('ptStatTpHits');
+    if (tp) tp.textContent = stats.tp_hits ?? '—';
+    const sl = document.getElementById('ptStatSlHits');
+    if (sl) sl.textContent = stats.sl_hits ?? '—';
+    const ah = document.getElementById('ptStatAvgHold');
+    if (ah) ah.textContent = stats.avg_hold_hours != null ? `${Number(stats.avg_hold_hours).toFixed(1)}h` : '—';
+
+    // Render equity curve
+    if (stats.equity_curve && stats.equity_curve.length > 1) {
+        renderPtEquityCurve(stats.equity_curve, stats.latest_equity);
+    }
+}
+
+function renderPaperTradingPositions(positions) {
+    const tbody = document.getElementById('ptOpenBody');
+    const countEl = document.getElementById('ptOpenCount');
+    if (!tbody) return;
+    if (!positions || positions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center py-6 text-[var(--text-2)] text-xs">Tidak ada posisi terbuka</td></tr>';
+        if (countEl) countEl.textContent = '0 posisi';
+        return;
+    }
+    if (countEl) countEl.textContent = `${positions.length} posisi`;
+
+    const now = Date.now() / 1000;
+    tbody.innerHTML = positions.map(p => {
+        const side = (p.direction || '').toUpperCase();
+        const sideColor = side === 'LONG' ? '#34d399' : '#f87171';
+        const sideIcon = side === 'LONG' ? '▲' : '▼';
+        const pnl = Number(p.floating_pnl_pct || 0);
+        const pnlColor = pnl >= 0 ? '#34d399' : '#f87171';
+        const pnlUsdt = Number(p.floating_pnl_usdt || 0);
+        const holdH = p.entry_ts ? ((now - p.entry_ts) / 3600).toFixed(1) : '—';
+        const entryP = Number(p.entry_price || 0);
+        const curP = Number(p.current_price || 0);
+        const tp1 = p.tp1_price ? Number(p.tp1_price).toFixed(6) : '—';
+        const tp2 = p.tp2_price ? Number(p.tp2_price).toFixed(6) : '—';
+        const tp3 = p.tp3_price ? Number(p.tp3_price).toFixed(6) : '—';
+        const sl = p.sl_price ? Number(p.sl_price).toFixed(6) : '—';
+        return `<tr class="border-b border-white/[0.05]">
+            <td class="py-2 px-2 font-mono text-[var(--text-1)]">${p.symbol || '—'}</td>
+            <td class="py-2 px-2"><span style="color:${sideColor};font-weight:600;">${sideIcon} ${side}</span></td>
+            <td class="py-2 px-2 text-right font-mono">${entryP.toFixed(6)}</td>
+            <td class="py-2 px-2 text-right font-mono">${curP.toFixed(6)}</td>
+            <td class="py-2 px-2 text-right font-mono" style="color:${pnlColor}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}% ($${pnlUsdt.toFixed(2)})</td>
+            <td class="py-2 px-2 text-right font-mono text-[#34d399]">${tp1}</td>
+            <td class="py-2 px-2 text-right font-mono text-[#34d399]">${tp2}</td>
+            <td class="py-2 px-2 text-right font-mono text-[#34d399]">${tp3}</td>
+            <td class="py-2 px-2 text-right font-mono text-[#f87171]">${sl}</td>
+            <td class="py-2 px-2 text-right font-mono text-[var(--text-2)]">${holdH}h</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderPaperTradingHistory(trades) {
+    const tbody = document.getElementById('ptClosedBody');
+    const countEl = document.getElementById('ptClosedCount');
+    if (!tbody) return;
+    if (!trades || trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-[var(--text-2)] text-xs">Belum ada trade ditutup</td></tr>';
+        if (countEl) countEl.textContent = '0 trade';
+        return;
+    }
+    if (countEl) countEl.textContent = `${trades.length} trade`;
+
+    tbody.innerHTML = trades.map(t => {
+        const side = (t.direction || '').toUpperCase();
+        const sideColor = side === 'LONG' ? '#34d399' : '#f87171';
+        const sideIcon = side === 'LONG' ? '▲' : '▼';
+        const pnl = Number(t.pnl_pct || 0);
+        const pnlUsdt = Number(t.pnl_usdt || 0);
+        const pnlColor = pnl >= 0 ? '#34d399' : '#f87171';
+        const reason = t.exit_reason || '—';
+        const reasonBadge = {
+            'TP1': '<span class="px-1.5 py-0.5 rounded bg-[#34d399]/15 text-[#34d399] text-[10px] font-semibold">TP1 ✅</span>',
+            'TP2': '<span class="px-1.5 py-0.5 rounded bg-[#34d399]/15 text-[#34d399] text-[10px] font-semibold">TP2 ✅</span>',
+            'TP3': '<span class="px-1.5 py-0.5 rounded bg-[#34d399]/15 text-[#34d399] text-[10px] font-semibold">TP3 ✅</span>',
+            'SL': '<span class="px-1.5 py-0.5 rounded bg-[#f87171]/15 text-[#f87171] text-[10px] font-semibold">SL 🔴</span>',
+            'EXIT': '<span class="px-1.5 py-0.5 rounded bg-[#fbbf24]/15 text-[#fbbf24] text-[10px] font-semibold">EXIT ⚠️</span>',
+            'EXPIRED': '<span class="px-1.5 py-0.5 rounded bg-[#a78bfa]/15 text-[#a78bfa] text-[10px] font-semibold">EXPIRED ⌛</span>'
+        };
+        const badge = reasonBadge[reason] || `<span class="text-[10px] text-[var(--text-2)]">${reason}</span>`;
+        const holdH = t.hold_hours ? `${Number(t.hold_hours).toFixed(1)}h` : '—';
+        const entryP = Number(t.entry_price || 0);
+        const exitP = Number(t.exit_price || 0);
+        const ts = t.exit_ts ? new Date(t.exit_ts * 1000).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+        return `<tr class="border-b border-white/[0.05]">
+            <td class="py-2 px-2 font-mono text-[var(--text-1)]">${t.symbol || '—'}</td>
+            <td class="py-2 px-2"><span style="color:${sideColor};font-weight:600;">${sideIcon} ${side}</span></td>
+            <td class="py-2 px-2 text-right font-mono">${entryP.toFixed(6)}</td>
+            <td class="py-2 px-2 text-right font-mono">${exitP.toFixed(6)}</td>
+            <td class="py-2 px-2 text-right font-mono" style="color:${pnlColor}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}% ($${pnlUsdt.toFixed(2)})</td>
+            <td class="py-2 px-2 text-center">${badge}</td>
+            <td class="py-2 px-2 text-right font-mono text-[var(--text-2)]">${holdH}</td>
+            <td class="py-2 px-2 text-right font-mono text-[var(--text-2)] text-[11px]">${ts}</td>
+        </tr>`;
+    }).join('');
+}
+
+function renderPtEquityCurve(equityCurve, latestEquity) {
+    const container = document.getElementById('ptEquityChartContainer');
+    const placeholder = document.getElementById('ptEquityPlaceholder');
+    const canvas = document.getElementById('ptEquityChart');
+    if (!container || !canvas) return;
+
+    if (!equityCurve || equityCurve.length < 2) {
+        if (placeholder) placeholder.style.display = 'flex';
+        canvas.classList.add('hidden');
+        return;
+    }
+
+    if (placeholder) placeholder.style.display = 'none';
+    canvas.classList.remove('hidden');
+
+    const ctx = canvas.getContext('2d');
+    const parent = container.getBoundingClientRect();
+    canvas.width = parent.width || container.clientWidth;
+    canvas.height = parent.height || container.clientHeight;
+
+    if (ptEquityChartInstance) ptEquityChartInstance.destroy();
+
+    const isDark = document.documentElement.classList.contains('light') === false;
+    const textColor = isDark ? '#94a3b8' : '#475569';
+    const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
+
+    const labels = equityCurve.map((pt, i) => {
+        if (pt.ts) {
+            const d = new Date(pt.ts * 1000);
+            return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) + ' ' +
+                   d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        }
+        return `#${i + 1}`;
+    });
+    const values = equityCurve.map(pt => Number(pt.cumulative_pnl !== undefined ? pt.cumulative_pnl : pt));
+
+    ptEquityChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Equity ($)',
+                data: values,
+                borderColor: '#a78bfa',
+                backgroundColor: (ctx) => {
+                    const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+                    g.addColorStop(0, 'rgba(167,139,250,0.25)');
+                    g.addColorStop(1, 'rgba(167,139,250,0.01)');
+                    return g;
+                },
+                fill: true,
+                tension: 0.3,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: isDark ? 'rgba(15,15,30,0.9)' : 'rgba(255,255,255,0.9)',
+                    titleColor: isDark ? '#e2e8f0' : '#1e293b',
+                    bodyColor: isDark ? '#94a3b8' : '#475569',
+                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: (ctx) => `$${Number(ctx.raw).toFixed(2)}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 10 },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    display: true,
+                    ticks: {
+                        color: textColor,
+                        font: { size: 10 },
+                        callback: (v) => `$${v.toFixed(0)}`
+                    },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+}
+
+async function resetPaperTrading() {
+    if (!confirm('⚠️ Reset semua data paper trading? Semua posisi dan riwayat akan dihapus.')) return;
+    try {
+        const res = await fetch('/api/paper-trading/reset', { method: 'POST' });
+        const json = await res.json();
+        if (json.success) {
+            showAlert('success', '🧹 Paper trading data reset successfully');
+            fetchPaperTrading();
+        } else {
+            showAlert('danger', '❌ Reset failed: ' + json.error);
+        }
+    } catch (e) {
+        showAlert('danger', '❌ ' + e.message);
+    }
+}
+
+// ── Paper Trading Polling ──
+let ptPollInterval = null;
+function startPaperTradingPolling() {
+    fetchPaperTrading();
+    if (ptPollInterval) clearInterval(ptPollInterval);
+    ptPollInterval = setInterval(fetchPaperTrading, 15000); // every 15 seconds
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const t = localStorage.getItem('theme') || 'dark';
     const h = document.documentElement;
@@ -1470,4 +1732,5 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchModels(); // Ambil model yang tersedia
     fetchData(); // Fungsi utama me-load single dashboard default
     fetchScannerData(); // Tambahan untuk memuat scanner
+    startPaperTradingPolling(); // Paper trading dashboard
 });

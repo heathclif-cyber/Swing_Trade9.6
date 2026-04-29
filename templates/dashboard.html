@@ -277,139 +277,142 @@
       </div><!-- /quantContent -->
     </div>
 
-    <!-- ═══════════════ SECTION: PRICE PERFORMANCE MONITOR ═══════════════ -->
+    <!-- ═══════════════ SECTION: PAPER TRADING DASHBOARD ═══════════════ -->
     <div
       class="mb-3 bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] light:bg-black/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
-      id="sectionPerfMonitor">
+      id="sectionPaperTrading">
       <div
         class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] light:bg-black/[0.02] section-collapsible open"
-        onclick="toggleSection('perfMonitorContent', this)">
-        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-cyan-500/[0.12]">📈</div>
-        <div class="text-sm font-semibold">Price Performance Monitor — Validasi Performa Model</div>
+        onclick="toggleSection('paperTradingContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-amber-500/[0.12]">📊</div>
+        <div class="text-sm font-semibold">Paper Trading Dashboard — Simulasi Real-Time</div>
         <span
           class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-[#34d399]/[0.12] text-[#34d399] border border-[#34d399]/[0.25]">LIVE</span>
         <span class="ml-auto text-xs text-[var(--text-2)] transition-transform duration-300 inline-block chevron"
           style="margin-left:auto;color:var(--text-2);font-size:12px;">▼</span>
       </div>
 
-      <div id="perfMonitorContent"
+      <div id="paperTradingContent"
         class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
-        style="max-height:2000px;">
+        style="max-height:4000px;">
 
-        <div class="flex flex-wrap gap-2 items-center mb-3">
-          <div class="text-[11px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Monitor:</div>
-          <div class="flex items-center gap-1 text-xs text-[var(--text-2)]">
-            <span>Koin:</span>
-            <strong id="perfCoinLabel" class="text-cyan-400 font-mono">—</strong>
-          </div>
-          <div class="flex items-center gap-1">
-            <label class="text-[11px] text-[var(--text-2)]">Lev</label>
-            <input id="perfLeverageInput" type="number"
-              class="bg-white/[0.05] border border-white/[0.08] light:border-black/[0.1] rounded-md text-[var(--text-1)] outline-none transition-colors duration-200 backdrop-blur focus:border-blue-500 focus:shadow-[0_0_0_3px_rgba(99,125,255,0.15)]"
-              value="3" min="1" max="20" step="1" style="width:64px;padding:5px 8px;font-size:12px;" />
-          </div>
-          <div class="flex items-center gap-1">
-            <label class="text-[11px] text-[var(--text-2)]">Periode</label>
-            <select id="perfHoursSelect"
-              class="bg-[rgba(20,20,35,0.8)] border border-white/[0.08] light:border-black/[0.1] rounded-md text-[var(--text-1)] outline-none cursor-pointer transition-colors duration-200 focus:border-blue-500"
-              style="padding:5px 8px;font-size:12px;">
-              <option value="12">12 Jam</option>
-              <option value="24">24 Jam</option>
-              <option value="48">48 Jam</option>
-              <option value="72" selected>72 Jam</option>
-            </select>
-          </div>
-          <button
-            class="bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-500/30 rounded-md text-[var(--text-1)] font-semibold cursor-pointer backdrop-blur transition-all duration-200 hover:from-blue-500/35 hover:to-purple-500/35 hover:shadow-[0_0_20px_rgba(99,125,255,0.3)] hover:-translate-y-px active:translate-y-0"
-            onclick="loadPerfChart()" style="padding:5px 14px;font-size:12px;">
-            🔍 Analisis
-          </button>
-          <div id="perfLastUpdate" class="text-[11px] text-[var(--text-3)]"></div>
-        </div>
-
-        <!-- Stat Cards -->
-        <div class="hidden grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-[7px] mb-3" id="perfStatGrid">
+        <!-- Summary Stats Grid -->
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-[7px] mb-4" id="ptStatGrid">
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
-            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide"
-              title="Total sinyal entry valid conf ≥ 72%">Valid Entry</div>
-            <div class="text-[17px] font-bold font-mono text-blue-500" id="statTotalSignals">—</div>
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">Total PnL</div>
+            <div class="text-[17px] font-bold font-mono" id="ptStatTotalPnl">—</div>
           </div>
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
-            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🐂 LONG</div>
-            <div class="text-[17px] font-bold font-mono text-[#34d399]" id="statLongCount">—</div>
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">Win Rate</div>
+            <div class="text-[17px] font-bold font-mono text-[#a78bfa]" id="ptStatWinRate">—</div>
           </div>
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
-            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🐻 SHORT</div>
-            <div class="text-[17px] font-bold font-mono text-[#f87171]" id="statShortCount">—</div>
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">Total Trade</div>
+            <div class="text-[17px] font-bold font-mono text-blue-500" id="ptStatTotalTrades">—</div>
           </div>
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
-            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">○ Weak (Skip)</div>
-            <div class="text-[17px] font-bold font-mono text-[var(--text-2)]" id="statFlatCount">—</div>
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🐂 Long</div>
+            <div class="text-[17px] font-bold font-mono text-[#34d399]" id="ptStatLongCount">—</div>
           </div>
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
-            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide" title="Win = TP kena sebelum SL">
-              Win Rate (sim)</div>
-            <div class="text-[17px] font-bold font-mono text-[#a78bfa]" id="statWinRate">—</div>
-          </div>
-          <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
-            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide"
-              title="Total PnL termasuk fee, leverage">Total PnL (sim)</div>
-            <div class="text-[17px] font-bold font-mono" id="statTotalPnl">—</div>
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🐻 Short</div>
+            <div class="text-[17px] font-bold font-mono text-[#f87171]" id="ptStatShortCount">—</div>
           </div>
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
             <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">✅ TP Hit</div>
-            <div class="text-[17px] font-bold font-mono text-[#34d399]" id="statTpHits">—</div>
+            <div class="text-[17px] font-bold font-mono text-[#34d399]" id="ptStatTpHits">—</div>
           </div>
           <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
             <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">🔴 SL Hit</div>
-            <div class="text-[17px] font-bold font-mono text-[#f87171]" id="statSlHits">—</div>
+            <div class="text-[17px] font-bold font-mono text-[#f87171]" id="ptStatSlHits">—</div>
+          </div>
+          <div class="bg-white/[0.04] light:bg-black/[0.04] border border-white/[0.08] light:border-black/[0.1] rounded-md p-2.5 text-center backdrop-blur">
+            <div class="text-[10px] text-[var(--text-2)] mb-1 uppercase tracking-wide">Avg Hold</div>
+            <div class="text-[17px] font-bold font-mono text-[var(--text-1)]" id="ptStatAvgHold">—</div>
           </div>
         </div>
 
-        <!-- Chart Area -->
-        <div id="perfChartContainer"
-          class="relative w-full h-[360px] rounded-md overflow-hidden border border-white/[0.08] light:border-black/[0.1] bg-[rgba(10,10,20,0.6)]">
-          <div class="absolute inset-0 flex items-center justify-center flex-col gap-3 text-[var(--text-2)] text-sm"
-            id="perfChartPlaceholder">
-            <div style="font-size:32px;">📈</div>
-            <div>Pilih koin & klik <strong>Analisis</strong> untuk memuat grafik</div>
+        <!-- Equity Curve Mini-Chart -->
+        <div class="mb-4">
+          <div class="text-[11px] text-[var(--text-3)] font-semibold uppercase tracking-wide mb-1.5">Equity Curve</div>
+          <div id="ptEquityChartContainer"
+            class="relative w-full h-[180px] rounded-md overflow-hidden border border-white/[0.08] light:border-black/[0.1] bg-[rgba(10,10,20,0.6)]">
+            <div class="absolute inset-0 flex items-center justify-center flex-col gap-2 text-[var(--text-2)] text-xs"
+              id="ptEquityPlaceholder">
+              <div style="font-size:24px;">📈</div>
+              <div>Menunggu data paper trading...</div>
+            </div>
+            <canvas id="ptEquityChart" class="hidden"></canvas>
           </div>
-          <canvas id="perfChart" class="hidden"></canvas>
         </div>
 
-        <!-- Legend -->
-        <div id="perfLegend" class="hidden mt-2.5 flex-col gap-1.5">
-          <div class="flex flex-wrap gap-2 items-center">
-            <span class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Sinyal:</span>
-            <span
-              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#34d399]/[0.15] text-[#34d399] border border-[#34d399]/[0.3]">▲
-              LONG (conf ≥72%)</span>
-            <span
-              class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#f87171]/[0.15] text-[#f87171] border border-[#f87171]/[0.3]">▼
-              SHORT (conf ≥72%)</span>
-            <span class="text-[11px]" style="color:rgba(148,163,184,0.7);">○ Weak (60–72%, skip)</span>
-            <span class="text-[11px]" style="color:rgba(167,139,250,0.9);">- - 🧠 ML Conf % (sumbu kiri)</span>
-            <span class="text-[11px]" style="color:rgba(99,125,255,0.8);">— Harga Close (sumbu kanan)</span>
+        <!-- Open Positions Table -->
+        <div class="mb-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-[11px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Posisi Terbuka</div>
+            <span class="text-[10px] text-[var(--text-2)]" id="ptOpenCount">0 posisi</span>
           </div>
-          <div class="flex flex-wrap gap-2 items-center">
-            <span class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Proyeksi TP/SL:</span>
-            <span
-              class="text-[11px] px-2 py-0.5 rounded bg-[#34d399]/10 border border-dashed border-[#34d399]/60 text-[#34d399]">-
-              - TP (2×ATR)</span>
-            <span class="text-[11px] text-[var(--text-3)]">Target profit</span>
-            <span
-              class="text-[11px] px-2 py-0.5 rounded bg-[#f87171]/10 border border-dashed border-[#f87171]/50 text-[#f87171]">-
-              - SL (1×ATR)</span>
-            <span class="text-[11px] text-[var(--text-3)]">Stop loss</span>
-            <span class="text-[11px] text-[#34d399]">★ = TP HIT ✅</span>
-            <span class="text-[11px] text-[#fbbf24]">✕ = SL HIT 🔴</span>
-            <span class="text-[11px] text-[var(--text-3)]">⊙ = belum tercapai | max 48 candle ke depan</span>
+          <div class="overflow-x-auto overscroll-x-contain">
+            <table class="w-full border-collapse text-[12px]">
+              <thead>
+                <tr class="border-b border-white/[0.08] light:border-black/[0.1]">
+                  <th class="text-left py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Koin</th>
+                  <th class="text-left py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Side</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Entry</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Harga Saat Ini</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">PnL</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">TP1</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">TP2</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">TP3</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">SL</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Hold</th>
+                </tr>
+              </thead>
+              <tbody id="ptOpenBody">
+                <tr><td colspan="10" class="text-center py-6 text-[var(--text-2)] text-xs">Tidak ada posisi terbuka</td></tr>
+              </tbody>
+            </table>
           </div>
+        </div>
+
+        <!-- Closed Trade History -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-[11px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Riwayat Trade</div>
+            <span class="text-[10px] text-[var(--text-2)]" id="ptClosedCount">0 trade</span>
+          </div>
+          <div class="overflow-x-auto overscroll-x-contain" style="max-height:300px;overflow-y:auto;">
+            <table class="w-full border-collapse text-[12px]">
+              <thead>
+                <tr class="border-b border-white/[0.08] light:border-black/[0.1]">
+                  <th class="text-left py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Koin</th>
+                  <th class="text-left py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Side</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Entry</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Exit</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">PnL</th>
+                  <th class="text-center py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Alasan</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Hold</th>
+                  <th class="text-right py-2 px-2 text-[var(--text-3)] font-semibold uppercase tracking-wide text-[10px]">Waktu</th>
+                </tr>
+              </thead>
+              <tbody id="ptClosedBody">
+                <tr><td colspan="8" class="text-center py-6 text-[var(--text-2)] text-xs">Belum ada trade ditutup</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Last Update -->
+        <div class="mt-3 flex items-center justify-between">
+          <div class="text-[10px] text-[var(--text-3)]" id="ptLastUpdate">Memperbarui...</div>
+          <button
+            class="text-[10px] px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors"
+            onclick="resetPaperTrading()">🔄 Reset All</button>
         </div>
 
       </div>
     </div>
-    <!-- ═══════════════ END PRICE PERFORMANCE MONITOR ═══════════════ -->
+    <!-- ═══════════════ END PAPER TRADING DASHBOARD ═══════════════ -->
 
     <!-- ═══════════════ SECTION 2: KILL SWITCH + MARKET STRUCTURE ═══════════════ -->
     <div
@@ -954,482 +957,6 @@
 checkSystemHealth();
 setInterval(checkSystemHealth, 30000);
 
-// ══════════════════════════════════════════════════
-// PRICE PERFORMANCE MONITOR
-// ══════════════════════════════════════════════════
-
-let perfChartInstance = null;
-
-async function loadPerfChart() {
-  const coin     = document.getElementById('pairSelect').value || currentBackendPair || 'BTCUSDT';
-  const leverage = parseFloat(document.getElementById('perfLeverageInput').value) || 3;
-  const hours    = parseInt(document.getElementById('perfHoursSelect').value) || 24;
-
-  const lbl = document.getElementById('perfCoinLabel');
-  if (lbl) lbl.textContent = coin;
-
-  const placeholder = document.getElementById('perfChartPlaceholder');
-  const canvas      = document.getElementById('perfChart');
-  placeholder.innerHTML = `
-            < div class="w-9 h-9 border-[3px] border-white/[0.08] light:border-black/[0.1] border-t-blue-500 rounded-full animate-spin" ></div >
-              <div>Memuat data ${coin}...</div>
-          `;
-  placeholder.style.display = 'flex';
-  canvas.style.display = 'none';
-
-  try {
-    const [perfRes, confRes] = await Promise.all([
-      fetch(`/ api / price - performance / ${ coin }?hours = ${ hours }& leverage=${ leverage } `),
-      fetch(`/ api / confidence - history / ${ coin }?hours = ${ hours } `)
-    ]);
-    const perfData = await perfRes.json();
-    const confData = await confRes.json();
-
-    if (!perfData.success) throw new Error(perfData.error || 'Gagal memuat data harga');
-
-    const confHistory = (confData.success && confData.data) ? confData.data : [];
-
-    const filteredCounts = renderPerfChart(perfData, coin, leverage, confHistory);
-    updatePerfStats(perfData.stats, filteredCounts);
-
-    document.getElementById('perfLastUpdate').textContent =
-      `Update: ${ new Date().toLocaleTimeString('id-ID') } · ${ confHistory.length } titik conf`;
-
-  } catch (err) {
-    placeholder.innerHTML = `
-            < div style = "color:#f87171;font-size:13px;" >❌ Error: ${ err.message }</div >
-              `;
-    placeholder.style.display = 'flex';
-    console.error('PerfChart error:', err);
-  }
-}
-
-function renderPerfChart(data, coin, leverage, confHistory = []) {
-  const canvas      = document.getElementById('perfChart');
-  const placeholder = document.getElementById('perfChartPlaceholder');
-
-  if (perfChartInstance) {
-    perfChartInstance.destroy();
-    perfChartInstance = null;
-  }
-
-  const ohlcv   = data.ohlcv   || [];
-  const signals = data.signals || [];
-
-  if (ohlcv.length === 0) {
-    placeholder.innerHTML = '<div style="color:var(--text-2);">Tidak ada data OHLCV tersedia</div>';
-    placeholder.style.display = 'flex';
-    return;
-  }
-
-  const labels = ohlcv.map(d => {
-    const dt = new Date(d.ts);
-    return dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  });
-  const closes = ohlcv.map(d => d.close);
-
-  const CONF_ENTRY   = 0.72;
-  const CONF_WEAK    = 0.60;
-  const HOLD_BAR_MS  = 96 * 15 * 60 * 1000;
-
-  const longPoints  = [];
-  const shortPoints = [];
-  const weakPoints  = [];
-
-  const sortedSignals = [...signals].sort((a, b) => (a.ts || 0) - (b.ts || 0));
-  let lastLongTs  = -Infinity;
-  let lastShortTs = -Infinity;
-
-  sortedSignals.forEach(s => {
-    const sig  = s.ml_signal || s.signal;
-    const conf = s.ml_conf   || s.conf || 0;
-    const sMs  = (s.ts || 0) * 1000;
-
-    if (conf < CONF_WEAK) return;
-    if (sig === 'FLAT')   return;
-
-    let bestIdx = -1, bestDiff = Infinity;
-    ohlcv.forEach((d, i) => {
-      const diff = Math.abs(d.ts - sMs);
-      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-    });
-    if (bestIdx < 0 || bestDiff > 15 * 60 * 1000) return;
-
-    const price = ohlcv[bestIdx].close;
-
-    if (conf >= CONF_ENTRY) {
-      if (sig === 'LONG') {
-        if (sMs - lastLongTs >= HOLD_BAR_MS) {
-          longPoints.push({ x: bestIdx, y: price, conf });
-          lastLongTs = sMs;
-        }
-      } else if (sig === 'SHORT') {
-        if (sMs - lastShortTs >= HOLD_BAR_MS) {
-          shortPoints.push({ x: bestIdx, y: price, conf });
-          lastShortTs = sMs;
-        }
-      }
-    } else {
-      weakPoints.push({ x: bestIdx, y: price, conf, sig });
-    }
-  });
-
-  const simulation = data.simulation || [];
-  const tpSlDatasets = [];
-  const tpSlByIdx    = {};
-
-  simulation.forEach(sim => {
-    const entryIdx  = sim.ohlcv_idx;
-    const endIdx    = sim.end_idx;
-    const entryPrice = sim.entry_price;
-    const tpPrice    = sim.tp_price;
-    const slPrice    = sim.sl_price;
-    const tpHit      = sim.tp_hit;
-    const slHit      = sim.sl_hit;
-    const isLong     = (sim.signal === 'LONG');
-
-    if (entryIdx == null || endIdx == null) return;
-
-    const tpEnd = endIdx;
-    const slEnd = endIdx;
-
-    function lineFromEntry(targetPrice, to) {
-      return ohlcv.map((_, i) => {
-        if (i === entryIdx) return entryPrice;
-        if (i > entryIdx && i <= to) return targetPrice;
-        return null;
-      });
-    }
-
-    tpSlByIdx[entryIdx] = sim;
-
-    const tpColor = tpHit
-      ? (isLong ? 'rgba(52,211,153,1.0)' : 'rgba(248,113,113,1.0)')
-      : (isLong ? 'rgba(52,211,153,0.4)'  : 'rgba(248,113,113,0.4)');
-
-    tpSlDatasets.push({
-      label: `_tp_${ sim.signal }_${ entryIdx } `,
-      data: lineFromEntry(tpPrice, tpEnd),
-      type: 'line', yAxisID: 'yPrice',
-      borderColor: tpColor,
-      borderWidth: tpHit ? 2.5 : 1.5,
-      borderDash: [8, 4],
-      pointRadius: 0, pointHoverRadius: 0,
-      fill: false, showLine: true, tension: 0, spanGaps: false, order: 6,
-    });
-
-    const slColor = slHit
-      ? 'rgba(251,191,36,1.0)'
-      : (isLong ? 'rgba(248,113,113,0.4)' : 'rgba(52,211,153,0.4)');
-
-    tpSlDatasets.push({
-      label: `_sl_${ sim.signal }_${ entryIdx } `,
-      data: lineFromEntry(slPrice, slEnd),
-      type: 'line', yAxisID: 'yPrice',
-      borderColor: slColor,
-      borderWidth: slHit ? 2.5 : 1.5,
-      borderDash: [3, 3],
-      pointRadius: 0, pointHoverRadius: 0,
-      fill: false, showLine: true, tension: 0, spanGaps: false, order: 6,
-    });
-
-    const dotTP = new Array(ohlcv.length).fill(null);
-    dotTP[tpEnd] = tpPrice;
-    tpSlDatasets.push({
-      label: `_dot_tp_${ entryIdx } `,
-      data: dotTP, type: 'line', showLine: false, yAxisID: 'yPrice',
-      borderColor: isLong ? '#34d399' : '#f87171',
-      backgroundColor: tpHit
-        ? (isLong ? 'rgba(52,211,153,0.95)' : 'rgba(248,113,113,0.95)')
-        : 'rgba(80,80,100,0.5)',
-      pointRadius: tpHit ? 8 : 5,
-      pointStyle: tpHit ? 'star' : 'circle',
-      pointHoverRadius: 10, fill: false, tension: 0, order: 5,
-    });
-
-    const dotSL = new Array(ohlcv.length).fill(null);
-    dotSL[slEnd] = slPrice;
-    tpSlDatasets.push({
-      label: `_dot_sl_${ entryIdx } `,
-      data: dotSL, type: 'line', showLine: false, yAxisID: 'yPrice',
-      borderColor: '#fbbf24',
-      backgroundColor: slHit ? 'rgba(251,191,36,0.95)' : 'rgba(80,80,100,0.5)',
-      pointRadius: slHit ? 8 : 5,
-      pointStyle: slHit ? 'crossRot' : 'circle',
-      pointHoverRadius: 10, fill: false, tension: 0, order: 5,
-    });
-  });
-
-  const confLineData = new Array(ohlcv.length).fill(null);
-  confHistory.forEach(ch => {
-
-    if (!ch.ts) return;
-    let bestIdx = -1, bestDiff = Infinity;
-    ohlcv.forEach((d, i) => {
-      const diff = Math.abs(d.ts - ch.ts * 1000);
-      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-    });
-    if (bestIdx >= 0 && bestDiff < 30 * 60 * 1000) {
-      confLineData[bestIdx] = (ch.ml_conf || 0) * 100;
-    }
-  });
-
-  const ctx = canvas.getContext('2d');
-  const gradient = ctx.createLinearGradient(0, 0, 0, 400);
-  gradient.addColorStop(0, 'rgba(99,125,255,0.3)');
-  gradient.addColorStop(1, 'rgba(99,125,255,0.0)');
-
-  const confGrad = ctx.createLinearGradient(0, 0, 0, 400);
-  confGrad.addColorStop(0, 'rgba(167,139,250,0.25)');
-  confGrad.addColorStop(1, 'rgba(167,139,250,0.0)');
-
-  placeholder.style.display = 'none';
-  canvas.style.display = 'block';
-
-  perfChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          type: 'bar',
-          label: `${ coin } Candles`,
-          data: ohlcv.map(d => [d.low, d.high]),
-          yAxisID: 'yPrice',
-          backgroundColor: ohlcv.map(d => d.close >= d.open ? '#34d399' : '#f87171'),
-          barPercentage: 0.1,
-          categoryPercentage: 0.8,
-          order: 4,
-        },
-        {
-          type: 'bar',
-          label: `_ignore`,
-          data: ohlcv.map(d => {
-             if (d.open === d.close) return [d.open, d.open + (d.open * 0.0001)];
-             return [d.open, d.close];
-          }),
-          yAxisID: 'yPrice',
-          backgroundColor: ohlcv.map(d => d.close >= d.open ? 'rgba(52,211,153, 0.9)' : 'rgba(248,113,113, 0.9)'),
-          barPercentage: 0.7,
-          categoryPercentage: 0.8,
-          order: 4,
-        },
-        {
-          label: '🧠 ML Conf %',
-          data: confLineData,
-          yAxisID: 'yConf',
-          borderColor: 'rgba(167,139,250,0.85)',
-          borderWidth: 2,
-          backgroundColor: confGrad,
-          fill: false,
-          tension: 0.4,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          borderDash: [4, 3],
-          spanGaps: true,
-          order: 3,
-        },
-        {
-          label: '▲ LONG',
-          data: ohlcv.map((_, i) => { const pt = longPoints.find(p => p.x === i); return pt ? pt.y : null; }),
-          type: 'line',
-          showLine: false,
-          yAxisID: 'yPrice',
-          borderColor: '#34d399',
-          backgroundColor: 'rgba(52,211,153,0.9)',
-          pointRadius: 12,
-          pointHoverRadius: 14,
-          pointStyle: 'triangle',
-          order: 1,
-        },
-        {
-          label: '▼ SHORT',
-          data: ohlcv.map((_, i) => { const pt = shortPoints.find(p => p.x === i); return pt ? pt.y : null; }),
-          type: 'line',
-          showLine: false,
-          yAxisID: 'yPrice',
-          borderColor: '#f87171',
-          backgroundColor: 'rgba(248,113,113,0.9)',
-          pointRadius: 12,
-          pointHoverRadius: 14,
-          pointStyle: 'triangle',
-          rotation: 180,
-          order: 1,
-        },
-        {
-          label: '○ Weak (60-72%)',
-          data: ohlcv.map((_, i) => { const pt = weakPoints.find(p => p.x === i); return pt ? pt.y : null; }),
-          type: 'line',
-          showLine: false,
-          yAxisID: 'yPrice',
-          borderColor: 'rgba(148,163,184,0.5)',
-          backgroundColor: 'rgba(148,163,184,0.15)',
-          pointRadius: 4,
-          pointStyle: 'circle',
-          order: 2,
-        },
-        ...tpSlDatasets.filter(ds => !ds.label.startsWith('_dot_')),
-        ...tpSlDatasets.filter(ds => ds.label.startsWith('_dot_')),
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      animation: { duration: 400 },
-      plugins: {
-        legend: {
-          display: false,
-        },
-        tooltip: {
-          backgroundColor: 'rgba(15,15,30,0.95)',
-          borderColor: 'rgba(255,255,255,0.1)',
-          borderWidth: 1,
-          titleColor: '#fff',
-          bodyColor: 'rgba(255,255,255,0.7)',
-          padding: 12,
-          filter: function(tooltipItem) {
-             return !tooltipItem.dataset.label.startsWith('_');
-          },
-          callbacks: {
-            label: function(ctx) {
-              if (ctx.dataset.label.includes('Candles')) {
-                const c = ohlcv[ctx.dataIndex];
-                const fmt = v => v >= 1 ? v.toFixed(2) : v.toFixed(6);
-                return `O: ${ fmt(c.open) } H: ${ fmt(c.high) } L: ${ fmt(c.low) } C: ${ fmt(c.close) } `;
-              }
-              if (ctx.dataset.label === '🧠 ML Conf %') {
-                return `🧠 ML Conf %: ${ ctx.parsed.y.toFixed(1) }% `;
-              }
-              return ctx.dataset.label + ': ' + ctx.formattedValue;
-            },
-            afterBody: function(items) {
-              const i      = items[0]?.dataIndex;
-              const ohlcvD = ohlcv[i];
-              const confVal = confLineData[i];
-              const lines  = [];
-
-              const inLong  = longPoints.find(p => p.x === i);
-              const inShort = shortPoints.find(p => p.x === i);
-              const inWeak  = weakPoints.find(p => p.x === i);
-
-              if (inLong) {
-                lines.push(`✅ VALID ENTRY: LONG`);
-                const m = tpSlByIdx[i];
-                lines.push(`Conf: ${ (inLong.conf * 100).toFixed(1) }% (≥ 72 %)`);
-                if (m) {
-                  const fmt = v => v >= 1 ? v.toFixed(4) : v.toFixed(6);
-                  lines.push(`ATR: ${ (m.atr || 0).toFixed(6) } `);
-                  lines.push(`TP(2×): ${ fmt(m.tpPrice) } ${ m.tpHit ? '✅ HIT' : '⏳' } `);
-                  lines.push(`SL(1×): ${ fmt(m.slPrice) } ${ m.slHit ? '🔴 HIT' : '⏳' } `);
-                }
-              } else if (inShort) {
-                lines.push(`✅ VALID ENTRY: SHORT`);
-                const m = tpSlByIdx[i];
-                lines.push(`Conf: ${ (inShort.conf * 100).toFixed(1) }% (≥ 72 %)`);
-                if (m) {
-                  const fmt = v => v >= 1 ? v.toFixed(4) : v.toFixed(6);
-                  lines.push(`ATR: ${ (m.atr || 0).toFixed(6) } `);
-                  lines.push(`TP(2×): ${ fmt(m.tpPrice) } ${ m.tpHit ? '✅ HIT' : '⏳' } `);
-                  lines.push(`SL(1×): ${ fmt(m.slPrice) } ${ m.slHit ? '🔴 HIT' : '⏳' } `);
-                }
-              } else if (inWeak) {
-                lines.push(`⚠️ Weak signal: ${ inWeak.sig } `);
-                lines.push(`Conf: ${ (inWeak.conf * 100).toFixed(1) }% (< 72 %, skip)`);
-              }
-
-              if (confVal != null) lines.push(`ML Conf: ${ confVal.toFixed(1) }% `);
-              if (leverage > 1)    lines.push(`Lev: ${ leverage } x`);
-              return lines;
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: {
-            color: 'rgba(255,255,255,0.4)',
-            maxTicksLimit: 12,
-            font: { size: 11 },
-          },
-          grid: { color: 'rgba(255,255,255,0.04)' }
-        },
-        yPrice: {
-          type: 'linear',
-          position: 'right',
-          beginAtZero: false,
-          grace: '5%',
-          ticks: {
-            color: 'rgba(99,125,255,0.6)',
-            font: { size: 11 },
-            callback: v => v >= 1 ? v.toFixed(2) : v.toFixed(5),
-          },
-          grid: { color: 'rgba(255,255,255,0.04)' }
-        },
-        yConf: {
-          type: 'linear',
-          position: 'left',
-          min: 0,
-          max: 100,
-          ticks: {
-            color: 'rgba(167,139,250,0.6)',
-            font: { size: 10 },
-            callback: v => v + '%',
-            stepSize: 25,
-          },
-          grid: { drawOnChartArea: false },
-          border: { dash: [4, 4] }
-        }
-      }
-    }
-  });
-
-  document.getElementById('perfLegend').style.display = 'flex';
-
-  return {
-    longCount: longPoints.length,
-    shortCount: shortPoints.length,
-    weakCount: weakPoints.length
-  };
-}
-
-function updatePerfStats(stats, filteredCounts) {
-  if (!stats) return;
-  const grid = document.getElementById('perfStatGrid');
-  grid.classList.remove('hidden');
-  grid.classList.add('grid');
-
-  const totalValid = (stats.tp_hits ?? 0) + (stats.sl_hits ?? 0) + ((filteredCounts?.longCount ?? 0) + (filteredCounts?.shortCount ?? 0) - (stats.tp_hits ?? 0) - (stats.sl_hits ?? 0));
-
-  if (filteredCounts) {
-    document.getElementById('statTotalSignals').textContent = filteredCounts.longCount + filteredCounts.shortCount;
-    document.getElementById('statLongCount').textContent    = filteredCounts.longCount;
-    document.getElementById('statShortCount').textContent   = filteredCounts.shortCount;
-    document.getElementById('statFlatCount').textContent    = filteredCounts.weakCount;
-  } else {
-    document.getElementById('statTotalSignals').textContent = stats.total_signals ?? '—';
-    document.getElementById('statLongCount').textContent    = stats.long_count    ?? '—';
-    document.getElementById('statShortCount').textContent   = stats.short_count   ?? '—';
-    document.getElementById('statFlatCount').textContent    = stats.flat_count    ?? '—';
-  }
-
-  const wr = stats.winrate_pct;
-  const wrEl = document.getElementById('statWinRate');
-  if (wr != null) {
-    wrEl.textContent = wr + '%';
-    wrEl.style.color = wr >= 55 ? '#34d399' : wr >= 45 ? '#a78bfa' : '#f87171';
-  } else { wrEl.textContent = '—'; }
-
-  const pnl = stats.total_pnl_pct;
-  const pnlEl = document.getElementById('statTotalPnl');
-  if (pnl != null) {
-    pnlEl.textContent = (pnl > 0 ? '+' : '') + pnl + '%';
-    pnlEl.style.color = pnl > 0 ? '#34d399' : '#f87171';
-  } else { pnlEl.textContent = '—'; }
-
-  document.getElementById('statTpHits').textContent = stats.tp_hits ?? '—';
-  document.getElementById('statSlHits').textContent = stats.sl_hits ?? '—';
-}
 
 function closeEntryModal() {
     document.getElementById('entryModal').classList.remove('show', 'flex');
