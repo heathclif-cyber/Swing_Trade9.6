@@ -1213,7 +1213,7 @@ async function changeModel() {
         if (json.success) {
             showAlert('success', `✅ Model changed to ${model.toUpperCase().replace('_', ' ')}`);
             setTimeout(hideAlert, 3000);
-            fetchData(); // reload data with new model
+            runAlgorithm(); // Update both single pair and scanner
         } else {
             showAlert('danger', '❌ Failed to change model: ' + json.error);
         }
