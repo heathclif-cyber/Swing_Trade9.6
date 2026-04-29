@@ -39,8 +39,9 @@ async function fetchData() {
         renderKillSwitch(json);
         renderQuantAnalysis(json.state?.quant_analysis, json.state);
         renderEmergency(json.state?.quant_analysis, json.state);
-        renderFeatureCols();
         renderShapTop15();
+        renderFeatureCols();
+        renderFeatureQuality();
         // ML Confidence chart kini digabung di Price Performance Monitor
     } catch (e) {
         showAlert('danger', '❌ ' + e.message);
@@ -102,40 +103,131 @@ function renderEmergency(quant, state) {
     } else { bar.style.display = 'none'; }
 }
 
-/* ── SHAP TOP 15 RANKING ──────────────────────────────────────────────────── */
+/* ── SHAP TOP 15 RANKING (standalone section) ────────────────────────────── */
 function renderShapTop15() {
     const shap = APP_DATA?.shap_ranking;
+    const quality = APP_DATA?.feature_quality;
+    const tbody = document.getElementById('shapPrimaryBody');
+    const sourceEl = document.getElementById('shapPrimarySource');
+    if (!tbody) return;
     if (!shap || !shap.top15 || shap.top15.length === 0) {
-        document.getElementById('shapTopBody').innerHTML =
-            '<tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:20px">SHAP ranking not available</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:20px">SHAP ranking not available</td></tr>';
         return;
     }
-    document.getElementById('shapRankSource').textContent = 'source: ' + (shap.source || 'shap_ranking.json');
-    const tbody = document.getElementById('shapTopBody');
+    if (sourceEl) sourceEl.textContent = 'source: ' + (shap.source || 'shap_ranking.json');
+
+    const missingFromDf = quality?.missing_from_df || [];
+    const nanValues = quality?.nan_values || [];
+
     tbody.innerHTML = shap.top15.map(item => {
         const cat = getFeatureCategory(item.feature);
         const catBadge = categoryBadge(cat);
         const shapVal = typeof item.shap_value === 'number' ? item.shap_value.toFixed(4) : '—';
-        const liveVal = item.live_value != null ? item.live_value : '—';
-        const liveStr = typeof liveVal === 'number'
+        const liveVal = item.live_value;
+        const isMissing = missingFromDf.includes(item.feature);
+        const isNaN_ = nanValues.includes(item.feature);
+        const liveStr = liveVal != null
             ? (Math.abs(liveVal) >= 1000 ? liveVal.toFixed(2) : Math.abs(liveVal) >= 1 ? liveVal.toFixed(4) : liveVal.toFixed(6))
             : 'N/A';
         const barWidth = Math.min(item.shap_value * 100, 100);
-        return `<tr class="hover:bg-white/[0.02] light:bg-black/[0.02] transition-colors duration-[0.15s]">
+        let statusBadge, rowStyle = '';
+        if (isMissing) {
+            statusBadge = '<span class="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-red-500/10 text-red-400 border-red-500/25">MISSING</span>';
+            rowStyle = 'background:rgba(248,113,113,0.05)';
+        } else if (isNaN_) {
+            statusBadge = '<span class="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-amber-500/10 text-amber-400 border-amber-500/25">NaN</span>';
+            rowStyle = 'background:rgba(251,191,36,0.05)';
+        } else {
+            statusBadge = '<span class="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-green-500/10 text-green-400 border-green-500/25">OK</span>';
+        }
+        return `<tr class="hover:bg-white/[0.02] transition-colors duration-[0.15s]" style="${rowStyle}">
             <td class="px-2.5 py-2 text-[var(--text-3)] font-mono text-[11px]">#${item.rank}</td>
             <td class="px-2.5 py-2 font-mono text-[12px] text-[var(--text-1)] font-medium">${item.feature}</td>
             <td class="px-2.5 py-2 text-right">
                 <div class="flex items-center justify-end gap-2">
-                    <div class="h-1.5 w-16 bg-white/[0.06] light:bg-black/[0.06] rounded-full overflow-hidden">
+                    <div class="h-1.5 w-16 bg-white/[0.06] rounded-full overflow-hidden">
                         <div class="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-400" style="width:${barWidth}%"></div>
                     </div>
                     <span class="font-mono text-[11px] text-purple-400">${shapVal}</span>
                 </div>
             </td>
-            <td class="px-2.5 py-2 text-right font-mono text-[12px] ${liveVal === 'N/A' ? 'text-[var(--text-3)]' : 'text-[var(--text-1)]'}">${liveStr}</td>
+            <td class="px-2.5 py-2 text-right font-mono text-[12px] ${liveVal == null ? 'text-[var(--text-3)]' : 'text-[var(--text-1)]'}">${liveStr}</td>
+            <td class="px-2.5 py-2 text-center">${statusBadge}</td>
             <td class="px-2.5 py-2">${catBadge}</td>
         </tr>`;
     }).join('');
+}
+
+/* ── FEATURE QUALITY NOTIFICATION ────────────────────────────────────────── */
+function renderFeatureQuality() {
+    const quality = APP_DATA?.feature_quality;
+    const shap = APP_DATA?.shap_ranking;
+    if (!quality) return;
+
+    const missing = quality.missing_from_df || [];
+    const nans = quality.nan_values || [];
+    const totalIssues = missing.length + nans.length;
+    const ok = quality.ok_count || 0;
+    const total = quality.total || 85;
+
+    // Badge di header ML Feature Columns
+    const countBadge = document.getElementById('featureQualityCountBadge');
+    if (countBadge) {
+        countBadge.textContent = `${ok}/${total} OK`;
+        countBadge.className = `ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full border ${
+            totalIssues > 0
+                ? 'bg-amber-500/[0.15] text-amber-400 border-amber-500/[0.3]'
+                : 'bg-green-500/[0.12] text-green-400 border-green-500/[0.25]'
+        }`;
+        countBadge.classList.remove('hidden');
+    }
+
+    // Badge ⚠ di header SHAP section (hanya jika ada top-15 yang kena)
+    const shapBadge = document.getElementById('shapMissingBadge');
+    if (shapBadge) {
+        const top15feats = (shap?.top15 || []).map(f => f.feature);
+        const critical = top15feats.filter(f => missing.includes(f) || nans.includes(f));
+        if (critical.length > 0) {
+            shapBadge.textContent = `⚠ ${critical.length} CRITICAL`;
+            shapBadge.classList.remove('hidden');
+        } else {
+            shapBadge.classList.add('hidden');
+        }
+    }
+
+    // Alert box di dalam SHAP section
+    const shapAlert = document.getElementById('shapQualityAlert');
+    if (shapAlert) {
+        const top15feats = (shap?.top15 || []).map(f => f.feature);
+        const critical = top15feats.filter(f => missing.includes(f) || nans.includes(f));
+        if (critical.length > 0) {
+            shapAlert.className = 'mb-3 px-4 py-3 rounded-lg border text-[12px] bg-red-500/[0.08] border-red-500/[0.3] text-red-300';
+            shapAlert.innerHTML = `<span class="font-bold text-red-400">⚠ AKURASI MODEL TERDAMPAK —</span> ${critical.length} dari 15 fitur terpenting memiliki data kosong: <span class="font-mono text-amber-300">${critical.join(', ')}</span>. Hasil prediksi mungkin tidak akurat.`;
+            shapAlert.classList.remove('hidden');
+        } else {
+            shapAlert.classList.add('hidden');
+        }
+    }
+
+    // Banner detail di ML Feature Columns section
+    const banner = document.getElementById('featureQualityBanner');
+    const warnBadge = document.getElementById('featureQualityWarnBadge');
+    if (banner) {
+        if (totalIssues > 0) {
+            const parts = [];
+            if (missing.length > 0)
+                parts.push(`<span class="text-red-400 font-semibold">${missing.length} tidak ada di dataframe:</span> <span class="font-mono text-[11px] opacity-80">${missing.join(', ')}</span>`);
+            if (nans.length > 0)
+                parts.push(`<span class="text-amber-400 font-semibold">${nans.length} bernilai NaN:</span> <span class="font-mono text-[11px] opacity-80">${nans.join(', ')}</span>`);
+            banner.className = 'mb-3 px-4 py-3 rounded-lg border text-[12px] bg-amber-500/[0.06] border-amber-500/[0.25] text-[var(--text-1)]';
+            banner.innerHTML = `<div class="font-bold mb-1.5 text-amber-400">⚠ ${totalIssues} fitur bermasalah dari ${total} total — model mungkin menggunakan nilai default/imputed:</div>${parts.map(p => `<div class="mb-0.5">${p}</div>`).join('')}`;
+            banner.classList.remove('hidden');
+            if (warnBadge) { warnBadge.textContent = `⚠ ${totalIssues}`; warnBadge.classList.remove('hidden'); }
+        } else {
+            banner.classList.add('hidden');
+            if (warnBadge) warnBadge.classList.add('hidden');
+        }
+    }
 }
 
 /* ── FEATURE COLS TABLE ──────────────────────────────────────────────────── */
@@ -190,13 +282,37 @@ function filterFeatureCols(filter) {
     }
 
     const tbody = document.getElementById('featureColsBody');
+    const featureLive = APP_DATA?.feature_live || {};
+    const quality = APP_DATA?.feature_quality || {};
+    const missingFromDf = quality.missing_from_df || [];
+    const nanValues = quality.nan_values || [];
     tbody.innerHTML = filtered.map((col, i) => {
         const cat = getFeatureCategory(col);
-        const catBadge = categoryBadge(cat);
-        return `<tr class="hover:bg-white/[0.02] light:bg-black/[0.02] transition-colors duration-[0.15s]">
-            <td class="px-3.5 py-2.5 text-[var(--text-3)] font-mono text-[11px] text-right">${i + 1}</td>
-            <td class="px-3.5 py-2.5 font-mono text-[12px] text-[var(--text-1)]">${col}</td>
-            <td class="px-3.5 py-2.5">${catBadge}</td>
+        const catBadge = categoryBadge(col === 'rsi_h4' ? 'Smart Money v3' : cat);
+        const isMissing = missingFromDf.includes(col);
+        const isNaN_ = nanValues.includes(col);
+        const liveVal = featureLive[col];
+        let liveStr, statusBadge, rowStyle = '';
+        if (isMissing) {
+            liveStr = '<span class="text-red-400/70 text-[11px]">MISSING</span>';
+            statusBadge = '<span style="font-size:12px" title="Tidak ada di dataframe">❌</span>';
+            rowStyle = 'background:rgba(248,113,113,0.03)';
+        } else if (isNaN_) {
+            liveStr = '<span class="text-amber-400/70 text-[11px]">NaN</span>';
+            statusBadge = '<span style="font-size:12px" title="Nilai NaN">⚠️</span>';
+            rowStyle = 'background:rgba(251,191,36,0.03)';
+        } else {
+            liveStr = liveVal != null
+                ? `<span class="font-mono text-[11px]">${Math.abs(liveVal) >= 1000 ? liveVal.toFixed(2) : Math.abs(liveVal) >= 1 ? liveVal.toFixed(4) : liveVal.toFixed(6)}</span>`
+                : '<span class="text-[var(--text-3)] text-[11px]">—</span>';
+            statusBadge = '<span style="font-size:11px" title="OK">✅</span>';
+        }
+        return `<tr class="hover:bg-white/[0.02] transition-colors duration-[0.15s]" style="${rowStyle}">
+            <td class="px-3.5 py-2 text-[var(--text-3)] font-mono text-[11px] text-right">${i + 1}</td>
+            <td class="px-3.5 py-2 font-mono text-[12px] text-[var(--text-1)]">${col}</td>
+            <td class="px-3.5 py-2 text-right">${liveStr}</td>
+            <td class="px-3.5 py-2 text-center">${statusBadge}</td>
+            <td class="px-3.5 py-2">${catBadge}</td>
         </tr>`;
     }).join('');
 }

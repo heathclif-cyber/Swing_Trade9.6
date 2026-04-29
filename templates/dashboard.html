@@ -505,6 +505,46 @@
       </div>
     </div>
 
+    <!-- ═══════════════ SECTION: ML SIGNALS INTELLIGENCE ═══════════════ -->
+    <div
+      class="mb-3 bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] light:bg-black/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionShapPrimary">
+      <div
+        class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] light:bg-black/[0.02] section-collapsible open"
+        onclick="toggleSection('shapPrimaryContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-purple-500/[0.12]">🏆</div>
+        <div class="text-sm font-semibold">ML Signals Intelligence — Top 15 SHAP Feature Drivers</div>
+        <span class="ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-purple-400 border border-purple-500/[0.25]">SHAP</span>
+        <span id="shapMissingBadge" class="hidden ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-amber-500/[0.15] text-amber-400 border border-amber-500/[0.3]"></span>
+        <span class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
+      </div>
+      <div id="shapPrimaryContent"
+        class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
+        style="max-height:2000px;">
+        <div id="shapQualityAlert" class="hidden mb-3 px-4 py-3 rounded-lg border text-[12px]"></div>
+        <div class="overflow-x-auto overscroll-x-contain">
+          <table class="w-full border-collapse text-[12px]">
+            <thead>
+              <tr>
+                <th class="text-left text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap" style="width:32px;">#</th>
+                <th class="text-left text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">Feature</th>
+                <th class="text-right text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">SHAP Importance</th>
+                <th class="text-right text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">Live Value</th>
+                <th class="text-center text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap" style="width:56px;">Status</th>
+                <th class="text-left text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">Category</th>
+              </tr>
+            </thead>
+            <tbody id="shapPrimaryBody">
+              <tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:20px">Awaiting data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-2 text-right">
+          <span class="text-[10px] text-[var(--text-3)] font-mono" id="shapPrimarySource">—</span>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══════════════ SECTION 3: RAW DATA ═══════════════ -->
     <div
       class="mb-3 bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] light:bg-black/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
@@ -687,8 +727,9 @@
         onclick="toggleSection('featureColsContent', this)">
         <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-purple-500/[0.12]">🧠</div>
         <div class="text-sm font-semibold">ML Feature Columns — 85 Fitur Input Model Ensemble</div>
-        <span
-          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-purple-400 border border-purple-500/[0.25]">V4</span>
+        <span class="ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-purple-500/[0.12] text-purple-400 border border-purple-500/[0.25]">V4</span>
+        <span id="featureQualityCountBadge" class="hidden ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full border"></span>
+        <span id="featureQualityWarnBadge" class="hidden ml-1 text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full border"></span>
         <span
           class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
       </div>
@@ -696,31 +737,7 @@
         class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body"
         style="max-height:2000px;">
 
-        <!-- ═══ TOP 15 SHAP RANKING (dengan live values) ═══ -->
-        <div
-          class="bg-gradient-to-br from-purple-500/[0.06] to-indigo-500/[0.06] border border-purple-500/[0.2] rounded-lg p-4 mb-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="text-[11px] font-bold text-purple-400 uppercase tracking-wide">🏆 Top 15 SHAP Feature Ranking</div>
-            <span class="text-[10px] text-[var(--text-3)] font-mono">by mean |SHAP|</span>
-            <span class="ml-auto text-[10px] text-[var(--text-3)]" id="shapRankSource">—</span>
-          </div>
-          <div class="overflow-x-auto overscroll-x-contain">
-            <table class="w-full border-collapse text-[12px]">
-              <thead>
-                <tr>
-                  <th class="text-left text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap" style="width:32px;">#</th>
-                  <th class="text-left text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">Feature</th>
-                  <th class="text-right text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">SHAP</th>
-                  <th class="text-right text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">Live Value</th>
-                  <th class="text-left text-[var(--text-3)] font-semibold text-[10px] uppercase tracking-wide px-2.5 py-2 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap">Category</th>
-                </tr>
-              </thead>
-              <tbody id="shapTopBody">
-                <tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:20px">Awaiting data...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <div id="featureQualityBanner" class="hidden mb-3 px-4 py-3 rounded-lg border text-[12px]"></div>
 
         <!-- ═══ Full 85 Feature List ═══ -->
         <div class="flex items-center gap-2 mb-3">
@@ -753,6 +770,12 @@
                   <th
                     class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
                     Feature Name</th>
+                  <th
+                    class="sticky top-0 text-right bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Live Value</th>
+                  <th
+                    class="sticky top-0 text-center bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                    style="width:36px;">St</th>
                   <th
                     class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
                     Category</th>

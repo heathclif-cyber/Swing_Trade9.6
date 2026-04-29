@@ -1077,6 +1077,9 @@ def api_data():
             import traceback; traceback.print_exc()
             state["quant_analysis"] = None
 
+        # ── Last row of df_quant — reused by SHAP ranking and feature quality audit ──
+        _last_row = df_quant.iloc[-1] if df_quant is not None and not df_quant.empty else None
+
         # ── SHAP Ranking: top 15 features with live values ──
         _shap_ranking_data = {"top15": [], "source": "models/shap_ranking.json"}
         try:
@@ -1085,9 +1088,6 @@ def api_data():
                 with open(_shap_path, 'r') as _f:
                     _shap_full = json.load(_f)
                 _shap_ranking = _shap_full.get("ranking", [])[:15]
-                # Extract live values from df_quant last row for each top feature
-                _last_row = df_quant.iloc[-1] if df_quant is not None and not df_quant.empty else None
-                _shap_ranking_data["top15"] = []
                 for _item in _shap_ranking:
                     _feat = _item["feature"]
                     _val = None
@@ -1107,17 +1107,54 @@ def api_data():
         except Exception as _shap_err:
             logger.warning(f"Could not load SHAP ranking: {_shap_err}")
 
+        # ── Feature quality audit: detect missing/NaN among all 85 FEATURE_COLS ──
+        _feature_quality = {
+            "missing_from_df": [],
+            "nan_values": [],
+            "total": len(FEATURE_COLS),
+            "ok_count": 0,
+        }
+        _feature_live: dict = {}
+        if _last_row is not None:
+            for _feat in FEATURE_COLS:
+                if _feat not in df_quant.columns:
+                    _feature_quality["missing_from_df"].append(_feat)
+                    _feature_live[_feat] = None
+                else:
+                    try:
+                        _raw_val = _last_row.get(_feat)
+                        if pd.isna(_raw_val):
+                            _feature_quality["nan_values"].append(_feat)
+                            _feature_live[_feat] = None
+                        else:
+                            _feature_live[_feat] = round(float(_raw_val), 6)
+                    except Exception:
+                        _feature_quality["nan_values"].append(_feat)
+                        _feature_live[_feat] = None
+        _feature_quality["ok_count"] = (
+            len(FEATURE_COLS)
+            - len(_feature_quality["missing_from_df"])
+            - len(_feature_quality["nan_values"])
+        )
+        if _feature_quality["missing_from_df"] or _feature_quality["nan_values"]:
+            logger.warning(
+                f"Feature quality: {len(_feature_quality['missing_from_df'])} missing, "
+                f"{len(_feature_quality['nan_values'])} NaN out of {len(FEATURE_COLS)}"
+            )
+
         logger.info("✅ Dashboard data ready!")
         payload = {
-            "success":      True,
-            "timestamp":    now_str,
-            "raw_data":     raw_data,
-            "oi_data":      oi_formatted,
-            "computed":     computed,
-            "state":        state,
-            "data_warning": _data_warning,   # UI bisa tampilkan banner peringatan
-            "feature_cols": FEATURE_COLS,    # 85 ML features sebagai input model
-            "shap_ranking": _shap_ranking_data,  # Top 15 SHAP features with live values
+            "success":         True,
+            "timestamp":       now_str,
+            "raw_data":        raw_data,
+            "oi_data":         oi_formatted,
+            "computed":        computed,
+            "state":           state,
+            "data_warning":    _data_warning,
+            "feature_cols":    FEATURE_COLS,
+            "feature_live":    _feature_live,       # live values for all 85 features
+            "feature_quality": _feature_quality,    # audit: missing/NaN per feature
+            "shap_ranking":    _shap_ranking_data,
         }
         
         _shap = state.get("quant_analysis", {}).get("variables", {}).get("shap_top_features", []) if state.get("quant_analysis") else []
