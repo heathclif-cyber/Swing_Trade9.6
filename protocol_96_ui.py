@@ -1077,6 +1077,36 @@ def api_data():
             import traceback; traceback.print_exc()
             state["quant_analysis"] = None
 
+        # ── SHAP Ranking: top 15 features with live values ──
+        _shap_ranking_data = {"top15": [], "source": "models/shap_ranking.json"}
+        try:
+            _shap_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'models', 'shap_ranking.json')
+            if _os.path.exists(_shap_path):
+                with open(_shap_path, 'r') as _f:
+                    _shap_full = json.load(_f)
+                _shap_ranking = _shap_full.get("ranking", [])[:15]
+                # Extract live values from df_quant last row for each top feature
+                _last_row = df_quant.iloc[-1] if df_quant is not None and not df_quant.empty else None
+                _shap_ranking_data["top15"] = []
+                for _item in _shap_ranking:
+                    _feat = _item["feature"]
+                    _val = None
+                    if _last_row is not None and _feat in df_quant.columns:
+                        try:
+                            _raw = _last_row.get(_feat)
+                            if pd.notna(_raw):
+                                _val = round(float(_raw), 6)
+                        except Exception:
+                            pass
+                    _shap_ranking_data["top15"].append({
+                        "rank":       _item["rank"],
+                        "feature":    _feat,
+                        "shap_value": _item["mean_abs_shap"],
+                        "live_value": _val,
+                    })
+        except Exception as _shap_err:
+            logger.warning(f"Could not load SHAP ranking: {_shap_err}")
+
         logger.info("✅ Dashboard data ready!")
         payload = {
             "success":      True,
@@ -1087,6 +1117,7 @@ def api_data():
             "state":        state,
             "data_warning": _data_warning,   # UI bisa tampilkan banner peringatan
             "feature_cols": FEATURE_COLS,    # 85 ML features sebagai input model
+            "shap_ranking": _shap_ranking_data,  # Top 15 SHAP features with live values
         }
         
         _shap = state.get("quant_analysis", {}).get("variables", {}).get("shap_top_features", []) if state.get("quant_analysis") else []

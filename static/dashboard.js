@@ -40,6 +40,7 @@ async function fetchData() {
         renderQuantAnalysis(json.state?.quant_analysis, json.state);
         renderEmergency(json.state?.quant_analysis, json.state);
         renderFeatureCols();
+        renderShapTop15();
         // ML Confidence chart kini digabung di Price Performance Monitor
     } catch (e) {
         showAlert('danger', '❌ ' + e.message);
@@ -99,6 +100,42 @@ function renderEmergency(quant, state) {
         document.getElementById('emergencyMsg').textContent =
             em.sl_touched ? '⚠️ SL SUDAH TERSENTUH — EVALUASI EXIT SEGERA' : '⚠️ RSI OVERBOUGHT — CEK EXIT SIGNAL';
     } else { bar.style.display = 'none'; }
+}
+
+/* ── SHAP TOP 15 RANKING ──────────────────────────────────────────────────── */
+function renderShapTop15() {
+    const shap = APP_DATA?.shap_ranking;
+    if (!shap || !shap.top15 || shap.top15.length === 0) {
+        document.getElementById('shapTopBody').innerHTML =
+            '<tr><td colspan="5" style="text-align:center;color:var(--text-3);padding:20px">SHAP ranking not available</td></tr>';
+        return;
+    }
+    document.getElementById('shapRankSource').textContent = 'source: ' + (shap.source || 'shap_ranking.json');
+    const tbody = document.getElementById('shapTopBody');
+    tbody.innerHTML = shap.top15.map(item => {
+        const cat = getFeatureCategory(item.feature);
+        const catBadge = categoryBadge(cat);
+        const shapVal = typeof item.shap_value === 'number' ? item.shap_value.toFixed(4) : '—';
+        const liveVal = item.live_value != null ? item.live_value : '—';
+        const liveStr = typeof liveVal === 'number'
+            ? (Math.abs(liveVal) >= 1000 ? liveVal.toFixed(2) : Math.abs(liveVal) >= 1 ? liveVal.toFixed(4) : liveVal.toFixed(6))
+            : 'N/A';
+        const barWidth = Math.min(item.shap_value * 100, 100);
+        return `<tr class="hover:bg-white/[0.02] light:bg-black/[0.02] transition-colors duration-[0.15s]">
+            <td class="px-2.5 py-2 text-[var(--text-3)] font-mono text-[11px]">#${item.rank}</td>
+            <td class="px-2.5 py-2 font-mono text-[12px] text-[var(--text-1)] font-medium">${item.feature}</td>
+            <td class="px-2.5 py-2 text-right">
+                <div class="flex items-center justify-end gap-2">
+                    <div class="h-1.5 w-16 bg-white/[0.06] light:bg-black/[0.06] rounded-full overflow-hidden">
+                        <div class="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-400" style="width:${barWidth}%"></div>
+                    </div>
+                    <span class="font-mono text-[11px] text-purple-400">${shapVal}</span>
+                </div>
+            </td>
+            <td class="px-2.5 py-2 text-right font-mono text-[12px] ${liveVal === 'N/A' ? 'text-[var(--text-3)]' : 'text-[var(--text-1)]'}">${liveStr}</td>
+            <td class="px-2.5 py-2">${catBadge}</td>
+        </tr>`;
+    }).join('');
 }
 
 /* ── FEATURE COLS TABLE ──────────────────────────────────────────────────── */
