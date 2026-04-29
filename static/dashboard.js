@@ -1168,11 +1168,22 @@ async function fetchModels() {
         const res = await fetch('/api/models');
         const json = await res.json();
         if (json.success) {
-            const sel = document.getElementById('modelSelect');
-            if (sel) {
-                sel.innerHTML = json.models.map(m => 
-                    `<option value="${m}" ${m === json.active ? 'selected' : ''}>${m.toUpperCase().replace('_', ' ')}</option>`
-                ).join('');
+            const container = document.getElementById('modelButtonsContainer');
+            if (container) {
+                // Keep the label, add the buttons
+                let html = '<span class="text-[11px] text-[var(--text-3)] font-semibold px-2 uppercase tracking-wide">Model:</span>';
+                
+                json.models.forEach(m => {
+                    const isActive = m === json.active;
+                    const label = m.toUpperCase().replace('_', ' ');
+                    
+                    if (isActive) {
+                        html += `<button class="px-3 py-1.5 text-[11px] font-bold rounded-full transition-all duration-[0.25s] bg-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.3)] border border-purple-400 cursor-default">${label}</button>`;
+                    } else {
+                        html += `<button class="px-3 py-1.5 text-[11px] font-medium rounded-full transition-all duration-[0.25s] bg-transparent text-[var(--text-2)] hover:bg-white/[0.05] light:hover:bg-black/[0.05] border border-transparent cursor-pointer" onclick="changeModel('${m}')">${label}</button>`;
+                    }
+                });
+                container.innerHTML = html;
             }
         }
     } catch (e) {
@@ -1180,28 +1191,19 @@ async function fetchModels() {
     }
 }
 
-
 async function runAlgorithm() {
-    const btn = document.getElementById('btnRunAlgo');
-    if(btn) {
-        btn.classList.add('btn-loading');
-        btn.innerHTML = '⏳ Running...';
-    }
     showAlert('success', '🚀 Running Machine Learning Algorithms...');
     await fetchScannerData();
     await fetchData();
     showAlert('success', '✅ Algorithms execution complete.');
     setTimeout(hideAlert, 3000);
-    if(btn) {
-        btn.classList.remove('btn-loading');
-        btn.innerHTML = '▶ Run Model';
-    }
 }
 
-async function changeModel() {
-    const sel = document.getElementById('modelSelect');
-    if (!sel) return;
-    const model = sel.value;
+async function changeModel(model) {
+    if (!model) return;
+    
+    // Optimistically update UI to loading state
+    showAlert('success', `🔄 Switching to ${model.toUpperCase().replace('_', ' ')}...`);
     
     try {
         const res = await fetch('/api/models/set', {
@@ -1211,8 +1213,7 @@ async function changeModel() {
         });
         const json = await res.json();
         if (json.success) {
-            showAlert('success', `✅ Model changed to ${model.toUpperCase().replace('_', ' ')}`);
-            setTimeout(hideAlert, 3000);
+            await fetchModels(); // Re-render the buttons to update active state
             runAlgorithm(); // Update both single pair and scanner
         } else {
             showAlert('danger', '❌ Failed to change model: ' + json.error);
