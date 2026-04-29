@@ -678,6 +678,69 @@
       </div>
     </div>
 
+    <!-- ═══════════════ SECTION 5: ML FEATURE COLS ═══════════════ -->
+    <div
+      class="mb-3 bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.4)] hover:bg-white/[0.06] light:bg-black/[0.06] hover:shadow-[0_12px_40px_rgba(0,0,0,0.5)] p-5"
+      id="sectionFeatureCols">
+      <div
+        class="flex items-center gap-2.5 mb-2.5 cursor-pointer select-none rounded-md -m-1 px-3.5 py-2.5 mb-3.5 transition-colors duration-[0.25s] hover:bg-white/[0.02] light:bg-black/[0.02] section-collapsible"
+        onclick="toggleSection('featureColsContent', this)">
+        <div class="w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm bg-purple-500/[0.12]">🧠</div>
+        <div class="text-sm font-semibold">ML Feature Columns — 85 Fitur Input Model Ensemble</div>
+        <span
+          class="ml-auto text-[10px] font-bold tracking-wide uppercase px-3 py-1 rounded-full bg-white/[0.03] light:bg-black/[0.03] text-[var(--text-3)] border border-white/[0.08] light:border-black/[0.1]">V4</span>
+        <span
+          class="ml-auto text-xs text-[var(--text-3)] transition-transform duration-300 inline-block chevron">▼</span>
+      </div>
+      <div id="featureColsContent"
+        class="overflow-hidden transition-all duration-[0.4s] ease-in-out opacity-100 section-body collapsed"
+        style="max-height:0;opacity:0;overflow:hidden;">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="text-[10px] text-[var(--text-3)] font-semibold uppercase tracking-wide">Total Features:</div>
+          <span class="text-sm font-bold font-mono text-purple-400" id="featureColsCount">—</span>
+          <div class="ml-auto flex gap-1.5">
+            <button
+              class="px-3 py-1.5 text-[11px] font-semibold rounded-md border border-white/[0.08] light:border-black/[0.1] bg-white/[0.03] light:bg-black/[0.03] text-[var(--text-1)] cursor-pointer transition-all duration-[0.25s] hover:bg-white/[0.055] light:bg-black/[0.055]"
+              onclick="filterFeatureCols('all')" id="fcFilterAll">All</button>
+            <button
+              class="px-3 py-1.5 text-[11px] font-semibold rounded-md border border-white/[0.08] light:border-black/[0.1] bg-white/[0.03] light:bg-black/[0.03] text-[var(--text-1)] cursor-pointer transition-all duration-[0.25s] hover:bg-white/[0.055] light:bg-black/[0.055]"
+              onclick="filterFeatureCols('smart_money')" id="fcFilterSM">Smart Money</button>
+            <button
+              class="px-3 py-1.5 text-[11px] font-semibold rounded-md border border-white/[0.08] light:border-black/[0.1] bg-white/[0.03] light:bg-black/[0.03] text-[var(--text-1)] cursor-pointer transition-all duration-[0.25s] hover:bg-white/[0.055] light:bg-black/[0.055]"
+              onclick="filterFeatureCols('structure')" id="fcFilterStruct">Structure</button>
+            <button
+              class="px-3 py-1.5 text-[11px] font-semibold rounded-md border border-white/[0.08] light:border-black/[0.1] bg-white/[0.03] light:bg-black/[0.03] text-[var(--text-1)] cursor-pointer transition-all duration-[0.25s] hover:bg-white/[0.055] light:bg-black/[0.055]"
+              onclick="filterFeatureCols('derived')" id="fcFilterDerived">Derived</button>
+          </div>
+        </div>
+        <div
+          class="overflow-hidden bg-white/[0.03] light:bg-black/[0.03] backdrop-blur-md border border-white/[0.08] light:border-black/[0.1] rounded-lg shadow-sm hover:bg-white/[0.055] light:bg-black/[0.055] hover:shadow-md transition-all duration-[0.25s]">
+          <div class="overflow-x-auto overscroll-x-contain">
+            <table class="w-full border-collapse text-[12.5px]">
+              <thead>
+                <tr>
+                  <th
+                    class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]"
+                    style="width:40px;">#</th>
+                  <th
+                    class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Feature Name</th>
+                  <th
+                    class="sticky top-0 text-left bg-[rgba(15,20,36,0.92)] backdrop-blur text-[var(--text-3)] font-semibold text-[10.5px] uppercase tracking-wide px-3.5 py-3 border-b border-white/[0.08] light:border-black/[0.1] whitespace-nowrap light:bg-[rgba(226,232,244,0.92)]">
+                    Category</th>
+                </tr>
+              </thead>
+              <tbody id="featureColsBody">
+                <tr>
+                  <td colspan="3" style="text-align:center;color:var(--text-3);padding:30px">Awaiting data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /.app-container -->
 
   <!-- ENTRY MODAL -->

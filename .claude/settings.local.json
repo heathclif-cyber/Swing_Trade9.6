@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(git -C d:/Apps-Dev/Swing_Trade9.6 diff --stat ml/ml_feature_calculator.py ml/ml_signal.py protocol_96_ui.py signal_monitor.py)",
+      "Bash(git -C d:/Apps-Dev/Swing_Trade9.6 add claude.md core/normalize.py plans/post-ssot-refinement-plan.md plans/ssot-restructuring-plan.md ml/ml_feature_calculator.py ml/ml_signal.py protocol_96_ui.py signal_monitor.py)",
+      "Bash(git -C d:/Apps-Dev/Swing_Trade9.6 add check_macro_pred.py check_vcb.py data_engine.py debug_coins.py debug_model_compare.py debug_probas.py debug_wait.py diag_cal.py diag_e2e.py diag_features.py test_atr_verify.py test_feat_order.py test_live.py test_ml_features.py test_ml_load.py test_shap_debug.py)",
+      "Bash(git -C d:/Apps-Dev/Swing_Trade9.6 add \"models/runs/\")",
+      "Bash(git -C d:/Apps-Dev/Swing_Trade9.6 status --short)",
+      "Bash(git -C d:/Apps-Dev/Swing_Trade9.6 commit -m ' *)"
+    ]
+  }
+}

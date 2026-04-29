@@ -21,6 +21,7 @@ import sys as _sys
 import os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from ml.ml_signal import MLSignalEngine as _MLSignalEngine
+from ml.ml_feature_calculator import FEATURE_COLS
 _ui_ml_engine = _MLSignalEngine()
 
 # Import shared SSOT utilities
@@ -1085,6 +1086,7 @@ def api_data():
             "computed":     computed,
             "state":        state,
             "data_warning": _data_warning,   # UI bisa tampilkan banner peringatan
+            "feature_cols": FEATURE_COLS,    # 85 ML features sebagai input model
         }
         
         _shap = state.get("quant_analysis", {}).get("variables", {}).get("shap_top_features", []) if state.get("quant_analysis") else []

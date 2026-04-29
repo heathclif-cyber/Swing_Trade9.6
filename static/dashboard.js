@@ -39,6 +39,7 @@ async function fetchData() {
         renderKillSwitch(json);
         renderQuantAnalysis(json.state?.quant_analysis, json.state);
         renderEmergency(json.state?.quant_analysis, json.state);
+        renderFeatureCols();
         // ML Confidence chart kini digabung di Price Performance Monitor
     } catch (e) {
         showAlert('danger', '❌ ' + e.message);
@@ -98,6 +99,122 @@ function renderEmergency(quant, state) {
         document.getElementById('emergencyMsg').textContent =
             em.sl_touched ? '⚠️ SL SUDAH TERSENTUH — EVALUASI EXIT SEGERA' : '⚠️ RSI OVERBOUGHT — CEK EXIT SIGNAL';
     } else { bar.style.display = 'none'; }
+}
+
+/* ── FEATURE COLS TABLE ──────────────────────────────────────────────────── */
+let _featureColsCache = [];
+
+function renderFeatureCols() {
+    const cols = APP_DATA?.feature_cols;
+    if (!cols || !Array.isArray(cols) || cols.length === 0) {
+        document.getElementById('featureColsBody').innerHTML =
+            '<tr><td colspan="3" style="text-align:center;color:var(--text-3);padding:30px">No feature columns available</td></tr>';
+        return;
+    }
+    _featureColsCache = cols;
+    document.getElementById('featureColsCount').textContent = cols.length;
+    filterFeatureCols('all');
+}
+
+function filterFeatureCols(filter) {
+    const cols = _featureColsCache;
+    if (!cols || cols.length === 0) return;
+
+    // Update active button style
+    document.querySelectorAll('#featureColsContent button[id^="fcFilter"]').forEach(btn => {
+        btn.style.background = '';
+        btn.style.color = '';
+    });
+    const activeBtn = document.getElementById('fcFilter' + filter.charAt(0).toUpperCase() + filter.slice(1));
+    if (activeBtn) {
+        activeBtn.style.background = 'rgba(167,139,250,0.15)';
+        activeBtn.style.color = '#a78bfa';
+    }
+
+    // Define category keywords for filtering
+    const categoryMap = {
+        'smart_money': ['ofi_', 'vwdp', 'hidden_divergence', 'cvd_momentum', 'absorption_at_swing',
+                        'spread_to_volume', 'ultra_high_vol', 'no_demand', 'no_supply', 'effort_vs_result',
+                        'cvd_div', 'cvd_slope', 'vol_efficiency', 'absorption_z', 'funding_price_div',
+                        'rsi_divergence', 'wyckoff', 'spring_upthrust', 'rsi_h4'],
+        'structure': ['MSB_BOS', 'CHoCH', 'bars_since_BOS', 'FVG_', 'Buy_Liq', 'Sell_Liq', 'SFP_sweep',
+                      'dist_swing', 'price_in_range', 'swing_momentum', 'h4_trend', 'trend_strength', 'vol_regime',
+                      'PDH', 'PDL', 'PWH', 'PWL', 'Fib_', 'POC', 'VAH', 'VAL'],
+        'derived': ['log_ret_', 'vol_ratio_', 'hour_sin', 'hour_cos', 'dow_sin', 'dow_cos', 'time_to_funding',
+                    'long_short_ratio', 'symbol', 'market_session', 'btc_dominance', 'fear_greed']
+    };
+
+    let filtered = cols;
+    if (filter !== 'all') {
+        const keywords = categoryMap[filter] || [];
+        filtered = cols.filter(col =>
+            keywords.some(kw => col.toLowerCase().includes(kw.toLowerCase()))
+        );
+    }
+
+    const tbody = document.getElementById('featureColsBody');
+    tbody.innerHTML = filtered.map((col, i) => {
+        const cat = getFeatureCategory(col);
+        const catBadge = categoryBadge(cat);
+        return `<tr class="hover:bg-white/[0.02] light:bg-black/[0.02] transition-colors duration-[0.15s]">
+            <td class="px-3.5 py-2.5 text-[var(--text-3)] font-mono text-[11px] text-right">${i + 1}</td>
+            <td class="px-3.5 py-2.5 font-mono text-[12px] text-[var(--text-1)]">${col}</td>
+            <td class="px-3.5 py-2.5">${catBadge}</td>
+        </tr>`;
+    }).join('');
+}
+
+function getFeatureCategory(col) {
+    const lc = col.toLowerCase();
+    if (['open', 'high', 'low', 'close', 'volume'].includes(lc)) return 'OHLCV';
+    if (['volume_delta', 'cvd', 'buy_volume', 'sell_volume'].includes(lc)) return 'Volume Flow';
+    if (lc.includes('msb') || lc.includes('choch') || lc.includes('bars_since') || lc.includes('fvg') ||
+        lc.includes('buy_liq') || lc.includes('sell_liq') || lc.includes('sfp_sweep')) return 'Market Structure';
+    if (lc.includes('open_interest') || lc.includes('funding_rate')) return 'Derivatives';
+    if (lc.includes('ema_')) return 'EMA';
+    if (lc.includes('rsi_') || lc.includes('stochrsi')) return 'Momentum';
+    if (lc.includes('atr_')) return 'Volatility';
+    if (lc.includes('pdh') || lc.includes('pdl') || lc.includes('pwh') || lc.includes('pwl') ||
+        lc.includes('fib_')) return 'Key Levels';
+    if (lc.includes('poc') || lc.includes('vah') || lc.includes('val')) return 'Volume Profile';
+    if (lc.includes('btc_') || lc.includes('fear_greed') || lc.includes('market_session')) return 'Macro';
+    if (lc.includes('log_ret') || lc.includes('vol_ratio') || lc.includes('hour_sin') || lc.includes('hour_cos') ||
+        lc.includes('dow_sin') || lc.includes('dow_cos') || lc.includes('time_to_funding')) return 'Derived';
+    if (lc.includes('long_short_ratio')) return 'Partial NaN';
+    if (lc === 'symbol') return 'Symbol Encoding';
+    if (lc.includes('dist_swing') || lc.includes('price_in_range') || lc.includes('swing_momentum') ||
+        lc.includes('h4_trend') || lc.includes('trend_strength') || lc.includes('vol_regime')) return 'Structural';
+    if (lc.includes('cvd_div') || lc.includes('cvd_slope') || lc.includes('vol_efficiency') ||
+        lc.includes('absorption_z') || lc.includes('funding_price_div') || lc.includes('rsi_divergence') ||
+        lc.includes('wyckoff') || lc.includes('spring_upthrust')) return 'Smart Money v3';
+    if (lc.includes('ofi_') || lc.includes('vwdp') || lc.includes('hidden_divergence') ||
+        lc.includes('cvd_momentum') || lc.includes('absorption_at_swing') || lc.includes('spread_to_volume') ||
+        lc.includes('ultra_high_vol') || lc.includes('no_demand') || lc.includes('no_supply') ||
+        lc.includes('effort_vs_result')) return 'Smart Money v4';
+    return 'Other';
+}
+
+function categoryBadge(cat) {
+    const colors = {
+        'OHLCV': 'bg-blue-500/10 text-blue-400 border-blue-500/25',
+        'Volume Flow': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/25',
+        'Market Structure': 'bg-yellow-500/10 text-yellow-400 border-yellow-500/25',
+        'Derivatives': 'bg-orange-500/10 text-orange-400 border-orange-500/25',
+        'EMA': 'bg-green-500/10 text-green-400 border-green-500/25',
+        'Momentum': 'bg-pink-500/10 text-pink-400 border-pink-500/25',
+        'Volatility': 'bg-red-500/10 text-red-400 border-red-500/25',
+        'Key Levels': 'bg-indigo-500/10 text-indigo-400 border-indigo-500/25',
+        'Volume Profile': 'bg-teal-500/10 text-teal-400 border-teal-500/25',
+        'Macro': 'bg-gray-500/10 text-gray-400 border-gray-500/25',
+        'Derived': 'bg-violet-500/10 text-violet-400 border-violet-500/25',
+        'Partial NaN': 'bg-amber-500/10 text-amber-400 border-amber-500/25',
+        'Symbol Encoding': 'bg-slate-500/10 text-slate-400 border-slate-500/25',
+        'Structural': 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/25',
+        'Smart Money v3': 'bg-purple-500/10 text-purple-400 border-purple-500/25',
+        'Smart Money v4': 'bg-purple-600/10 text-purple-300 border-purple-600/25',
+    };
+    const cls = colors[cat] || 'bg-white/5 text-[var(--text-3)] border-white/10';
+    return `<span class="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cls}">${cat}</span>`;
 }
 
 /* ── RAW TABLE ───────────────────────────────────────────────────────────── */
