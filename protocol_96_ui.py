@@ -2243,13 +2243,6 @@ def api_logbook_stats():
 # ==========================================
 # 🚀 MAIN
 # ==========================================
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    logger.info(f"🖥️  Protocol 9.6 Dashboard starting on http://0.0.0.0:{port}")
-    # ── Start background signal monitor (15-min polling + Telegram alerts) ──
-    signal_monitor.start_background_monitor()
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-
 @app.route('/api/models', methods=['GET'])
 def get_models():
     registry_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'models', 'model_registry.json')
@@ -2284,3 +2277,12 @@ def set_model():
         return jsonify({'success': True, 'active': model_name})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    logger.info(f"🖥️  Protocol 9.6 Dashboard starting on http://0.0.0.0:{port}")
+    # ── Start background signal monitor (15-min polling + Telegram alerts) ──
+    signal_monitor.start_background_monitor()
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
+

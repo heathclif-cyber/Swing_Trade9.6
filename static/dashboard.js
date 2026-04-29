@@ -1180,6 +1180,24 @@ async function fetchModels() {
     }
 }
 
+
+async function runAlgorithm() {
+    const btn = document.getElementById('btnRunAlgo');
+    if(btn) {
+        btn.classList.add('btn-loading');
+        btn.innerHTML = '⏳ Running...';
+    }
+    showAlert('success', '🚀 Running Machine Learning Algorithms...');
+    await fetchScannerData();
+    await fetchData();
+    showAlert('success', '✅ Algorithms execution complete.');
+    setTimeout(hideAlert, 3000);
+    if(btn) {
+        btn.classList.remove('btn-loading');
+        btn.innerHTML = '▶ Run Model';
+    }
+}
+
 async function changeModel() {
     const sel = document.getElementById('modelSelect');
     if (!sel) return;
