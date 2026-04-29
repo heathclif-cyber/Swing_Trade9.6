@@ -75,14 +75,8 @@ FEATURE_COLS = [
     'no_demand', 'no_supply', 'effort_vs_result',
 ]
 
-SYMBOL_MAP = {
-    'SOLUSDT': 0, 'ETHUSDT': 1, 'BNBUSDT': 2, 'XRPUSDT': 3, 'DOGEUSDT': 4,
-    'TONUSDT': 5, 'ADAUSDT': 6, 'TRXUSDT': 7, 'SHIBUSDT': 8, 'AVAXUSDT': 9,
-    'LINKUSDT': 10, 'DOTUSDT': 11, 'SUIUSDT': 12, 'POLUSDT': 13, 'NEARUSDT': 14,
-    'PEPEUSDT': 15, 'TAOUSDT': 16, 'APTOSUSDT': 17, 'ARBUSDT': 18, 'WLFIUSDT': 19,
-    # alias untuk pair dengan prefix 1000
-    '1000SHIBUSDT': 8, '1000PEPEUSDT': 15,
-}
+# SYMBOL_MAP is now defined in core/normalize.py (SSOT)
+from core.normalize import SYMBOL_MAP
 
 
 # --- Helper Functions ---

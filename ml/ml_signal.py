@@ -29,13 +29,8 @@ INFERENCE_CFG = load_inference_config()
 ML_DIR   = Path(__file__).parent.parent / "models"
 SEQ_LEN  = INFERENCE_CFG["inference"]["seq_len"]   # 32
 
-SYMBOL_MAP = {
-    'SOLUSDT': 0, 'ETHUSDT': 1, 'BNBUSDT': 2, 'XRPUSDT': 3, 'DOGEUSDT': 4,
-    'TONUSDT': 5, 'ADAUSDT': 6, 'TRXUSDT': 7, 'SHIBUSDT': 8, 'AVAXUSDT': 9,
-    'LINKUSDT': 10, 'DOTUSDT': 11, 'SUIUSDT': 12, 'POLUSDT': 13, 'NEARUSDT': 14,
-    'PEPEUSDT': 15, 'TAOUSDT': 16, 'APTOSUSDT': 17, 'ARBUSDT': 18, 'WLFIUSDT': 19,
-    '1000SHIBUSDT': 8, '1000PEPEUSDT': 15,
-}
+# SYMBOL_MAP is now defined in core/normalize.py (SSOT)
+from core.normalize import SYMBOL_MAP
 
 LABEL_MAP_INV = INFERENCE_CFG["inference"]["label_map_inv"]
 LABEL_MAP = {int(k): v for k, v in LABEL_MAP_INV.items()}

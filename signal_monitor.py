@@ -223,32 +223,8 @@ def _save_alert_state(state: dict) -> None:
 # ============================================================
 # SIGNAL EVALUATION
 # ============================================================
-def _normalize_h1_columns(df):
-    import pandas as pd
-    col_map = {
-        'Open':           'open',
-        'High':           'high',
-        'Low':            'low',
-        'Close':          'close',
-        'Total_Volume':   'volume',
-        'Taker_Buy_Base': 'taker_buy_volume',
-        'Sell_Volume':    'taker_sell_volume',
-        'Open_Time':      'open_time',
-    }
-    df = df.copy()
-    df.columns = [col_map.get(c, c.lower()) for c in df.columns]
-    df = df.loc[:, ~df.columns.duplicated(keep='first')]
-    if 'open_time' in df.columns:
-        df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True)
-        df = df.set_index('open_time')
-        df.index.name = 'timestamp'
-    elif not isinstance(df.index, pd.DatetimeIndex):
-        try:
-            df.index = pd.to_datetime(df.index, unit='ms', utc=True)
-            df.index.name = 'timestamp'
-        except Exception:
-            pass
-    return df
+# Import shared SSOT utilities
+from core.normalize import normalize_columns
 
 # ============================================================
 # SIGNAL STABILITY — Anti-flip & Confirmation Buffer
@@ -341,12 +317,11 @@ def _evaluate_pair(symbol: str, trade_entries: dict) -> None:
             logger.warning(f"[{symbol}] Insufficient data")
             return
 
-        # Fetch H1 untuk ML engine
-        import data_engine
+        # Fetch H1 untuk ML engine via enrichment SSOT
         try:
-            df_m15 = data_engine.get_klines_rest(symbol, '1h', limit=500)
+            df_m15 = enrichment._fetch_klines_raw(symbol, '1h', limit=500)
             if df_m15 is not None:
-                df_m15 = _normalize_h1_columns(df_m15)
+                df_m15 = normalize_columns(df_m15, timeframe='1h')
         except Exception as e:
             logger.warning(f"Failed to fetch H1 for {symbol}: {e}")
             df_m15 = None

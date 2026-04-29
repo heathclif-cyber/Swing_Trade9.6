@@ -23,35 +23,8 @@ _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 from ml.ml_signal import MLSignalEngine as _MLSignalEngine
 _ui_ml_engine = _MLSignalEngine()
 
-def _normalize_m15_columns(df):
-    import pandas as pd
-    col_map = {
-        'Open':           'open',
-        'High':           'high',
-        'Low':            'low',
-        'Close':          'close',
-        'Total_Volume':   'volume',
-        'Taker_Buy_Base': 'taker_buy_volume',
-        'Sell_Volume':    'taker_sell_volume',
-        'Open_Time':      'open_time',
-    }
-    df = df.copy()
-    df.columns = [col_map.get(c, c.lower()) for c in df.columns]
-    # Hapus kolom duplikat — pertahankan yang pertama
-    df = df.loc[:, ~df.columns.duplicated(keep='first')]
-    # Set DatetimeIndex dari open_time (Unix ms → UTC datetime)
-    if 'open_time' in df.columns:
-        df['open_time'] = pd.to_datetime(df['open_time'], unit='ms', utc=True)
-        df = df.set_index('open_time')
-        df.index.name = 'timestamp'
-    elif not isinstance(df.index, pd.DatetimeIndex):
-        # Fallback: coba konversi index yang ada
-        try:
-            df.index = pd.to_datetime(df.index, unit='ms', utc=True)
-            df.index.name = 'timestamp'
-        except Exception:
-            pass
-    return df
+# Import shared SSOT utilities
+from core.normalize import normalize_columns, BINANCE_KLINE_URLS
 import signal_monitor  # type: ignore
 from requests.packages import urllib3  # type: ignore
 
@@ -115,9 +88,9 @@ def _get_enriched_data(pair: str, force_refresh: bool = False):
     df_quant, data_meta = enrichment.get_fully_enriched_data(pair, interval="1h", limit=500)
     df_m15 = None
     try:
-        # Fetch 1h data for ML
-        _raw = get_klines_rest(pair, '1h', limit=500)
-        df_m15 = _normalize_m15_columns(_raw)
+        # Fetch 1h data for ML via enrichment SSOT
+        _raw = enrichment._fetch_klines_raw(pair, '1h', limit=500)
+        df_m15 = normalize_columns(_raw, timeframe='1h')
     except Exception as _em:
         logger.warning(f'[Cache] Gagal fetch H1 untuk {pair}: {_em}')
     _enrichment_cache[pair] = {"df": df_quant, "meta": data_meta, "m15": df_m15, "ts": now}
@@ -158,77 +131,7 @@ def send_telegram_message(text: str):
         logger.warning(f"Telegram notification failed: {e}")
 
 
-# ── REST-based API endpoint list (ordered by ISP accessibility) ──
-# fapi.binance.com is NOT blocked by Internet Positif (Indonesia ISP filter)
-# api.binance.com IS typically blocked → put it last
-BINANCE_KLINE_URLS = [
-    "https://fapi.binance.com/fapi/v1/klines",
-    "https://data-api.binance.vision/api/v3/klines",
-    "https://api1.binance.com/api/v3/klines",
-    "https://api2.binance.com/api/v3/klines",
-    "https://api3.binance.com/api/v3/klines",
-    "https://api4.binance.com/api/v3/klines",
-    "https://api.binance.com/api/v3/klines",
-]
-# Cache the last working URL for faster subsequent requests
-_last_working_url: str | None = None
-
-
-def get_klines_rest(symbol: str, interval: str, limit: int = 250) -> pd.DataFrame:
-    """REST klines fetcher — tries multiple Binance endpoints for ISP resilience."""
-    global _last_working_url
-    # Try last working URL first for speed
-    urls = list(BINANCE_KLINE_URLS)
-    if _last_working_url and _last_working_url in urls:
-        urls.remove(_last_working_url)
-        urls.insert(0, _last_working_url)
-
-    for url in urls:
-        try:
-            total_klines: list = []
-            end_time = None
-            ok = True
-            while len(total_klines) < limit:
-                req_limit = min(1000, limit - len(total_klines))
-                params: dict = {"symbol": symbol, "interval": interval, "limit": req_limit}
-                if end_time:
-                    params['endTime'] = end_time
-                resp = http_requests.get(url, params=params, timeout=8, verify=False)
-                if resp.status_code == 200:
-                    try:
-                        chunk = resp.json()
-                    except Exception:
-                        ok = False; break
-                    if not chunk or not isinstance(chunk, list):
-                        break
-                    total_klines = chunk + total_klines
-                    if len(chunk) < req_limit:
-                        break
-                    end_time = chunk[0][0] - 1
-                else:
-                    ok = False; break
-
-            if ok and total_klines:
-                _last_working_url = url
-                logger.info(f"  ✅ {symbol} {interval}: {len(total_klines)} candles via {url.split('/')[2]}")
-                df = pd.DataFrame(total_klines, columns=[
-                    'Open_Time', 'Open', 'High', 'Low', 'Close', 'Total_Volume',
-                    'Close_Time', 'Quote_Asset_Volume', 'Trades', 'Taker_Buy_Base', 'Taker_Buy_Quote', 'Ignore'
-                ])
-                df['Open_Time'] = pd.to_datetime(df['Open_Time'], unit='ms')
-                df['Close_Time'] = pd.to_datetime(df['Close_Time'], unit='ms')
-                for col in ['Open', 'High', 'Low', 'Close', 'Total_Volume', 'Taker_Buy_Base']:
-                    df[col] = df[col].astype(float)
-                df['Buy_Volume'] = df['Taker_Buy_Base']
-                df['Sell_Volume'] = df['Total_Volume'] - df['Buy_Volume']
-                df['Volume_Delta'] = df['Buy_Volume'] - df['Sell_Volume']
-                return df
-        except Exception as e:
-            logger.debug(f"REST {url.split('/')[2]} failed: {e}")
-            continue
-
-    logger.warning(f"All REST endpoints failed for {symbol} {interval}")
-    return pd.DataFrame()
+# ── REST klines fetching is now handled by protocol_96_enrichment._fetch_klines_raw() (SSOT) ──
 
 
 # ==========================================
@@ -648,9 +551,9 @@ def get_klines_df(symbol: str, interval: str, limit: int = 100) -> pd.DataFrame:
         except Exception as e:
             logger.warning(f"Client klines failed for {symbol} {interval}: {e}, trying REST fallback...")
 
-    # Fallback: use direct REST API
-    logger.info(f"  Using REST fallback for {symbol} {interval}...")
-    return get_klines_rest(symbol, interval, limit)
+    # Fallback: use enrichment SSOT
+    logger.info(f"  Using enrichment REST fallback for {symbol} {interval}...")
+    return enrichment._fetch_klines_raw(symbol, interval, limit)
 
 # ── Dead code removed ────────────────────────────────────────────────────────
 # get_klines_fapi, apply_full_indicators, fetch_oi_data, fetch_funding_rate,
@@ -713,12 +616,8 @@ def api_test_signal():
             total_qty  = sum(e["qty"] for e in entry_list)
             avg_entry  = (total_cost / total_qty) if total_qty > 0 else None
 
-            df_m15_raw = enrichment.get_klines_rest(pair, '1h', limit=500) if hasattr(enrichment, 'get_klines_rest') else None
-            if df_m15_raw is None:
-                from data_engine import DataEngine as _DE
-                _de = _DE()
-                df_m15_raw = _de.get_klines_rest(pair, '1h', limit=500)
-            df_m15_norm = _normalize_m15_columns(df_m15_raw)
+            df_m15_raw = enrichment._fetch_klines_raw(pair, '1h', limit=500)
+            df_m15_norm = normalize_columns(df_m15_raw, timeframe='1h')
             ml_result = _ui_ml_engine.predict(symbol=pair, df_m15=df_m15_norm)
 
             msg = (
