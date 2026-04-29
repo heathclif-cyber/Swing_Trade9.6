@@ -30,6 +30,9 @@
     gradient backgrounds with attachment.
   */
   body {
+    background-color: var(--bg-surface);
+    color: var(--text-1);
+    transition: background-color 0.3s ease, color 0.3s ease;
     @apply antialiased min-h-screen pt-[72px];
     font-family: 'Inter', system-ui, sans-serif;
     background-image:
@@ -351,6 +354,9 @@ utility classes in the JS template literals.
   }
 
   .sc-entry-body {
+    background-color: var(--bg-surface);
+    color: var(--text-1);
+    transition: background-color 0.3s ease, color 0.3s ease;
     @apply bg-white/[0.02] border border-white/[0.06] rounded p-2.5;
   }
 
